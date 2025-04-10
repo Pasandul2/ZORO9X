@@ -50,7 +50,7 @@ interface WorkSectionProps {
 }
 
 export const WorkSection = ({ darkMode }: WorkSectionProps) => {
-  const [currentIndex, setCurrentIndex] = useState(2);
+  const [currentIndex, setCurrentIndex] = useState(1);
 
   const nextSlide = () => {
     setCurrentIndex((prevIndex) => 
