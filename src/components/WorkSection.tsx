@@ -6,6 +6,14 @@ const projects = [
 
   {
     id: 1,
+    title: "Hotel Booking Website",
+    description: "Responsive design for a Hotel",
+    image: "/images/projects3.png",
+    link: "https://bolagalanatureresort.com/"
+  },
+
+  {
+    id: 2,
     title: "Salon Booking Website",
     description: "Responsive Web Page for a Salon",
     image: "/images/projects5.png",
@@ -13,7 +21,7 @@ const projects = [
   },
 
   {
-    id: 2,
+    id: 3,
     title: "Business Website",
     description: "Responsive design for a Business Company",
     image: "/images/projects1.png",
@@ -21,7 +29,7 @@ const projects = [
 
   },
   {
-    id: 3,
+    id: 4,
     title: "Business Website",
     description: "Clean design for a Business Company",
     image: "/images/projects2.png",
@@ -29,18 +37,25 @@ const projects = [
   },
 
   {
-    id: 4,
+    id: 5,
     title: "Wedding Planning Platform",
     description: "A Website for wedding planning and management",
     image: "/images/projects4.png",
     link: "https://royalweddings.lk/"
   },
   {
-    id: 5,
+    id: 6,
     title: "Hotel Booking Website",
     description: "Responsive design for a Hotel",
     image: "/images/projects3.png",
     link: "https://bolagalanatureresort.com/"
+  },
+  {
+    id: 7,
+    title: "Salon Booking Website",
+    description: "Responsive Web Page for a Salon",
+    image: "/images/projects5.png",
+    link: "https://salonkaveesha.com/"
   }
   
 ];
