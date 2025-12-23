@@ -32,6 +32,11 @@ async function createUserTable() {
         password VARCHAR(255) NOT NULL,
         fullName VARCHAR(255) NOT NULL,
         phone VARCHAR(20),
+        is_verified BOOLEAN DEFAULT FALSE,
+        verification_code VARCHAR(6),
+        verification_code_expires TIMESTAMP NULL,
+        reset_password_code VARCHAR(6),
+        reset_password_expires TIMESTAMP NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )

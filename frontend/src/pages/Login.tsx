@@ -55,6 +55,14 @@ const Login: React.FC = () => {
       const data = await response.json();
 
       if (!response.ok) {
+        // Check if user needs to verify email
+        if (data.requiresVerification) {
+          setError(data.message);
+          setTimeout(() => {
+            navigate('/verify-email', { state: { email } });
+          }, 2000);
+          return;
+        }
         setError(data.message || 'Login failed');
         return;
       }
@@ -75,7 +83,15 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white pt-32 pb-20 px-4">
+    <div 
+      className="min-h-screen bg-black text-white pt-32 pb-20 px-4"
+      style={{
+        backgroundImage: `url(/images/image1.webp), url(/images/image2.webp)`,
+        backgroundPosition: 'bottom left, top right',
+        backgroundSize: 'auto, auto',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
       {/* Background gradient */}
       <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-30 z-0" />
 
@@ -220,9 +236,9 @@ const Login: React.FC = () => {
         {/* Footer Links */}
         <div className="text-center mt-8 text-sm text-gray-400 space-y-2">
           <p>
-            <a href="#" className="text-indigo-400 hover:underline">
+            <Link to="/forgot-password" className="text-indigo-400 hover:underline">
               Forgot password?
-            </a>
+            </Link>
           </p>
           <p>
             By signing in, you agree to our{' '}
