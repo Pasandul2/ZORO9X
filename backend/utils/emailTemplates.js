@@ -19,81 +19,132 @@ const baseTemplate = (content) => `
       box-sizing: border-box;
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       line-height: 1.6;
-      color: #333;
-      background-color: #f4f4f4;
+      color: #ffffff;
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+      padding: 20px;
     }
     .container {
       max-width: 600px;
       margin: 0 auto;
-      background-color: #ffffff;
+      background: linear-gradient(180deg, #0f0f0f 0%, #1a1a1a 100%);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(236, 72, 153, 0.3);
+      border: 1px solid rgba(59, 130, 246, 0.1);
     }
     .header {
-      background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%);
-      padding: 30px;
+      background: #000000;
+      padding: 40px 30px;
       text-align: center;
+      border-bottom: 2px solid transparent;
+      border-image: linear-gradient(90deg, #ec4899 0%, #3b82f6 100%);
+      border-image-slice: 1;
+      position: relative;
+    }
+    .header::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #ec4899 0%, #3b82f6 100%);
+      opacity: 0.5;
     }
     .logo {
-      max-width: 150px;
+      max-width: 180px;
       height: auto;
+      filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.3));
     }
     .content {
-      padding: 40px 30px;
+      padding: 50px 40px;
+      background: linear-gradient(180deg, rgba(26, 26, 26, 0.8) 0%, rgba(15, 15, 15, 0.9) 100%);
     }
     .title {
-      color: #1a1a1a;
-      font-size: 24px;
-      font-weight: bold;
-      margin-bottom: 20px;
+      color: #ffffff;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
     .text {
-      color: #555;
+      color: #b0b0b0;
       font-size: 16px;
-      margin-bottom: 15px;
+      margin-bottom: 16px;
+      line-height: 1.8;
     }
     .code-box {
-      background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%);
+      background: linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%);
       color: #ffffff;
-      font-size: 32px;
-      font-weight: bold;
-      letter-spacing: 5px;
-      padding: 20px;
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: 8px;
+      padding: 30px;
       text-align: center;
-      border-radius: 8px;
-      margin: 30px 0;
+      border-radius: 12px;
+      margin: 35px 0;
+      border: 2px solid;
+      border-image: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%);
+      border-image-slice: 1;
+      box-shadow: 0 8px 32px rgba(236, 72, 153, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      position: relative;
+    }
+    .code-box::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 12px;
+      padding: 2px;
+      background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
     }
     .button {
       display: inline-block;
       background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%);
       color: #ffffff;
       text-decoration: none;
-      padding: 15px 40px;
-      border-radius: 8px;
-      font-weight: bold;
-      margin: 20px 0;
+      padding: 16px 48px;
+      border-radius: 10px;
+      font-weight: 700;
+      margin: 25px 0;
+      box-shadow: 0 4px 20px rgba(236, 72, 153, 0.4);
+      transition: transform 0.2s ease;
     }
     .footer {
-      background-color: #f8f8f8;
-      padding: 30px;
+      background: #000000;
+      padding: 35px 30px;
       text-align: center;
-      border-top: 1px solid #eee;
+      border-top: 1px solid rgba(59, 130, 246, 0.2);
     }
     .footer-text {
-      color: #888;
-      font-size: 14px;
+      color: #666;
+      font-size: 13px;
+      margin: 8px 0;
+      letter-spacing: 0.3px;
     }
     .divider {
       height: 1px;
-      background-color: #eee;
-      margin: 20px 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(236, 72, 153, 0.3) 50%, transparent 100%);
+      margin: 25px 0;
+    }
+    strong {
+      color: #ec4899;
+      font-weight: 700;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <img src="https://i.ibb.co/ZfYqF5K/zoro.png" alt="Zoro9x Logo" class="logo">
+      <img src="cid:logo" alt="Zoro9x Logo" class="logo">
     </div>
     ${content}
     <div class="footer">

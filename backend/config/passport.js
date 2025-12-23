@@ -9,6 +9,8 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const bcrypt = require('bcryptjs');
 const { pool } = require('./database');
+const transporter = require('./email');
+const { welcomeEmailTemplate } = require('../utils/emailTemplates');
 
 // ============================================
 // GOOGLE OAUTH STRATEGY
@@ -33,7 +35,7 @@ passport.use(
         // CHECK IF USER EXISTS
         // ============================================
         const [existingUser] = await connection.execute(
-          'SELECT id, email FROM users WHERE email = ?',
+          'SELECT id, email, fullName, is_verified FROM users WHERE email = ?',
           [profile.emails[0].value]
         );
 
@@ -44,6 +46,15 @@ passport.use(
           // USER EXISTS - USE EXISTING
           // ============================================
           user = existingUser[0];
+          
+          // Ensure Google OAuth users are verified
+          if (!user.is_verified) {
+            await connection.execute(
+              'UPDATE users SET is_verified = ? WHERE id = ?',
+              [true, user.id]
+            );
+            user.is_verified = true;
+          }
         } else {
           // ============================================
           // NEW USER - CREATE ACCOUNT
@@ -56,10 +67,10 @@ passport.use(
           // (They don't use password-based login)
           const randomPassword = await bcrypt.hash(googleId + Date.now(), 10);
 
-          // Insert new user into database
+          // Insert new user into database (Google OAuth users are auto-verified)
           const [result] = await connection.execute(
-            'INSERT INTO users (email, password, fullName) VALUES (?, ?, ?)',
-            [email, randomPassword, fullName]
+            'INSERT INTO users (email, password, fullName, is_verified) VALUES (?, ?, ?, ?)',
+            [email, randomPassword, fullName, true]
           );
 
           user = {
@@ -69,6 +80,28 @@ passport.use(
           };
 
           console.log(`✅ New user created via Google OAuth: ${email}`);
+          
+          // ============================================
+          // SEND WELCOME EMAIL
+          // ============================================
+          // Send welcome email to new Google user (non-blocking)
+          try {
+            await transporter.sendMail({
+              from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+              to: email,
+              subject: 'Welcome to Zoro9x! 🎉',
+              html: welcomeEmailTemplate(fullName),
+              attachments: [{
+                filename: 'logo.png',
+                path: __dirname + '/../assets/logo.png',
+                cid: 'logo'
+              }]
+            });
+            console.log('✅ Welcome email sent to:', email);
+          } catch (emailError) {
+            console.error('❌ Error sending welcome email:', emailError);
+            // Don't fail authentication if email fails
+          }
         }
 
         connection.release();

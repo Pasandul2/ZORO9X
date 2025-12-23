@@ -45,7 +45,9 @@ const Navbar: React.FC<NavbarProps> = () => {
   const handleLogout = () => {
     logout();
     setShowLogoutDialog(false);
-    navigate('/');
+    setIsMenuOpen(false);
+    // Force full page reload to home
+    window.location.href = '/';
   };
 
   // useEffect(() => {
