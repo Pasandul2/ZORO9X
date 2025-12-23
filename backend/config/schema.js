@@ -52,4 +52,49 @@ async function createUserTable() {
   }
 }
 
-module.exports = { createUserTable };
+// ============================================
+// CREATE PORTFOLIO TABLE
+// ============================================
+/**
+ * Create portfolio table for managing portfolio items
+ * 
+ * Columns:
+ * - id: Auto-incrementing primary key
+ * - title: Project title
+ * - description: Project description
+ * - image: Image URL/path
+ * - link: Live project link
+ * - github: GitHub repository link (optional)
+ * - technologies: JSON array of technologies used
+ * - created_at: Creation timestamp
+ * - updated_at: Last update timestamp
+ */
+async function createPortfolioTable() {
+  try {
+    const connection = await pool.getConnection();
+    
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS portfolio (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        image VARCHAR(500) NOT NULL,
+        link VARCHAR(500),
+        github VARCHAR(500),
+        technologies JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `;
+    
+    await connection.execute(createTableQuery);
+    console.log('✅ Portfolio table created/verified successfully!');
+    connection.release();
+    
+  } catch (error) {
+    console.error('❌ Error creating portfolio table:', error.message);
+    throw error;
+  }
+}
+
+module.exports = { createUserTable, createPortfolioTable };

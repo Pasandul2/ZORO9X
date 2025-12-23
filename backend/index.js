@@ -8,14 +8,16 @@
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
+const path = require('path');
 require('dotenv').config();
 const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
-const { createUserTable } = require('./config/schema');
+const { createUserTable, createPortfolioTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
+const portfolioRoutes = require('./routes/portfolio');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -50,6 +52,9 @@ app.use(express.json());
 
 // Parse URL-encoded request bodies
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files (uploaded images)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
 // PASSPORT AUTHENTICATION
@@ -90,6 +95,9 @@ app.use('/api/oauth', oauthRoutes);
 
 // Admin routes (admin login, admin dashboard)
 app.use('/api/admin', adminRoutes);
+
+// Portfolio routes (public and admin)
+app.use('/api/portfolio', portfolioRoutes);
 
 // ============================================
 // ERROR HANDLING MIDDLEWARE
@@ -136,6 +144,9 @@ async function startServer() {
 
     // Step 3: Create admin table and default admin if not exists
     await createAdminTable();
+
+    // Step 4: Create portfolio table if not exists
+    await createPortfolioTable();
 
     // Step 4: Start the Express server
     app.listen(PORT, () => {

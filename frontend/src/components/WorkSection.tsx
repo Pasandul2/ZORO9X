@@ -1,71 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-const projects = [
-
-  {
-    id: 1,
-    title: "Hotel Booking Website",
-    description: "Responsive design for a Hotel",
-    image: "/images/projects3.png",
-    link: "https://bolagalanatureresort.com/"
-  },
-
-  {
-    id: 2,
-    title: "Salon Booking Website",
-    description: "Responsive Web Page for a Salon",
-    image: "/images/projects5.png",
-    link: "https://salonkaveesha.com/"
-  },
-
-  {
-    id: 3,
-    title: "Business Website",
-    description: "Responsive design for a Business Company",
-    image: "/images/projects1.png",
-    link: "https://smarttradingasia.com/"
-
-  },
-  {
-    id: 4,
-    title: "Business Website",
-    description: "Clean design for a Business Company",
-    image: "/images/projects2.png",
-    link: "https://silvaaccessorieslanka.com/"
-  },
-
-  {
-    id: 5,
-    title: "Wedding Planning Platform",
-    description: "A Website for wedding planning and management",
-    image: "/images/projects4.png",
-    link: "https://royalweddings.lk/"
-  },
-  {
-    id: 6,
-    title: "Hotel Booking Website",
-    description: "Responsive design for a Hotel",
-    image: "/images/projects3.png",
-    link: "https://bolagalanatureresort.com/"
-  },
-  {
-    id: 7,
-    title: "Salon Booking Website",
-    description: "Responsive Web Page for a Salon",
-    image: "/images/projects5.png",
-    link: "https://salonkaveesha.com/"
-  }
-  
-];
+interface Project {
+  id: number;
+  title: string;
+  description: string;
+  image: string;
+  link: string;
+  github?: string;
+  technologies?: string[];
+}
 
 interface WorkSectionProps {
   darkMode: boolean;
 }
 
 export const WorkSection = ({ darkMode }: WorkSectionProps) => {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(1);
+
+  useEffect(() => {
+    const fetchPortfolio = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/portfolio`);
+        const data = await response.json();
+        
+        if (data.success) {
+          setProjects(data.portfolio);
+        }
+      } catch (err) {
+        console.error('Error fetching portfolio:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPortfolio();
+  }, []);
 
   const nextSlide = () => {
     setCurrentIndex((prevIndex) => 
@@ -80,6 +53,31 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
   };
 
   const visibleProjects = projects.slice(currentIndex -1, currentIndex + 2);
+
+  if (loading) {
+    return (
+      <section className={`py-16 md:py-24 relative overflow-hidden ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
+        <div className="flex items-center justify-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+        </div>
+      </section>
+    );
+  }
+
+  if (projects.length === 0) {
+    return (
+      <section className={`py-16 md:py-24 relative overflow-hidden ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
+        <div className="container mx-auto px-4 md:px-6 relative z-10">
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4 text-white">
+            Our Portfolio
+          </h2>
+          <p className="text-center text-gray-300 mb-12">
+            No portfolio items available yet. Check back soon!
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className={`py-16 md:py-24 relative overflow-hidden ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
@@ -144,7 +142,10 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
               >
                 <a href={project.link} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
                   <img
-                    src={project.image}
+                    src={project.image.startsWith('/uploads/') 
+                      ? `${import.meta.env.VITE_API_URL}${project.image}`
+                      : project.image
+                    }
                     alt={project.title}
                     className="w-full h-full object-cover"
                   />

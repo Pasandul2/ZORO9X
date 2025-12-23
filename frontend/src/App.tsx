@@ -21,6 +21,7 @@ import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
+import Portfolio from './pages/Portfolio';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
@@ -94,6 +95,7 @@ function AppContent() {
             <Route path="/services/:serviceId" element={<ServiceDetail />} />
             <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
             <Route path="/work" element={<WorkSection darkMode={darkMode} />} />
+            <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/faq" element={<FaqSection darkMode={darkMode} />} />
             <Route path="/contact" element={<ContactUs/>} />
             <Route path="*" element={<NotFound />} />

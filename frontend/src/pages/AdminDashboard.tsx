@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Users, Mail, Calendar, Settings, BarChart } from 'lucide-react';
+import PortfolioManagement from '../components/PortfolioManagement';
 
 interface AdminData {
   id: number;
@@ -326,6 +327,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
             </motion.button>
           </div>
         </motion.div>
+
+        {/* Portfolio Management Section */}
+        <PortfolioManagement darkMode={darkMode} />
       </motion.div>
     </div>
   );
