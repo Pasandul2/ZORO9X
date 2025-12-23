@@ -26,12 +26,7 @@ const sendVerificationEmail = async (email, fullName, code) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Verify Your Email - Zoro9x',
-      html: verificationEmailTemplate(fullName, code),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: verificationEmailTemplate(fullName, code)
     });
     console.log('✅ Verification email sent to:', email);
     return true;
@@ -50,12 +45,7 @@ const sendPasswordResetEmail = async (email, fullName, code) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Reset Your Password - Zoro9x',
-      html: passwordResetTemplate(fullName, code),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: passwordResetTemplate(fullName, code)
     });
     console.log('✅ Password reset email sent to:', email);
     return true;
@@ -74,12 +64,7 @@ const sendWelcomeEmail = async (email, fullName) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Welcome to Zoro9x! 🎉',
-      html: welcomeEmailTemplate(fullName),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: welcomeEmailTemplate(fullName)
     });
     console.log('✅ Welcome email sent to:', email);
   } catch (error) {

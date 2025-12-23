@@ -192,8 +192,22 @@ const Dashboard: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="grid md:grid-cols-2 gap-6"
+          className="grid md:grid-cols-3 gap-6"
         >
+          {/* My Systems Card */}
+          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10">
+            <h3 className="text-xl font-bold mb-2">My Systems</h3>
+            <p className="text-gray-400 text-sm mb-4">View and manage your purchased systems</p>
+            <motion.button
+              onClick={() => navigate('/client-dashboard')}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg transition"
+            >
+              View Systems
+            </motion.button>
+          </div>
+
           {/* Account Settings Card */}
           <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-6 border border-white/10">
             <h3 className="text-xl font-bold mb-2">Account Settings</h3>

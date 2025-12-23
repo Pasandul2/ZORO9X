@@ -20,7 +20,8 @@ const Navbar: React.FC<NavbarProps> = () => {
 
   const menuItems = [
     { label: 'Home', path: '/' },
-    { label: 'Portfolio', path: '/portfolio' },
+    
+    { label: 'Our Works', path: '/work' },
     { label: 'Services', path: '/services' },
     { label: 'Contact', path: '/contact' },
     { label: 'About', path: '/about' },

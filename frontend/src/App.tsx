@@ -19,6 +19,9 @@ import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
+import SaaSDashboard from './pages/SaaSDashboard';
+import SystemsMarketplace from './pages/SystemsMarketplace';
+import ClientDashboard from './pages/ClientDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
 import Portfolio from './pages/Portfolio';
@@ -92,6 +95,9 @@ function AppContent() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admin/login" element={<AdminLogin darkMode={adminDarkMode} />} />
             <Route path="/admin/dashboard" element={<AdminDashboard darkMode={adminDarkMode} />} />
+            <Route path="/admin/saas-dashboard" element={<SaaSDashboard darkMode={adminDarkMode} />} />
+            <Route path="/marketplace" element={<SystemsMarketplace darkMode={darkMode} />} />
+            <Route path="/client-dashboard" element={<ClientDashboard darkMode={darkMode} />} />
             <Route path="/services/:serviceId" element={<ServiceDetail />} />
             <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
             <Route path="/work" element={<WorkSection darkMode={darkMode} />} />

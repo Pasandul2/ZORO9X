@@ -8,7 +8,7 @@
 const jwt = require('jsonwebtoken');
 
 // ============================================
-// VERIFY JWT TOKEN MIDDLEWARE
+// VERIFY JWT TOKEN MIDDLEWARE (User)
 // ============================================
 /**
  * Middleware to verify JWT token from Authorization header
@@ -52,38 +52,5 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// ============================================
-// VERIFY ADMIN TOKEN MIDDLEWARE
-// ============================================
-/**
- * Middleware to verify admin JWT token
- * Similar to verifyToken but for admin routes
- */
-const verifyAdminToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ 
-      message: 'No admin token provided' 
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(
-      token, 
-      process.env.JWT_SECRET || 'your_jwt_secret_key_change_this_in_production_12345678'
-    );
-    
-    // Add admin data to request object
-    req.admin = decoded;
-    
-    next();
-  } catch (error) {
-    res.status(403).json({ 
-      message: 'Invalid or expired admin token' 
-    });
-  }
-};
-
-module.exports = { verifyToken, verifyAdminToken };
+module.exports = verifyToken;
 

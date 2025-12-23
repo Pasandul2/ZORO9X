@@ -14,10 +14,10 @@ const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
 const { createUserTable, createPortfolioTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
+const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('./config/saasSchema');
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
-const portfolioRoutes = require('./routes/portfolio');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -96,9 +96,6 @@ app.use('/api/oauth', oauthRoutes);
 // Admin routes (admin login, admin dashboard)
 app.use('/api/admin', adminRoutes);
 
-// Portfolio routes (public and admin)
-app.use('/api/portfolio', portfolioRoutes);
-
 // ============================================
 // ERROR HANDLING MIDDLEWARE
 // ============================================
@@ -148,7 +145,12 @@ async function startServer() {
     // Step 4: Create portfolio table if not exists
     await createPortfolioTable();
 
-    // Step 4: Start the Express server
+    // Step 4: Initialize SaaS tables and seed initial data
+    await initializeSaaSTables();
+    await seedInitialSystems();
+    await seedInitialPlans();
+
+    // Step 5: Start the Express server
     app.listen(PORT, () => {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`🚀 ZORO9X Backend Server Started`);
