@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
-  ShoppingCart, Check, Star, Info, Package, 
-  Zap, Shield, TrendingUp, Search 
+  ShoppingCart, Check, Star, Package, 
+  Shield, Search, Users 
 } from 'lucide-react';
 
 interface SystemsMarketplaceProps {
@@ -266,20 +266,28 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index, onViewDetails, onP
       </div>
 
       {/* Description */}
-      <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+      <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'} line-clamp-3`}>
         {system.description}
       </p>
 
       {/* Features */}
       <div className="mb-6">
-        <h4 className="font-semibold mb-2 text-sm">Key Features:</h4>
+        <h4 className="font-semibold mb-3 text-sm flex items-center gap-2">
+          <Star className="w-4 h-4 text-yellow-400" />
+          Key Features:
+        </h4>
         <div className="space-y-2">
-          {system.features.slice(0, 3).map((feature: string, idx: number) => (
-            <div key={idx} className="flex items-center gap-2">
-              <Check className="w-4 h-4 text-green-400" />
+          {system.features.slice(0, 4).map((feature: string, idx: number) => (
+            <div key={idx} className="flex items-start gap-2">
+              <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
               <span className="text-sm">{feature}</span>
             </div>
           ))}
+          {system.features.length > 4 && (
+            <p className="text-xs text-purple-400 pl-6">
+              +{system.features.length - 4} more features
+            </p>
+          )}
         </div>
       </div>
 
@@ -289,9 +297,9 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index, onViewDetails, onP
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={fetchPlans}
-          className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-semibold"
+          className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white py-3 rounded-lg font-semibold shadow-lg"
         >
-          View Plans
+          {showPlans ? 'Hide Plans' : 'View Plans'}
         </motion.button>
       </div>
 
@@ -300,35 +308,70 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index, onViewDetails, onP
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
-          className="mt-4 space-y-3"
+          className="mt-6 space-y-3"
         >
-          {plans.map((plan) => (
-            <div
+          <h4 className="font-bold text-lg mb-3">Choose Your Plan:</h4>
+          {plans.map((plan, idx) => (
+            <motion.div
               key={plan.id}
-              className={`p-4 rounded-lg border ${
-                darkMode ? 'bg-gray-800 border-purple-500/20' : 'bg-gray-50 border-purple-200'
-              }`}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.1 }}
+              className={`p-5 rounded-xl border-2 ${
+                darkMode ? 'bg-gray-800 border-purple-500/30' : 'bg-gray-50 border-purple-200'
+              } hover:border-purple-500 transition-all`}
             >
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h5 className="font-bold">{plan.name}</h5>
-                  <p className="text-sm text-gray-400">{plan.description}</p>
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex-1">
+                  <h5 className="font-bold text-lg mb-1">{plan.name}</h5>
+                  <p className="text-sm text-gray-400 mb-2">{plan.description}</p>
+                  
+                  {/* Plan Features */}
+                  <div className="space-y-1 mt-3">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Users className="w-3 h-3" />
+                      <span>Up to {plan.max_users} users</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <Shield className="w-3 h-3" />
+                      <span>{plan.support_level} support</span>
+                    </div>
+                    {plan.max_storage_gb && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <Package className="w-3 h-3" />
+                        <span>{plan.max_storage_gb}GB storage</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Plan-specific Features */}
+                  {plan.features && plan.features.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {plan.features.slice(0, 3).map((feature: string, fIdx: number) => (
+                        <div key={fIdx} className="flex items-start gap-2 text-xs">
+                          <Check className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+                          <span className="text-gray-400">{feature}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-purple-400">${plan.price}</p>
+                <div className="text-right ml-4">
+                  <p className="text-3xl font-bold text-purple-400">${plan.price}</p>
                   <p className="text-xs text-gray-400">/{plan.billing_cycle}</p>
                 </div>
               </div>
+              
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => onPurchase(system, plan)}
-                className="w-full mt-2 bg-green-600 hover:bg-green-500 text-white py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
+                className="w-full mt-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white py-3 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-lg"
               >
                 <ShoppingCart className="w-4 h-4" />
-                Purchase Now
+                Purchase {plan.name}
               </motion.button>
-            </div>
+            </motion.div>
           ))}
         </motion.div>
       )}
