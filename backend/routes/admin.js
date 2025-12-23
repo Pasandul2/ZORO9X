@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { adminLogin, getAdminProfile } = require('../controllers/adminController');
-const verifyToken = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
 /**
  * @route   POST /api/admin/login

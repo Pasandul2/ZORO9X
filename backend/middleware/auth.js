@@ -52,5 +52,43 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-module.exports = verifyToken;
+// Alias for verifyToken (used in some routes)
+const authenticateToken = verifyToken;
+
+// ============================================
+// ADMIN AUTHENTICATION MIDDLEWARE
+// ============================================
+/**
+ * Middleware to verify admin role
+ * Must be used after verifyToken middleware
+ */
+const authenticateAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  
+  next();
+};
+
+/**
+ * Combined middleware: verify token AND admin role
+ * Can be used as a single middleware in routes
+ */
+const verifyAdminToken = (req, res, next) => {
+  verifyToken(req, res, (err) => {
+    if (err) return;
+    authenticateAdmin(req, res, next);
+  });
+};
+
+module.exports = {
+  verifyToken,
+  authenticateToken,
+  authenticateAdmin,
+  verifyAdminToken
+};
 
