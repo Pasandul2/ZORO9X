@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom'; // Importing Router components
+import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
 import ServicesSection from './components/ServicesSection';
 import { WorkSection } from './components/WorkSection';
@@ -34,40 +35,42 @@ export function App() {
 
   return (
     <Router>
-      <ScrollToTop />
-      <div className={`min-h-screen ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
-        {/* Global gradient effect */}
-        <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-60 z-50" />
+      <AuthProvider>
+        <ScrollToTop />
+        <div className={`min-h-screen ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
+          {/* Global gradient effect */}
+          <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-60 z-50" />
 
-        {/* Main content */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
-          className="w-full"
-        >
-          <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
+          {/* Main content */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5 }}
+            className="w-full"
+          >
+            <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
 
-          <Routes>
-            {/* Define routes for the pages */}
-            <Route path="/" element={<Home/>} />
-            <Route path="/about" element={<AboutUs />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/services/:serviceId" element={<ServiceDetail />} />
-            <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
-            <Route path="/work" element={<WorkSection darkMode={darkMode} />} />
-            <Route path="/faq" element={<FaqSection darkMode={darkMode} />} />
-            <Route path="/contact" element={<ContactUs/>} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-          <WhatsApp />
-          <Footer darkMode={darkMode} />
-        </motion.div>
-      </div>
+            <Routes>
+              {/* Define routes for the pages */}
+              <Route path="/" element={<Home/>} />
+              <Route path="/about" element={<AboutUs />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route path="/admin/dashboard" element={<AdminDashboard />} />
+              <Route path="/services/:serviceId" element={<ServiceDetail />} />
+              <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
+              <Route path="/work" element={<WorkSection darkMode={darkMode} />} />
+              <Route path="/faq" element={<FaqSection darkMode={darkMode} />} />
+              <Route path="/contact" element={<ContactUs/>} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+            <WhatsApp />
+            <Footer darkMode={darkMode} />
+          </motion.div>
+        </div>
+      </AuthProvider>
     </Router>
   );
 }

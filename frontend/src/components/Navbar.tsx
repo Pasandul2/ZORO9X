@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { MenuIcon, XIcon, LogOut, LayoutDashboard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import ConfirmDialog from './ConfirmDialog';
 import '../styles/styles.css';
 
 interface NavbarProps {
@@ -12,7 +14,8 @@ interface NavbarProps {
 const Navbar: React.FC<NavbarProps> = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
 
   const menuItems = [
@@ -29,12 +32,6 @@ const Navbar: React.FC<NavbarProps> = () => {
   //   setDarkMode(!darkMode);
   // };
 
-  // Check login status
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsLoggedIn(!!token);
-  }, []);
-
   // Scroll listener
   useEffect(() => {
     const handleScroll = () => {
@@ -46,13 +43,9 @@ const Navbar: React.FC<NavbarProps> = () => {
   }, []);
 
   const handleLogout = () => {
-    if (window.confirm('Are you sure you want to logout?')) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setIsLoggedIn(false);
-      navigate('/');
-      window.location.reload();
-    }
+    logout();
+    setShowLogoutDialog(false);
+    navigate('/');
   };
 
   // useEffect(() => {
@@ -90,7 +83,7 @@ const Navbar: React.FC<NavbarProps> = () => {
 
       {/* Right Side Buttons */}
       <div className="flex items-center gap-4">
-        {isLoggedIn ? (
+        {isAuthenticated ? (
           // Show Dashboard and Logout when logged in
           <>
             <Link to="/dashboard">
@@ -104,7 +97,7 @@ const Navbar: React.FC<NavbarProps> = () => {
               </motion.button>
             </Link>
             <motion.button
-              onClick={handleLogout}
+              onClick={() => setShowLogoutDialog(true)}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="hidden md:flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-6 py-2 rounded-full"
@@ -171,7 +164,7 @@ const Navbar: React.FC<NavbarProps> = () => {
               </Link>
             ))}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-2 flex flex-col space-y-3">
-              {isLoggedIn ? (
+              {isAuthenticated ? (
                 // Mobile: Show Dashboard and Logout when logged in
                 <>
                   <Link to="/dashboard" onClick={() => setMobileMenuOpen(false)}>
@@ -186,7 +179,7 @@ const Navbar: React.FC<NavbarProps> = () => {
                   </Link>
                   <motion.button
                     onClick={() => {
-                      handleLogout();
+                      setShowLogoutDialog(true);
                       setMobileMenuOpen(false);
                     }}
                     whileHover={{ scale: 1.02 }}
@@ -224,6 +217,18 @@ const Navbar: React.FC<NavbarProps> = () => {
           </div>
         </motion.div>
       )}
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showLogoutDialog}
+        title="Logout Confirmation"
+        message="Are you sure you want to logout?"
+        confirmText="Yes, Logout"
+        cancelText="Cancel"
+        type="danger"
+        onConfirm={handleLogout}
+        onCancel={() => setShowLogoutDialog(false)}
+      />
     </motion.nav>
   );
 };
