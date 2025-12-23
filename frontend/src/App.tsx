@@ -13,6 +13,9 @@ import AboutUs from './pages/AboutUs';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import VerifyEmail from './pages/VerifyEmail';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
@@ -24,6 +27,7 @@ import ContactUs from './pages/ContactUs';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
+import CustomCursor from './components/CustomCursor';
 
 function AppContent() {
   const [darkMode, setDarkMode] = useState(true);
@@ -52,6 +56,7 @@ function AppContent() {
 
   return (
     <AuthProvider>
+      <CustomCursor />
       <ScrollToTop />
       <div className={`min-h-screen ${
         isAdminRoute 
@@ -83,6 +88,9 @@ function AppContent() {
             <Route path="/about" element={<AboutUs />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admin/login" element={<AdminLogin darkMode={adminDarkMode} />} />
             <Route path="/admin/dashboard" element={<AdminDashboard darkMode={adminDarkMode} />} />

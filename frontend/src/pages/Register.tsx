@@ -81,13 +81,22 @@ const Register: React.FC = () => {
         return;
       }
 
-      // Update auth context
-      login(data.token, data.user);
-
-      setSuccess('Account created successfully! Redirecting...');
-      setTimeout(() => {
-        navigate('/');
-      }, 1500);
+      // Check if verification is required
+      if (data.requiresVerification) {
+        setSuccess('Account created! Check your email for verification code.');
+        setTimeout(() => {
+          navigate('/verify-email', { state: { email: data.email }, replace: true });
+        }, 1000);
+      } else {
+        // Update auth context if token is provided
+        if (data.token) {
+          login(data.token, data.user);
+        }
+        setSuccess('Account created successfully! Redirecting...');
+        setTimeout(() => {
+          navigate('/');
+        }, 1500);
+      }
     } catch (err) {
       setError('Network error. Please try again.');
       console.error(err);
@@ -97,7 +106,15 @@ const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white pt-32 pb-20 px-4">
+    <div 
+      className="min-h-screen bg-black text-white pt-32 pb-20 px-4"
+      style={{
+        backgroundImage: `url(/images/image1.webp), url(/images/image2.webp)`,
+        backgroundPosition: 'bottom left, top right',
+        backgroundSize: 'auto, auto',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
       {/* Background gradient */}
       <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-30 z-0" />
 
