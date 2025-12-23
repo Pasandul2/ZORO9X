@@ -5,8 +5,7 @@ build/
 coverage/
 
 # Environment
-.env
-.env.*
+
 
 # Logs
 logs/
