@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Users, Mail, Calendar, LogOut, Settings, BarChart } from 'lucide-react';
+import { Shield, Users, Mail, Calendar, Settings, BarChart } from 'lucide-react';
 
 interface AdminData {
   id: number;
@@ -11,7 +11,11 @@ interface AdminData {
   created_at: string;
 }
 
-const AdminDashboard: React.FC = () => {
+interface AdminDashboardProps {
+  darkMode: boolean;
+}
+
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
   const [admin, setAdmin] = useState<AdminData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,17 +56,13 @@ const AdminDashboard: React.FC = () => {
     fetchAdminProfile();
   }, [navigate]);
 
-  const handleLogout = () => {
-    if (window.confirm('Are you sure you want to logout from admin panel?')) {
-      localStorage.removeItem('adminToken');
-      localStorage.removeItem('admin');
-      navigate('/admin/login');
-    }
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white flex items-center justify-center">
+      <div className={`min-h-screen pt-32 pb-20 px-4 flex items-center justify-center ${
+        darkMode 
+          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
+          : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
+      }`}>
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -77,7 +77,11 @@ const AdminDashboard: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white flex items-center justify-center">
+      <div className={`min-h-screen pt-32 pb-20 px-4 flex items-center justify-center ${
+        darkMode 
+          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
+          : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
+      }`}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -90,7 +94,11 @@ const AdminDashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white pt-20 pb-20 px-4">
+    <div className={`min-h-screen pt-32 pb-20 px-4 ${
+      darkMode 
+        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
+        : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
+    }`}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -99,23 +107,16 @@ const AdminDashboard: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-12">
           <div>
-            <h1 className="text-4xl font-bold flex items-center gap-3">
+            <h1 className={`text-4xl font-bold flex items-center gap-3 ${
+              darkMode ? 'text-white' : 'text-gray-900'
+            }`}>
               <Shield className="w-10 h-10 text-purple-500" />
               Admin Dashboard
             </h1>
-            <p className="text-gray-400 mt-2">
-              Welcome back, <span className="text-purple-400 font-semibold">{admin?.fullName}</span>
+            <p className={`mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Welcome back, <span className="text-purple-500 font-semibold">{admin?.fullName}</span>
             </p>
           </div>
-          <motion.button
-            onClick={handleLogout}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold px-6 py-3 rounded-lg"
-          >
-            <LogOut className="w-5 h-5" />
-            Logout
-          </motion.button>
         </div>
 
         {/* Stats Grid */}
@@ -174,9 +175,15 @@ const AdminDashboard: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-8 border border-purple-500/20 mb-8"
+          className={`backdrop-blur-lg rounded-2xl p-8 border mb-8 ${
+            darkMode 
+              ? 'bg-gray-800/50 border-purple-500/20' 
+              : 'bg-white/80 border-purple-200'
+          }`}
         >
-          <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+          <h2 className={`text-2xl font-bold mb-6 flex items-center gap-2 ${
+            darkMode ? 'text-white' : 'text-gray-900'
+          }`}>
             <Settings className="w-6 h-6 text-purple-500" />
             Admin Profile
           </h2>
@@ -184,34 +191,50 @@ const AdminDashboard: React.FC = () => {
           <div className="grid md:grid-cols-2 gap-6">
             {/* Email */}
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-purple-500/10 rounded-lg">
+              <div className={`p-3 rounded-lg ${
+                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
+              }`}>
                 <Mail className="w-6 h-6 text-purple-500" />
               </div>
               <div>
-                <p className="text-gray-400 text-sm">Email Address</p>
-                <p className="text-white font-medium">{admin?.email}</p>
+                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Email Address
+                </p>
+                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {admin?.email}
+                </p>
               </div>
             </div>
 
             {/* Role */}
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-purple-500/10 rounded-lg">
+              <div className={`p-3 rounded-lg ${
+                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
+              }`}>
                 <Shield className="w-6 h-6 text-purple-500" />
               </div>
               <div>
-                <p className="text-gray-400 text-sm">Role</p>
-                <p className="text-white font-medium capitalize">{admin?.role?.replace('_', ' ')}</p>
+                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Role
+                </p>
+                <p className={`font-medium capitalize ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {admin?.role?.replace('_', ' ')}
+                </p>
               </div>
             </div>
 
             {/* Admin Since */}
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-purple-500/10 rounded-lg">
+              <div className={`p-3 rounded-lg ${
+                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
+              }`}>
                 <Calendar className="w-6 h-6 text-purple-500" />
               </div>
               <div>
-                <p className="text-gray-400 text-sm">Admin Since</p>
-                <p className="text-white font-medium">
+                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Admin Since
+                </p>
+                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                   {new Date(admin?.created_at || '').toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'long',
@@ -223,12 +246,18 @@ const AdminDashboard: React.FC = () => {
 
             {/* Full Name */}
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-purple-500/10 rounded-lg">
+              <div className={`p-3 rounded-lg ${
+                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
+              }`}>
                 <Users className="w-6 h-6 text-purple-500" />
               </div>
               <div>
-                <p className="text-gray-400 text-sm">Full Name</p>
-                <p className="text-white font-medium">{admin?.fullName}</p>
+                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Full Name
+                </p>
+                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {admin?.fullName}
+                </p>
               </div>
             </div>
           </div>
@@ -241,9 +270,19 @@ const AdminDashboard: React.FC = () => {
           transition={{ delay: 0.5 }}
           className="grid md:grid-cols-3 gap-6"
         >
-          <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-6 border border-purple-500/20">
-            <h3 className="text-xl font-bold mb-2">User Management</h3>
-            <p className="text-gray-400 text-sm mb-4">Manage registered users</p>
+          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
+            darkMode 
+              ? 'bg-gray-800/50 border-purple-500/20' 
+              : 'bg-white/80 border-purple-200'
+          }`}>
+            <h3 className={`text-xl font-bold mb-2 ${
+              darkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              User Management
+            </h3>
+            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Manage registered users
+            </p>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -253,9 +292,19 @@ const AdminDashboard: React.FC = () => {
             </motion.button>
           </div>
 
-          <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-6 border border-purple-500/20">
-            <h3 className="text-xl font-bold mb-2">System Settings</h3>
-            <p className="text-gray-400 text-sm mb-4">Configure system</p>
+          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
+            darkMode 
+              ? 'bg-gray-800/50 border-purple-500/20' 
+              : 'bg-white/80 border-purple-200'
+          }`}>
+            <h3 className={`text-xl font-bold mb-2 ${
+              darkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              System Settings
+            </h3>
+            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Configure system
+            </p>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -265,9 +314,19 @@ const AdminDashboard: React.FC = () => {
             </motion.button>
           </div>
 
-          <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-6 border border-purple-500/20">
-            <h3 className="text-xl font-bold mb-2">Analytics</h3>
-            <p className="text-gray-400 text-sm mb-4">View statistics</p>
+          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
+            darkMode 
+              ? 'bg-gray-800/50 border-purple-500/20' 
+              : 'bg-white/80 border-purple-200'
+          }`}>
+            <h3 className={`text-xl font-bold mb-2 ${
+              darkMode ? 'text-white' : 'text-gray-900'
+            }`}>
+              Analytics
+            </h3>
+            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              View statistics
+            </p>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}

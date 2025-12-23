@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom'; // Importing Router components
+import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import Navbar from './components/Navbar';
+import AdminHeader from './components/AdminHeader';
+import AdminFooter from './components/AdminFooter';
 import ServicesSection from './components/ServicesSection';
 import { WorkSection } from './components/WorkSection';
 import { Footer } from './components/Footer';
@@ -18,59 +20,96 @@ import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
-import ScrollToTop from './components/ScrollToTop'; // Adjust path if needed
+import ScrollToTop from './components/ScrollToTop';
 
-
-export function App() {
-  const [darkMode, setDarkMode] = useState(true); // Dark mode state
+function AppContent() {
+  const [darkMode, setDarkMode] = useState(true);
+  const [adminDarkMode, setAdminDarkMode] = useState(true);
+  const location = useLocation();
+  
+  // Check if current route is admin route
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   // Apply dark mode class to HTML element
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
+    if (isAdminRoute) {
+      if (adminDarkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
     } else {
-      document.documentElement.classList.remove('dark');
+      if (darkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
     }
-  }, [darkMode]);
+  }, [darkMode, adminDarkMode, isAdminRoute]);
 
   return (
-    <Router>
-      <AuthProvider>
-        <ScrollToTop />
-        <div className={`min-h-screen ${darkMode ? 'bg-black text-white' : 'bg-white text-black'}`}>
-          {/* Global gradient effect */}
+    <AuthProvider>
+      <ScrollToTop />
+      <div className={`min-h-screen ${
+        isAdminRoute 
+          ? (adminDarkMode ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' : 'bg-gray-50 text-gray-900')
+          : (darkMode ? 'bg-black text-white' : 'bg-white text-black')
+      }`}>
+        {/* Global gradient effect for non-admin pages */}
+        {!isAdminRoute && (
           <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-60 z-50" />
+        )}
 
-          {/* Main content */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-            className="w-full"
-          >
+        {/* Main content */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5 }}
+          className="w-full"
+        >
+          {/* Conditional Headers */}
+          {isAdminRoute ? (
+            <AdminHeader darkMode={adminDarkMode} setDarkMode={setAdminDarkMode} />
+          ) : (
             <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
+          )}
 
-            <Routes>
-              {/* Define routes for the pages */}
-              <Route path="/" element={<Home/>} />
-              <Route path="/about" element={<AboutUs />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/admin/login" element={<AdminLogin />} />
-              <Route path="/admin/dashboard" element={<AdminDashboard />} />
-              <Route path="/services/:serviceId" element={<ServiceDetail />} />
-              <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
-              <Route path="/work" element={<WorkSection darkMode={darkMode} />} />
-              <Route path="/faq" element={<FaqSection darkMode={darkMode} />} />
-              <Route path="/contact" element={<ContactUs/>} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-            <WhatsApp />
+          <Routes>
+            {/* Define routes for the pages */}
+            <Route path="/" element={<Home/>} />
+            <Route path="/about" element={<AboutUs />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/admin/login" element={<AdminLogin darkMode={adminDarkMode} />} />
+            <Route path="/admin/dashboard" element={<AdminDashboard darkMode={adminDarkMode} />} />
+            <Route path="/services/:serviceId" element={<ServiceDetail />} />
+            <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
+            <Route path="/work" element={<WorkSection darkMode={darkMode} />} />
+            <Route path="/faq" element={<FaqSection darkMode={darkMode} />} />
+            <Route path="/contact" element={<ContactUs/>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+
+          {/* WhatsApp only on non-admin pages */}
+          {!isAdminRoute && <WhatsApp />}
+
+          {/* Conditional Footers */}
+          {isAdminRoute ? (
+            <AdminFooter darkMode={adminDarkMode} />
+          ) : (
             <Footer darkMode={darkMode} />
-          </motion.div>
-        </div>
-      </AuthProvider>
+          )}
+        </motion.div>
+      </div>
+    </AuthProvider>
+  );
+}
+
+export function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }
