@@ -1,27 +1,20 @@
 import { Facebook, Instagram, Linkedin, LogOut, LayoutDashboard } from 'lucide-react';
-import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 interface FooterProps {
   darkMode: boolean;
 }
 
 export const Footer = ({ darkMode }: FooterProps) => {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    setIsLoggedIn(!!token);
-  }, []);
 
   const handleLogout = () => {
     if (window.confirm('Are you sure you want to logout?')) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      setIsLoggedIn(false);
-      navigate('/');
-      window.location.reload();
+      logout();
+      // Force full page reload to home
+      window.location.href = '/';
     }
   };
 
@@ -102,7 +95,7 @@ export const Footer = ({ darkMode }: FooterProps) => {
             >
               Services
             </a>
-            {isLoggedIn ? (
+            {isAuthenticated ? (
               <>
                 <Link
                   to="/dashboard"

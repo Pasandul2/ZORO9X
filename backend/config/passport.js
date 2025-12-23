@@ -33,7 +33,7 @@ passport.use(
         // CHECK IF USER EXISTS
         // ============================================
         const [existingUser] = await connection.execute(
-          'SELECT id, email FROM users WHERE email = ?',
+          'SELECT id, email, fullName, is_verified FROM users WHERE email = ?',
           [profile.emails[0].value]
         );
 
@@ -44,6 +44,15 @@ passport.use(
           // USER EXISTS - USE EXISTING
           // ============================================
           user = existingUser[0];
+          
+          // Ensure Google OAuth users are verified
+          if (!user.is_verified) {
+            await connection.execute(
+              'UPDATE users SET is_verified = ? WHERE id = ?',
+              [true, user.id]
+            );
+            user.is_verified = true;
+          }
         } else {
           // ============================================
           // NEW USER - CREATE ACCOUNT
@@ -56,10 +65,10 @@ passport.use(
           // (They don't use password-based login)
           const randomPassword = await bcrypt.hash(googleId + Date.now(), 10);
 
-          // Insert new user into database
+          // Insert new user into database (Google OAuth users are auto-verified)
           const [result] = await connection.execute(
-            'INSERT INTO users (email, password, fullName) VALUES (?, ?, ?)',
-            [email, randomPassword, fullName]
+            'INSERT INTO users (email, password, fullName, is_verified) VALUES (?, ?, ?, ?)',
+            [email, randomPassword, fullName, true]
           );
 
           user = {

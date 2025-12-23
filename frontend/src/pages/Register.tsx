@@ -28,7 +28,8 @@ const Register: React.FC = () => {
       try {
         const userData = user ? JSON.parse(decodeURIComponent(user)) : {};
         login(token, userData);
-        navigate('/');
+        // Use window.location to force full page reload
+        window.location.href = '/';
       } catch (error) {
         console.error('Error parsing OAuth data:', error);
         setError('Authentication failed. Please try again.');

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import FaqSection from '../components/FaqSection';
 import HeroSection from '../components/HeroSection';
 import ServicesSection from '../components/ServicesSection';
@@ -9,6 +11,27 @@ import ContactSection from '../components/ContactSection';
 export function Home() {
   const bgRef = useRef<HTMLDivElement>(null);
   const [darkMode, setDarkMode] = useState(true); // 🔥 Dark mode state
+  const [searchParams] = useSearchParams();
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  // Handle Google OAuth callback
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const user = searchParams.get('user');
+
+    if (token && user) {
+      try {
+        const userData = JSON.parse(decodeURIComponent(user));
+        login(token, userData);
+        // Clean URL and reload to update all components
+        navigate('/', { replace: true });
+        window.location.reload();
+      } catch (error) {
+        console.error('Error parsing OAuth data:', error);
+      }
+    }
+  }, [searchParams, login, navigate]);
 
   // Optional: Apply class to HTML tag if you’re using Tailwind’s `dark:` utility
   useEffect(() => {

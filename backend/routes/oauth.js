@@ -56,7 +56,7 @@ router.get(
       // ============================================
       // Send token and user data to frontend via URL params
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      res.redirect(`${frontendUrl}/login?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`);
+      res.redirect(`${frontendUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`);
     } catch (error) {
       console.error('❌ Google callback error:', error.message);
       res.redirect(process.env.FRONTEND_URL + '/login?error=token_generation_failed');
