@@ -18,6 +18,7 @@ const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
+const portfolioRoutes = require('./routes/portfolio');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -96,11 +97,14 @@ app.use('/api/oauth', oauthRoutes);
 // Admin routes (admin login, admin dashboard)
 app.use('/api/admin', adminRoutes);
 
+// Portfolio routes (public and admin)
+app.use('/api/portfolio', portfolioRoutes);
+
 // ============================================
 // ERROR HANDLING MIDDLEWARE
 // ============================================
 // Catch-all error handler
-app.use((err, req, res) => {
+app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({ 
     message: err.message || 'Internal server error',

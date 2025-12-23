@@ -16,12 +16,11 @@ const Navbar: React.FC<NavbarProps> = () => {
   const [scrolled, setScrolled] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const { isAuthenticated, logout } = useAuth();
-  const navigate = useNavigate();
 
   const menuItems = [
     { label: 'Home', path: '/' },
-    
-    { label: 'Our Works', path: '/work' },
+    { label: 'Portfolio', path: '/portfolio' },
+    { label: 'Marketplace', path: '/marketplace' },
     { label: 'Services', path: '/services' },
     { label: 'Contact', path: '/contact' },
     { label: 'About', path: '/about' },
@@ -45,7 +44,7 @@ const Navbar: React.FC<NavbarProps> = () => {
   const handleLogout = () => {
     logout();
     setShowLogoutDialog(false);
-    setIsMenuOpen(false);
+    setMobileMenuOpen(false);
     // Force full page reload to home
     window.location.href = '/';
   };
