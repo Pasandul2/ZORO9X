@@ -292,25 +292,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
             </motion.button>
           </div>
 
-          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
-            darkMode 
-              ? 'bg-gray-800/50 border-purple-500/20' 
-              : 'bg-white/80 border-purple-200'
-          }`}>
-            <h3 className={`text-xl font-bold mb-2 ${
-              darkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              System Settings
-            </h3>
-            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Configure system
-            </p>
+          <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-6 border border-purple-500/20">
+            <h3 className="text-xl font-bold mb-2">System Settings</h3>
+            <p className="text-gray-400 text-sm mb-4">Configure system</p>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg"
             >
-              Settings
+              Dashboard
             </motion.button>
           </div>
 
