@@ -113,35 +113,28 @@ const register = async (req, res) => {
       parseInt(process.env.BCRYPT_ROUNDS || '10')
     );
 
-    // GENERATE VERIFICATION CODE
-    const verificationCode = generateVerificationCode();
-    const codeExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-    // CREATE USER IN DATABASE
+    // CREATE USER IN DATABASE (auto-verified for now)
     const [result] = await connection.execute(
-      'INSERT INTO users (email, password, fullName, phone, verification_code, verification_code_expires, is_verified) VALUES (?, ?, ?, ?, ?, ?, FALSE)',
-      [email, hashedPassword, fullName, phone || null, verificationCode, codeExpiry]
+      'INSERT INTO users (email, password, fullName, phone, is_verified) VALUES (?, ?, ?, ?, TRUE)',
+      [email, hashedPassword, fullName, phone || null]
     );
 
     const userId = result.insertId;
 
     connection.release();
 
-    // SEND VERIFICATION EMAIL
-    const emailSent = await sendVerificationEmail(email, fullName, verificationCode);
-
-    if (!emailSent) {
-      return res.status(500).json({ 
-        message: 'User created but failed to send verification email. Please try resending.' 
-      });
-    }
+    // Generate JWT token for immediate login
+    const token = jwt.sign(
+      { id: userId, email: email },
+      process.env.JWT_SECRET || 'your_jwt_secret_key_change_this_in_production_12345678',
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
+    );
 
     // SUCCESS RESPONSE
     res.status(201).json({
-      message: 'Registration successful! Please check your email for verification code.',
-      userId: userId,
-      email: email,
-      requiresVerification: true
+      message: 'Registration successful!',
+      user: { id: userId, email: email, fullName: fullName },
+      token
     });
   } catch (error) {
     console.error('❌ Register error:', error.message);
@@ -337,15 +330,6 @@ const login = async (req, res) => {
     }
 
     const user = users[0];
-
-    // CHECK IF EMAIL IS VERIFIED
-    if (!user.is_verified) {
-      connection.release();
-      return res.status(403).json({ 
-        message: 'Please verify your email before logging in',
-        requiresVerification: true
-      });
-    }
 
     // VERIFY PASSWORD
     const isPasswordValid = await bcrypt.compare(password, user.password);

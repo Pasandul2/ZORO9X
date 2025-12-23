@@ -6,6 +6,10 @@
 
 const { pool } = require('../config/database');
 const crypto = require('crypto');
+const { createStripeCustomer, createStripeSubscription } = require('../services/stripeService');
+const { sendWelcomeEmail, sendSubscriptionEmail } = require('../services/emailService');
+const { logAudit } = require('../services/auditService');
+const { recordUsage } = require('../services/usageService');
 
 /**
  * Get all available systems
@@ -222,25 +226,42 @@ exports.purchaseSubscription = async (req, res) => {
     await connection.beginTransaction();
     
     const userId = req.user.id;
-    const { system_id, plan_id, company_name, contact_email, contact_phone, billing_cycle } = req.body;
+    const { system_id, plan_id, company_name, contact_email, contact_phone, billing_cycle, payment_method_id, coupon_code } = req.body;
     
     // Check if client exists for this user
     let [clients] = await connection.execute(
-      'SELECT id FROM clients WHERE user_id = ?',
+      'SELECT id, stripe_customer_id FROM clients WHERE user_id = ?',
       [userId]
     );
     
     let clientId;
+    let stripeCustomerId;
     
     if (clients.length === 0) {
+      // Create Stripe customer
+      const stripeCustomer = await createStripeCustomer(contact_email, company_name);
+      stripeCustomerId = stripeCustomer.id;
+      
       // Create new client
       const [clientResult] = await connection.execute(
-        'INSERT INTO clients (user_id, company_name, contact_email, contact_phone) VALUES (?, ?, ?, ?)',
-        [userId, company_name, contact_email, contact_phone]
+        'INSERT INTO clients (user_id, company_name, contact_email, contact_phone, stripe_customer_id) VALUES (?, ?, ?, ?, ?)',
+        [userId, company_name, contact_email, contact_phone, stripeCustomerId]
       );
       clientId = clientResult.insertId;
     } else {
       clientId = clients[0].id;
+      stripeCustomerId = clients[0].stripe_customer_id;
+      
+      // Create Stripe customer if not exists
+      if (!stripeCustomerId) {
+        const stripeCustomer = await createStripeCustomer(contact_email, company_name);
+        stripeCustomerId = stripeCustomer.id;
+        
+        await connection.execute(
+          'UPDATE clients SET stripe_customer_id = ? WHERE id = ?',
+          [stripeCustomerId, clientId]
+        );
+      }
     }
     
     // Get plan details
@@ -255,6 +276,33 @@ exports.purchaseSubscription = async (req, res) => {
     
     const plan = plans[0];
     
+    // Apply coupon if provided
+    let finalAmount = plan.price;
+    let couponId = null;
+    
+    if (coupon_code) {
+      const [coupons] = await connection.execute(
+        'SELECT * FROM coupons WHERE code = ? AND is_active = true',
+        [coupon_code.toUpperCase()]
+      );
+      
+      if (coupons.length > 0) {
+        const coupon = coupons[0];
+        if (coupon.discount_type === 'percentage') {
+          finalAmount = plan.price * (1 - coupon.discount_value / 100);
+        } else {
+          finalAmount = Math.max(0, plan.price - coupon.discount_value);
+        }
+        couponId = coupon.id;
+        
+        // Update coupon redemption count
+        await connection.execute(
+          'UPDATE coupons SET redemption_count = redemption_count + 1 WHERE id = ?',
+          [coupon.id]
+        );
+      }
+    }
+    
     // Generate unique identifiers
     const apiKey = crypto.randomBytes(32).toString('hex');
     const databaseName = `saas_${company_name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${Date.now()}`;
@@ -264,33 +312,73 @@ exports.purchaseSubscription = async (req, res) => {
     const startDate = new Date();
     const endDate = new Date();
     
-    switch (billing_cycle) {
-      case 'monthly':
-        endDate.setMonth(endDate.getMonth() + 1);
-        break;
-      case 'quarterly':
-        endDate.setMonth(endDate.getMonth() + 3);
-        break;
-      case 'yearly':
-        endDate.setFullYear(endDate.getFullYear() + 1);
-        break;
+    // Check if trial period is available
+    const trialDays = plan.trial_days || 0;
+    const isTrialPeriod = trialDays > 0;
+    
+    if (isTrialPeriod) {
+      endDate.setDate(endDate.getDate() + trialDays);
+    } else {
+      switch (billing_cycle) {
+        case 'monthly':
+          endDate.setMonth(endDate.getMonth() + 1);
+          break;
+        case 'quarterly':
+          endDate.setMonth(endDate.getMonth() + 3);
+          break;
+        case 'yearly':
+          endDate.setFullYear(endDate.getFullYear() + 1);
+          break;
+      }
+    }
+    
+    // Create Stripe subscription
+    let stripeSubscriptionId = null;
+    try {
+      const stripeSubscription = await createStripeSubscription(
+        stripeCustomerId,
+        plan.stripe_price_id || `price_${plan.id}`,
+        payment_method_id,
+        trialDays
+      );
+      stripeSubscriptionId = stripeSubscription.id;
+    } catch (stripeError) {
+      console.error('Stripe error:', stripeError);
+      // Continue without Stripe if it fails
     }
     
     // Create subscription
     const [subscriptionResult] = await connection.execute(
       `INSERT INTO client_subscriptions 
-       (client_id, system_id, plan_id, database_name, subdomain, api_key, status, start_date, end_date, total_amount) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [clientId, system_id, plan_id, databaseName, subdomain, apiKey, 'active', startDate, endDate, plan.price]
+       (client_id, system_id, plan_id, database_name, subdomain, api_key, status, start_date, end_date, 
+        total_amount, is_trial, trial_ends_at, stripe_subscription_id) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        clientId, system_id, plan_id, databaseName, subdomain, apiKey,
+        isTrialPeriod ? 'trial' : 'active',
+        startDate, endDate, finalAmount,
+        isTrialPeriod, isTrialPeriod ? endDate : null,
+        stripeSubscriptionId
+      ]
     );
     
     const subscriptionId = subscriptionResult.insertId;
     
-    // Create payment record
-    await connection.execute(
-      'INSERT INTO payments (client_id, subscription_id, amount, status, transaction_id) VALUES (?, ?, ?, ?, ?)',
-      [clientId, subscriptionId, plan.price, 'completed', `TXN-${Date.now()}`]
-    );
+    // Record coupon redemption if used
+    if (couponId) {
+      await connection.execute(
+        'INSERT INTO coupon_redemptions (coupon_id, client_id, subscription_id, discount_amount) VALUES (?, ?, ?, ?)',
+        [couponId, clientId, subscriptionId, plan.price - finalAmount]
+      );
+    }
+    
+    // Create payment record (skip if trial)
+    if (!isTrialPeriod && finalAmount > 0) {
+      await connection.execute(
+        'INSERT INTO payments (client_id, subscription_id, amount, status, transaction_id, stripe_payment_intent_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [clientId, subscriptionId, finalAmount, 'completed', `TXN-${Date.now()}`, stripeSubscriptionId]
+      );
+    }
     
     // Create welcome notification
     await connection.execute(
@@ -298,11 +386,33 @@ exports.purchaseSubscription = async (req, res) => {
       [
         clientId,
         subscriptionId,
-        'Welcome to Your New System!',
-        `Your ${plan.name} subscription has been activated successfully. Your API key and access details are ready.`,
+        isTrialPeriod ? 'Trial Started!' : 'Welcome to Your New System!',
+        isTrialPeriod
+          ? `Your ${trialDays}-day trial has started. Your API key and access details are ready.`
+          : `Your ${plan.name} subscription has been activated successfully. Your API key and access details are ready.`,
         'success'
       ]
     );
+    
+    // Log audit
+    await logAudit({
+      userId: clientId,
+      userType: 'client',
+      action: 'PURCHASE_SUBSCRIPTION',
+      resourceType: 'subscription',
+      resourceId: subscriptionId,
+      newValue: { system_id, plan_id, amount: finalAmount, isTrialPeriod },
+      ipAddress: req.ip
+    });
+    
+    // Send welcome email
+    try {
+      await sendWelcomeEmail(contact_email, company_name, apiKey);
+      await sendSubscriptionEmail(contact_email, company_name, plan.name, startDate, endDate, finalAmount);
+    } catch (emailError) {
+      console.error('Email error:', emailError);
+      // Continue even if email fails
+    }
     
     // TODO: Create separate database for client
     // This would involve creating a new MySQL database dynamically
@@ -311,15 +421,18 @@ exports.purchaseSubscription = async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Subscription purchased successfully',
+      message: isTrialPeriod ? 'Trial started successfully' : 'Subscription purchased successfully',
       subscription: {
         id: subscriptionId,
         apiKey,
         databaseName,
         subdomain,
-        status: 'active',
+        status: isTrialPeriod ? 'trial' : 'active',
         startDate,
-        endDate
+        endDate,
+        isTrialPeriod,
+        trialEndsAt: isTrialPeriod ? endDate : null,
+        amount: finalAmount
       }
     });
     
@@ -328,7 +441,8 @@ exports.purchaseSubscription = async (req, res) => {
     console.error('Error purchasing subscription:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to purchase subscription'
+      message: 'Failed to purchase subscription',
+      error: error.message
     });
   } finally {
     connection.release();
