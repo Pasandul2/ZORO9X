@@ -4,10 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, Shield } from 'lucide-react';
 
 interface AdminLoginProps {
-  darkMode: boolean;
+  darkMode?: boolean;
 }
 
-const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
+const AdminLogin: React.FC<AdminLoginProps> = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -50,15 +50,11 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
   };
 
   return (
-    <div className={`min-h-screen pt-32 pb-20 px-4 ${
-      darkMode 
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
-        : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
-    }`}>
+    <div className="min-h-screen flex items-center justify-center px-4 bg-gradient-to-br from-gray-950 via-blue-950 to-black">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md mx-auto"
+        className="w-full max-w-md"
       >
         {/* Admin Badge */}
         <div className="text-center mb-8">
@@ -66,14 +62,14 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: 'spring' }}
-            className="inline-flex items-center justify-center w-20 h-20 bg-purple-600 rounded-full mb-4"
+            className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-800 rounded-full mb-4 shadow-lg shadow-blue-900/50"
           >
             <Shield className="w-10 h-10 text-white" />
           </motion.div>
-          <h1 className={`text-3xl font-bold mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          <h1 className="text-3xl font-bold mb-2 text-white">
             Admin Portal
           </h1>
-          <p className={darkMode ? 'text-gray-400' : 'text-gray-600'}>
+          <p className="text-gray-400">
             ZORO9X Management System
           </p>
         </div>
@@ -83,15 +79,9 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className={`backdrop-blur-lg rounded-2xl p-8 border shadow-2xl ${
-            darkMode 
-              ? 'bg-gray-800/50 border-purple-500/20' 
-              : 'bg-white/80 border-purple-200'
-          }`}
+          className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-8 border border-blue-900/30 shadow-2xl shadow-blue-900/30"
         >
-          <h2 className={`text-2xl font-bold mb-6 text-center ${
-            darkMode ? 'text-white' : 'text-gray-900'
-          }`}>
+          <h2 className="text-2xl font-bold mb-6 text-center text-white">
             Admin Login
           </h2>
 
@@ -99,7 +89,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded-lg mb-6"
+              className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg mb-6"
             >
               {error}
             </motion.div>
@@ -108,24 +98,16 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
           <form onSubmit={handleLogin} className="space-y-6">
             {/* Email Field */}
             <div>
-              <label className={`block text-sm font-medium mb-2 ${
-                darkMode ? 'text-gray-200' : 'text-gray-700'
-              }`}>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
                 Admin Email
               </label>
               <div className="relative">
-                <Mail className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 ${
-                  darkMode ? 'text-gray-400' : 'text-gray-500'
-                }`} />
+                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className={`w-full border pl-12 pr-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${
-                    darkMode 
-                      ? 'bg-gray-700/50 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-500'
-                  }`}
+                  className="w-full border border-gray-700 bg-gray-800 pl-12 pr-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-500 transition-all"
                   placeholder="admin@zoro9x.com"
                   required
                 />
@@ -134,33 +116,23 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
 
             {/* Password Field */}
             <div>
-              <label className={`block text-sm font-medium mb-2 ${
-                darkMode ? 'text-gray-200' : 'text-gray-700'
-              }`}>
+              <label className="block text-sm font-medium mb-2 text-gray-300">
                 Password
               </label>
               <div className="relative">
-                <Lock className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 ${
-                  darkMode ? 'text-gray-400' : 'text-gray-500'
-                }`} />
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={`w-full border pl-12 pr-12 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 ${
-                    darkMode 
-                      ? 'bg-gray-700/50 border-gray-600 text-white placeholder-gray-400' 
-                      : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-500'
-                  }`}
+                  className="w-full border border-gray-700 bg-gray-800 pl-12 pr-12 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-500 transition-all"
                   placeholder="Enter admin password"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className={`absolute right-3 top-1/2 transform -translate-y-1/2 ${
-                    darkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-700'
-                  }`}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -173,7 +145,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
               disabled={loading}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/30"
             >
               {loading ? 'Logging in...' : 'Admin Login'}
             </motion.button>
@@ -181,7 +153,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
 
           {/* Security Notice */}
           <div className="mt-6 text-center">
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            <p className="text-xs text-gray-400">
               🔒 Secure admin access only
             </p>
           </div>
@@ -194,9 +166,7 @@ const AdminLogin: React.FC<AdminLoginProps> = ({ darkMode }) => {
           transition={{ delay: 0.5 }}
           className="text-center mt-6"
         >
-          <a href="/" className={`text-sm ${
-            darkMode ? 'text-purple-400 hover:text-purple-300' : 'text-purple-600 hover:text-purple-700'
-          }`}>
+          <a href="/" className="text-sm text-blue-400 hover:text-blue-300 transition-colors">
             ← Back to main site
           </a>
         </motion.div>

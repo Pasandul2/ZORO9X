@@ -116,7 +116,35 @@ const getAdminProfile = async (req, res) => {
   }
 };
 
+/**
+ * Get All Users
+ * Returns all registered users for admin management
+ * 
+ * @route GET /api/admin/users
+ * @access Private (Admin only)
+ */
+const getAllUsers = async (req, res) => {
+  try {
+    // Fetch all users from database (exclude passwords)
+    const [users] = await pool.query(
+      'SELECT id, email, fullName, isVerified, created_at, lastLogin FROM users ORDER BY created_at DESC'
+    );
+
+    res.status(200).json({ 
+      users,
+      count: users.length
+    });
+
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({ 
+      message: 'Server error fetching users' 
+    });
+  }
+};
+
 module.exports = {
   adminLogin,
-  getAdminProfile
+  getAdminProfile,
+  getAllUsers
 };

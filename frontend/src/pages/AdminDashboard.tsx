@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Users, Mail, Calendar, Settings, BarChart } from 'lucide-react';
-import PortfolioManagement from '../components/PortfolioManagement';
+import { Shield, Users, Mail, Calendar, Settings, TrendingUp, Activity } from 'lucide-react';
 
 interface AdminData {
   id: number;
@@ -13,10 +12,10 @@ interface AdminData {
 }
 
 interface AdminDashboardProps {
-  darkMode: boolean;
+  darkMode?: boolean;
 }
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = () => {
   const [admin, setAdmin] = useState<AdminData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -59,18 +58,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
 
   if (loading) {
     return (
-      <div className={`min-h-screen pt-32 pb-20 px-4 flex items-center justify-center ${
-        darkMode 
-          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
-          : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
-      }`}>
+      <div className="flex items-center justify-center h-screen">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="text-center"
         >
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
-          <p>Loading admin dashboard...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-300">Loading dashboard...</p>
         </motion.div>
       </div>
     );
@@ -78,11 +73,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
 
   if (error) {
     return (
-      <div className={`min-h-screen pt-32 pb-20 px-4 flex items-center justify-center ${
-        darkMode 
-          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
-          : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
-      }`}>
+      <div className="flex items-center justify-center h-screen">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -95,242 +86,216 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ darkMode }) => {
   }
 
   return (
-    <div className={`min-h-screen pt-32 pb-20 px-4 ${
-      darkMode 
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' 
-        : 'bg-gradient-to-br from-gray-50 via-purple-50 to-gray-50 text-gray-900'
-    }`}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="max-w-7xl mx-auto"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-12">
-          <div>
-            <h1 className={`text-4xl font-bold flex items-center gap-3 ${
-              darkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              <Shield className="w-10 h-10 text-purple-500" />
-              Admin Dashboard
-            </h1>
-            <p className={`mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Welcome back, <span className="text-purple-500 font-semibold">{admin?.fullName}</span>
-            </p>
+    <div className="space-y-6">
+      {/* Welcome Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+            <Shield className="w-10 h-10 text-blue-400" />
+            Dashboard Overview
+          </h1>
+          <p className="text-gray-400 mt-1">
+            Welcome back, <span className="text-blue-400 font-semibold">{admin?.fullName}</span>
+          </p>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid md:grid-cols-4 gap-6">
+        {/* Total Users Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 shadow-xl shadow-blue-900/50"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-blue-200 text-sm font-medium">Total Users</p>
+              <h3 className="text-4xl font-bold text-white mt-2">0</h3>
+              <p className="text-blue-300 text-xs mt-1">+0% from last month</p>
+            </div>
+            <Users className="w-12 h-12 text-blue-200" />
           </div>
-        </div>
+        </motion.div>
 
-        {/* Stats Grid */}
-        <div className="grid md:grid-cols-3 gap-6 mb-12">
-          {/* Total Users Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 shadow-xl"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-200 text-sm">Total Users</p>
-                <h3 className="text-3xl font-bold mt-2">0</h3>
-              </div>
-              <Users className="w-12 h-12 text-blue-200" />
+        {/* Total Admins Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-2xl p-6 shadow-xl shadow-purple-900/50"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-purple-200 text-sm font-medium">Total Admins</p>
+              <h3 className="text-4xl font-bold text-white mt-2">1</h3>
+              <p className="text-purple-300 text-xs mt-1">Active now</p>
             </div>
-          </motion.div>
+            <Shield className="w-12 h-12 text-purple-200" />
+          </div>
+        </motion.div>
 
-          {/* Total Admins Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-gradient-to-br from-purple-600 to-purple-800 rounded-2xl p-6 shadow-xl"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-purple-200 text-sm">Total Admins</p>
-                <h3 className="text-3xl font-bold mt-2">1</h3>
-              </div>
-              <Shield className="w-12 h-12 text-purple-200" />
+        {/* System Status Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-gradient-to-br from-green-600 to-green-800 rounded-2xl p-6 shadow-xl shadow-green-900/50"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-green-200 text-sm font-medium">System Status</p>
+              <h3 className="text-2xl font-bold text-white mt-2">Online</h3>
+              <p className="text-green-300 text-xs mt-1">All services operational</p>
             </div>
-          </motion.div>
+            <Activity className="w-12 h-12 text-green-200" />
+          </div>
+        </motion.div>
 
-          {/* System Status Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-gradient-to-br from-green-600 to-green-800 rounded-2xl p-6 shadow-xl"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-200 text-sm">System Status</p>
-                <h3 className="text-2xl font-bold mt-2">Operational</h3>
-              </div>
-              <BarChart className="w-12 h-12 text-green-200" />
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Admin Profile Card */}
+        {/* Analytics Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          className={`backdrop-blur-lg rounded-2xl p-8 border mb-8 ${
-            darkMode 
-              ? 'bg-gray-800/50 border-purple-500/20' 
-              : 'bg-white/80 border-purple-200'
-          }`}
+          className="bg-gradient-to-br from-orange-600 to-orange-800 rounded-2xl p-6 shadow-xl shadow-orange-900/50"
         >
-          <h2 className={`text-2xl font-bold mb-6 flex items-center gap-2 ${
-            darkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            <Settings className="w-6 h-6 text-purple-500" />
-            Admin Profile
-          </h2>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Email */}
-            <div className="flex items-start gap-4">
-              <div className={`p-3 rounded-lg ${
-                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
-              }`}>
-                <Mail className="w-6 h-6 text-purple-500" />
-              </div>
-              <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Email Address
-                </p>
-                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {admin?.email}
-                </p>
-              </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-orange-200 text-sm font-medium">Total Analytics</p>
+              <h3 className="text-4xl font-bold text-white mt-2">24</h3>
+              <p className="text-orange-300 text-xs mt-1">Active reports</p>
             </div>
-
-            {/* Role */}
-            <div className="flex items-start gap-4">
-              <div className={`p-3 rounded-lg ${
-                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
-              }`}>
-                <Shield className="w-6 h-6 text-purple-500" />
-              </div>
-              <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Role
-                </p>
-                <p className={`font-medium capitalize ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {admin?.role?.replace('_', ' ')}
-                </p>
-              </div>
-            </div>
-
-            {/* Admin Since */}
-            <div className="flex items-start gap-4">
-              <div className={`p-3 rounded-lg ${
-                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
-              }`}>
-                <Calendar className="w-6 h-6 text-purple-500" />
-              </div>
-              <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Admin Since
-                </p>
-                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {new Date(admin?.created_at || '').toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
-                </p>
-              </div>
-            </div>
-
-            {/* Full Name */}
-            <div className="flex items-start gap-4">
-              <div className={`p-3 rounded-lg ${
-                darkMode ? 'bg-purple-500/10' : 'bg-purple-100'
-              }`}>
-                <Users className="w-6 h-6 text-purple-500" />
-              </div>
-              <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Full Name
-                </p>
-                <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {admin?.fullName}
-                </p>
-              </div>
-            </div>
+            <TrendingUp className="w-12 h-12 text-orange-200" />
           </div>
         </motion.div>
+      </div>
 
-        {/* Quick Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="grid md:grid-cols-3 gap-6"
-        >
-          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
-            darkMode 
-              ? 'bg-gray-800/50 border-purple-500/20' 
-              : 'bg-white/80 border-purple-200'
-          }`}>
-            <h3 className={`text-xl font-bold mb-2 ${
-              darkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              User Management
-            </h3>
-            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Manage registered users
-            </p>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg"
-            >
-              View Users
-            </motion.button>
+      {/* Admin Profile Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+        className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-8 border border-blue-900/30"
+      >
+        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+          <Settings className="w-6 h-6 text-blue-400" />
+          Admin Profile
+        </h2>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Email */}
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <Mail className="w-6 h-6 text-blue-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Email Address</p>
+              <p className="font-medium text-white">{admin?.email}</p>
+            </div>
           </div>
 
-          <div className="bg-gray-800/50 backdrop-blur-lg rounded-2xl p-6 border border-purple-500/20">
-            <h3 className="text-xl font-bold mb-2">SaaS Systems</h3>
-            <p className="text-gray-400 text-sm mb-4">Manage SaaS systems and clients</p>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => navigate('/admin/saas-dashboard')}
-              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg"
-            >
-              SaaS Dashboard
-            </motion.button>
+          {/* Role */}
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20">
+              <Shield className="w-6 h-6 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Role</p>
+              <p className="font-medium capitalize text-white">
+                {admin?.role?.replace('_', ' ')}
+              </p>
+            </div>
           </div>
 
-          <div className={`backdrop-blur-lg rounded-2xl p-6 border ${
-            darkMode 
-              ? 'bg-gray-800/50 border-purple-500/20' 
-              : 'bg-white/80 border-purple-200'
-          }`}>
-            <h3 className={`text-xl font-bold mb-2 ${
-              darkMode ? 'text-white' : 'text-gray-900'
-            }`}>
-              Analytics
-            </h3>
-            <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              View statistics
-            </p>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-lg"
-            >
-              View Analytics
-            </motion.button>
+          {/* Admin Since */}
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+              <Calendar className="w-6 h-6 text-green-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Admin Since</p>
+              <p className="font-medium text-white">
+                {new Date(admin?.created_at || '').toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </p>
+            </div>
           </div>
-        </motion.div>
 
-        {/* Portfolio Management Section */}
-        <PortfolioManagement darkMode={darkMode} />
+          {/* Full Name */}
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-xl bg-orange-500/10 border border-orange-500/20">
+              <Users className="w-6 h-6 text-orange-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Full Name</p>
+              <p className="font-medium text-white">{admin?.fullName}</p>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Quick Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+        className="grid md:grid-cols-4 gap-6"
+      >
+        <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-6 border border-blue-900/30 hover:border-blue-700/50 transition-all">
+          <h3 className="text-xl font-bold text-white mb-2">User Management</h3>
+          <p className="text-sm text-gray-400 mb-4">Manage registered users</p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => navigate('/admin/users')}
+            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-blue-900/30"
+          >
+            View Users
+          </motion.button>
+        </div>
+
+        <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-6 border border-purple-900/30 hover:border-purple-700/50 transition-all">
+          <h3 className="text-xl font-bold text-white mb-2">SaaS Analytics</h3>
+          <p className="text-gray-400 text-sm mb-4">Manage SaaS systems</p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => navigate('/admin/saas')}
+            className="w-full bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-purple-900/30"
+          >
+            SaaS Dashboard
+          </motion.button>
+        </div>
+
+        <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-6 border border-green-900/30 hover:border-green-700/50 transition-all">
+          <h3 className="text-xl font-bold text-white mb-2">Portfolio</h3>
+          <p className="text-sm text-gray-400 mb-4">Manage portfolio items</p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => navigate('/admin/portfolio')}
+            className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-green-900/30"
+          >
+            Manage Portfolio
+          </motion.button>
+        </div>
+
+        <div className="bg-gray-900/50 backdrop-blur-sm rounded-2xl p-6 border border-orange-900/30 hover:border-orange-700/50 transition-all">
+          <h3 className="text-xl font-bold text-white mb-2">Analytics</h3>
+          <p className="text-sm text-gray-400 mb-4">View statistics</p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => navigate('/admin/analytics')}
+            className="w-full bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-500 hover:to-orange-600 text-white font-semibold py-3 rounded-lg shadow-lg shadow-orange-900/30"
+          >
+            View Analytics
+          </motion.button>
+        </div>
       </motion.div>
     </div>
   );
