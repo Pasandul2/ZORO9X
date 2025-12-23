@@ -43,57 +43,6 @@ async function createUserTable() {
     `;
     
     await connection.execute(createTableQuery);
-    
-    // Check and add missing columns for existing tables
-    const [columns] = await connection.execute(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME = 'users'
-    `);
-    
-    const existingColumns = columns.map(col => col.COLUMN_NAME);
-    
-    // Add is_verified if missing
-    if (!existingColumns.includes('is_verified')) {
-      await connection.execute(`
-        ALTER TABLE users 
-        ADD COLUMN is_verified BOOLEAN DEFAULT FALSE
-      `);
-    }
-    
-    // Add verification_code if missing
-    if (!existingColumns.includes('verification_code')) {
-      await connection.execute(`
-        ALTER TABLE users 
-        ADD COLUMN verification_code VARCHAR(6)
-      `);
-    }
-    
-    // Add verification_code_expires if missing
-    if (!existingColumns.includes('verification_code_expires')) {
-      await connection.execute(`
-        ALTER TABLE users 
-        ADD COLUMN verification_code_expires TIMESTAMP NULL
-      `);
-    }
-    
-    // Add reset_password_code if missing
-    if (!existingColumns.includes('reset_password_code')) {
-      await connection.execute(`
-        ALTER TABLE users 
-        ADD COLUMN reset_password_code VARCHAR(6)
-      `);
-    }
-    
-    // Add reset_password_expires if missing
-    if (!existingColumns.includes('reset_password_expires')) {
-      await connection.execute(`
-        ALTER TABLE users 
-        ADD COLUMN reset_password_expires TIMESTAMP NULL
-      `);
-    }
-    
     console.log('✅ Users table created/verified successfully!');
     connection.release();
     

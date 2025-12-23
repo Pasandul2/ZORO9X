@@ -14,14 +14,10 @@ const { initializeDatabase } = require('./config/database');
 const { createUserTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
 const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('./config/saasSchema');
-const { initializeExtendedTables } = require('./config/extendedSaasSchema');
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
 const saasRoutes = require('./routes/saas');
-const couponRoutes = require('./routes/coupon');
-const invoiceRoutes = require('./routes/invoice');
-const twoFactorRoutes = require('./routes/twoFactor');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -100,15 +96,6 @@ app.use('/api/admin', adminRoutes);
 // SaaS routes (systems, subscriptions, clients)
 app.use('/api/saas', saasRoutes);
 
-// Coupon routes (discount management)
-app.use('/api/coupons', couponRoutes);
-
-// Invoice routes (billing and invoicing)
-app.use('/api/invoices', invoiceRoutes);
-
-// Two-Factor Authentication routes
-app.use('/api/2fa', twoFactorRoutes);
-
 // ============================================
 // ERROR HANDLING MIDDLEWARE
 // ============================================
@@ -160,10 +147,7 @@ async function startServer() {
     await seedInitialSystems();
     await seedInitialPlans();
 
-    // Step 5: Initialize extended SaaS tables (coupons, invoices, 2FA, etc.)
-    await initializeExtendedTables();
-
-    // Step 6: Start the Express server
+    // Step 5: Start the Express server
     app.listen(PORT, () => {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`🚀 ZORO9X Backend Server Started`);

@@ -26,12 +26,7 @@ const sendVerificationEmail = async (email, fullName, code) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Verify Your Email - Zoro9x',
-      html: verificationEmailTemplate(fullName, code),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: verificationEmailTemplate(fullName, code)
     });
     console.log('✅ Verification email sent to:', email);
     return true;
@@ -50,12 +45,7 @@ const sendPasswordResetEmail = async (email, fullName, code) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Reset Your Password - Zoro9x',
-      html: passwordResetTemplate(fullName, code),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: passwordResetTemplate(fullName, code)
     });
     console.log('✅ Password reset email sent to:', email);
     return true;
@@ -74,12 +64,7 @@ const sendWelcomeEmail = async (email, fullName) => {
       from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
       to: email,
       subject: 'Welcome to Zoro9x! 🎉',
-      html: welcomeEmailTemplate(fullName),
-      attachments: [{
-        filename: 'logo.png',
-        path: __dirname + '/../assets/logo.png',
-        cid: 'logo'
-      }]
+      html: welcomeEmailTemplate(fullName)
     });
     console.log('✅ Welcome email sent to:', email);
   } catch (error) {
@@ -128,28 +113,35 @@ const register = async (req, res) => {
       parseInt(process.env.BCRYPT_ROUNDS || '10')
     );
 
-    // CREATE USER IN DATABASE (auto-verified for now)
+    // GENERATE VERIFICATION CODE
+    const verificationCode = generateVerificationCode();
+    const codeExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // CREATE USER IN DATABASE
     const [result] = await connection.execute(
-      'INSERT INTO users (email, password, fullName, phone, is_verified) VALUES (?, ?, ?, ?, TRUE)',
-      [email, hashedPassword, fullName, phone || null]
+      'INSERT INTO users (email, password, fullName, phone, verification_code, verification_code_expires, is_verified) VALUES (?, ?, ?, ?, ?, ?, FALSE)',
+      [email, hashedPassword, fullName, phone || null, verificationCode, codeExpiry]
     );
 
     const userId = result.insertId;
 
     connection.release();
 
-    // Generate JWT token for immediate login
-    const token = jwt.sign(
-      { id: userId, email: email },
-      process.env.JWT_SECRET || 'your_jwt_secret_key_change_this_in_production_12345678',
-      { expiresIn: process.env.JWT_EXPIRE || '7d' }
-    );
+    // SEND VERIFICATION EMAIL
+    const emailSent = await sendVerificationEmail(email, fullName, verificationCode);
+
+    if (!emailSent) {
+      return res.status(500).json({ 
+        message: 'User created but failed to send verification email. Please try resending.' 
+      });
+    }
 
     // SUCCESS RESPONSE
     res.status(201).json({
-      message: 'Registration successful!',
-      user: { id: userId, email: email, fullName: fullName },
-      token
+      message: 'Registration successful! Please check your email for verification code.',
+      userId: userId,
+      email: email,
+      requiresVerification: true
     });
   } catch (error) {
     console.error('❌ Register error:', error.message);
@@ -345,6 +337,15 @@ const login = async (req, res) => {
     }
 
     const user = users[0];
+
+    // CHECK IF EMAIL IS VERIFIED
+    if (!user.is_verified) {
+      connection.release();
+      return res.status(403).json({ 
+        message: 'Please verify your email before logging in',
+        requiresVerification: true
+      });
+    }
 
     // VERIFY PASSWORD
     const isPasswordValid = await bcrypt.compare(password, user.password);
