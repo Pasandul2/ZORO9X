@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Edit2, Trash2, X, ExternalLink, Github, Upload, Image as ImageIcon } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, ExternalLink, Github, Upload } from 'lucide-react';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Portfolio {

@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { adminLogin, getAdminProfile } = require('../controllers/adminController');
-const { authenticateAdmin } = require('../middleware/auth');
+const verifyToken = require('../middleware/auth');
 
 /**
  * @route   POST /api/admin/login
@@ -20,6 +20,6 @@ router.post('/login', adminLogin);
  * @desc    Get admin profile (protected route)
  * @access  Private (requires admin JWT token)
  */
-router.get('/profile', authenticateAdmin, getAdminProfile);
+router.get('/profile', verifyToken, getAdminProfile);
 
 module.exports = router;
