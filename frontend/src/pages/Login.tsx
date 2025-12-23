@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -12,6 +13,7 @@ const Login: React.FC = () => {
   const [success, setSuccess] = useState('');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { login } = useAuth();
 
   // Handle OAuth callback
   useEffect(() => {
@@ -19,18 +21,21 @@ const Login: React.FC = () => {
     const user = searchParams.get('user');
 
     if (token) {
-      localStorage.setItem('token', token);
-      if (user) {
-        localStorage.setItem('user', decodeURIComponent(user));
+      try {
+        const userData = user ? JSON.parse(decodeURIComponent(user)) : {};
+        login(token, userData);
+        navigate('/');
+      } catch (error) {
+        console.error('Error parsing OAuth data:', error);
+        setError('Authentication failed. Please try again.');
       }
-      navigate('/');
     }
 
     const error = searchParams.get('error');
     if (error) {
       setError('Google login failed. Please try again.');
     }
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, login]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,9 +59,8 @@ const Login: React.FC = () => {
         return;
       }
 
-      // Save token to localStorage
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      // Update auth context
+      login(data.token, data.user);
 
       setSuccess('Login successful! Redirecting...');
       setTimeout(() => {
