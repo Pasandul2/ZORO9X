@@ -14,6 +14,7 @@ const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
 const { createUserTable, createPortfolioTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
+const { migrate } = require('./migrations/add_admin_columns');
 const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('./config/saasSchema');
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
@@ -145,6 +146,9 @@ async function startServer() {
 
     // Step 3: Create admin table and default admin if not exists
     await createAdminTable();
+
+    // Step 3.5: Run migrations
+    await migrate();
 
     // Step 4: Create portfolio table if not exists
     await createPortfolioTable();

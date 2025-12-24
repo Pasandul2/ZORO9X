@@ -15,7 +15,8 @@ import {
   Sun,
   FileText,
   TrendingUp,
-  Database
+  Database,
+  Lock
 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -34,6 +35,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, darkMode, setDarkMo
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
     { icon: Users, label: 'User Management', path: '/admin/users' },
+    { icon: Lock, label: 'Admin Management', path: '/admin/admins' },
     { icon: BarChart3, label: 'SaaS Analytics', path: '/admin/saas' },
     { icon: Briefcase, label: 'Portfolio', path: '/admin/portfolio' },
     { icon: TrendingUp, label: 'Analytics', path: '/admin/analytics' },
