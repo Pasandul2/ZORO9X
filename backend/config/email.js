@@ -31,4 +31,37 @@ transporter.verify((error, success) => {
   }
 });
 
-module.exports = transporter;
+/**
+ * Send Email Function
+ * Sends email using the configured transporter
+ * 
+ * @param {Object} mailOptions - Email options object
+ * @param {string} mailOptions.to - Recipient email address
+ * @param {string} mailOptions.subject - Email subject
+ * @param {string} mailOptions.html - HTML email content
+ * @param {string} [mailOptions.from] - Sender email (optional, uses default)
+ * @returns {Promise} - Result of email sending
+ */
+const sendEmail = async (mailOptions) => {
+  try {
+    // Set default sender if not provided
+    if (!mailOptions.from) {
+      mailOptions.from = process.env.EMAIL_USER || 'noreply@zoro9x.com';
+    }
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent successfully:', info.messageId);
+    return {
+      success: true,
+      messageId: info.messageId
+    };
+  } catch (error) {
+    console.error('❌ Error sending email:', error);
+    throw error;
+  }
+};
+
+module.exports = {
+  transporter,
+  sendEmail
+};

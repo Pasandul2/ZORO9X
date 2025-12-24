@@ -2,16 +2,20 @@
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 
-/* Custom Cursor Styles */
+/* Default cursor styles restored */
 * {
-  cursor: none !important;
+  cursor: auto;
 }
 
 body {
-  cursor: none !important;
+  cursor: default;
 }
 
-/* Ensure custom cursor is visible on all elements */
-a, button, input, textarea, select {
-  cursor: none !important;
+/* Default cursor behavior for interactive elements */
+a, button {
+  cursor: pointer;
+}
+
+input, textarea, select {
+  cursor: text;
 }

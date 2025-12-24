@@ -221,8 +221,60 @@ const welcomeEmailTemplate = (userName) => {
   return baseTemplate(content);
 };
 
+// Admin Invitation Email Template
+const adminInvitationTemplate = (adminName, email, password, adminPortalUrl) => {
+  const content = `
+    <div class="content">
+      <h1 class="title">🎉 Welcome to Admin Portal</h1>
+      <p class="text">Hi ${adminName},</p>
+      <p class="text">You have been invited to join the <strong>Zoro9x Admin Portal</strong>. Your admin account has been successfully created and is ready to use!</p>
+      
+      <div class="divider"></div>
+      
+      <p class="text"><strong>📋 Your Admin Account Details:</strong></p>
+      <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; border-radius: 8px; font-family: 'Courier New', monospace;">
+        <p style="color: #a0a0a0; margin: 8px 0;"><strong>Email/Username:</strong></p>
+        <p style="color: #3b82f6; font-size: 14px; margin: 8px 0; word-break: break-all;">${email}</p>
+        
+        <p style="color: #a0a0a0; margin: 16px 0 8px 0;"><strong>Temporary Password:</strong></p>
+        <p style="color: #3b82f6; font-size: 14px; margin: 8px 0; word-break: break-all; letter-spacing: 1px;">${password}</p>
+      </div>
+      
+      <div class="divider"></div>
+      
+      <p class="text"><strong>🔐 Security Reminders:</strong></p>
+      <ul style="color: #b0b0b0; margin-left: 20px; margin-bottom: 20px;">
+        <li style="margin-bottom: 8px;">Keep your password secure and do not share it with anyone</li>
+        <li style="margin-bottom: 8px;">Change your password on your first login</li>
+        <li style="margin-bottom: 8px;">Enable two-factor authentication for additional security</li>
+        <li style="margin-bottom: 8px;">Log out when you finish your admin session</li>
+      </ul>
+      
+      <div class="divider"></div>
+      
+      <p class="text"><strong>🚀 Getting Started:</strong></p>
+      <p class="text">Click the button below to access the admin portal and log in with your credentials:</p>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${adminPortalUrl}" style="display: inline-block; background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3);">
+          Access Admin Portal
+        </a>
+      </div>
+      
+      <p class="text"><strong>📞 Need Help?</strong></p>
+      <p class="text">If you encounter any issues logging in or have questions about your admin role, please contact our support team immediately.</p>
+      
+      <div class="divider"></div>
+      
+      <p class="text">Welcome aboard! We look forward to working with you.<br><br><strong>Best regards,<br>The Zoro9x Team</strong></p>
+    </div>
+  `;
+  return baseTemplate(content);
+};
+
 module.exports = {
   verificationEmailTemplate,
   passwordResetTemplate,
-  welcomeEmailTemplate
+  welcomeEmailTemplate,
+  adminInvitationTemplate
 };

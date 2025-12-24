@@ -425,12 +425,12 @@ const PortfolioManagement: React.FC<PortfolioManagementProps> = ({ darkMode }) =
       {/* Add/Edit Modal */}
       <AnimatePresence>
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-y-auto flex items-center justify-center" style={{ top: 0 }}>
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className={`w-full max-w-2xl rounded-xl p-8 ${
+              className={`w-full max-w-2xl rounded-xl p-8 my-auto ${
                 darkMode ? 'bg-gray-800' : 'bg-white'
               }`}
             >

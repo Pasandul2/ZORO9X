@@ -23,6 +23,8 @@ const createAdminTable = async () => {
         password VARCHAR(255) NOT NULL,
         fullName VARCHAR(255) NOT NULL,
         role ENUM('super_admin', 'admin') DEFAULT 'admin',
+        permissions JSON DEFAULT NULL,
+        status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )

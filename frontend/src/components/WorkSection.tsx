@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 interface Project {
   id: number;
@@ -41,18 +42,34 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
   }, []);
 
   const nextSlide = () => {
-    setCurrentIndex((prevIndex) => 
-      prevIndex === projects.length - 2 ? prevIndex : prevIndex + 1
-    );
+    setCurrentIndex((prevIndex) => {
+      // Loop back to the beginning when reaching the end
+      if (prevIndex === projects.length - 1) {
+        return 0;
+      }
+      return prevIndex + 1;
+    });
   };
 
   const prevSlide = () => {
-    setCurrentIndex((prevIndex) => 
-      prevIndex === 1 ? prevIndex : prevIndex -1
-    );
+    setCurrentIndex((prevIndex) => {
+      // Loop to the end when at the beginning
+      if (prevIndex === 0) {
+        return projects.length - 1;
+      }
+      return prevIndex - 1;
+    });
   };
 
-  const visibleProjects = projects.slice(currentIndex -1, currentIndex + 2);
+  const getVisibleProjects = () => {
+    if (projects.length === 0) return [];
+    const prev = (currentIndex - 1 + projects.length) % projects.length;
+    const curr = currentIndex;
+    const next = (currentIndex + 1) % projects.length;
+    return [projects[prev], projects[curr], projects[next]];
+  };
+
+  const visibleProjects = getVisibleProjects();
 
   if (loading) {
     return (
@@ -114,30 +131,31 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
           Explore our recent projects that showcase our expertise in creating exceptional digital experiences.
         </motion.p>
 
-        <div className="relative h-[500px] md:h-[600px] flex items-center ">
+        <div className="relative h-[250px] sm:h-[320px] md:h-[500px] lg:h-[600px] flex items-center justify-center w-full overflow-hidden">
           {/* Navigation arrows */}
           <motion.button 
             onClick={prevSlide}
-            disabled={currentIndex === 1}
-            className="absolute left-0 z-10 bg-white/90 p-3 rounded-full shadow-lg hover:bg-white transition-colors disabled:opacity-50"
+            className="absolute left-2 sm:left-4 md:left-8 top-1/2 -translate-y-1/2 z-20 bg-white/90 p-2 sm:p-3 rounded-full shadow-lg hover:bg-white transition-colors"
             whileHover={{ scale: 1.2 }}
             whileTap={{ scale: 0.9 }}
           >
-            <ChevronLeft className="h-6 w-6 text-gray-900" />
+            <ChevronLeft className="h-5 w-5 sm:h-6 sm:w-6 text-gray-900" />
           </motion.button>
           
-          <div className="w-full flex justify-center items-center gap-6 ">
+          <div className="flex justify-center items-center gap-1 sm:gap-3 md:gap-6 h-full px-14 sm:px-20 md:px-32 w-full">
             {visibleProjects.map((project, index) => (
               <motion.div
                 key={project.id}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ 
-                  opacity: index === 1 ? 1 : 0.8,
-                  scale: index === 1 ? 1.05 : 0.95
+                  opacity: index === 1 ? 1 : 0.5,
+                  scale: index === 1 ? 1 : 0.8
                 }}
                 transition={{ duration: 0.5 }}
-                className={`relative rounded-xl overflow-hidden shadow-2xl transition-all duration-300 ${
-                  index === 1 ? "w-full max-w-2xl h-[450px]" : "w-full max-w-md h-[400px] hidden md:block"
+                className={`relative rounded-lg sm:rounded-xl overflow-hidden shadow-lg transition-all duration-300 flex-shrink-0 ${
+                  index === 1 
+                    ? "w-full max-w-[200px] sm:max-w-md md:max-w-2xl h-[230px] sm:h-[290px] md:h-[450px]" 
+                    : "w-[120px] sm:w-[150px] md:w-[280px] h-[200px] sm:h-[250px] md:h-[400px]"
                 }`}
               >
                 <a href={project.link} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
@@ -148,10 +166,11 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
                     }
                     alt={project.title}
                     className="w-full h-full object-cover"
+                    loading="lazy"
                   />
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-6">
-                    <h3 className="text-xl font-bold text-white">{project.title}</h3>
-                    <p className="text-gray-200 mt-2">{project.description}</p>
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-4 md:p-6">
+                    <h3 className="text-sm sm:text-base md:text-xl font-bold text-white line-clamp-2">{project.title}</h3>
+                    <p className="text-xs sm:text-sm text-gray-200 mt-1 line-clamp-2 hidden sm:block">{project.description}</p>
                   </div>
                 </a>
               </motion.div>
@@ -160,12 +179,11 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
           
           <motion.button 
             onClick={nextSlide}
-            disabled={currentIndex === projects.length - 2}
-            className="absolute right-0 z-10 bg-white/90 p-3 rounded-full shadow-lg hover:bg-white transition-colors disabled:opacity-50"
+            className="absolute right-2 sm:right-4 md:right-8 top-1/2 -translate-y-1/2 z-20 bg-white/90 p-2 sm:p-3 rounded-full shadow-lg hover:bg-white transition-colors"
             whileHover={{ scale: 1.2 }}
             whileTap={{ scale: 0.9 }}
           >
-            <ChevronRight className="h-6 w-6 text-gray-900" />
+            <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6 text-gray-900" />
           </motion.button>
         </div>
 
@@ -186,6 +204,20 @@ export const WorkSection = ({ darkMode }: WorkSectionProps) => {
               }`}
             />
           ))}
+        </div>
+
+        {/* View More Button */}
+        <div className="flex justify-center mt-12">
+          <Link to="/portfolio">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-8 py-3 rounded-lg font-semibold transition-all shadow-lg"
+            >
+              View More Portfolio
+              <ArrowRight className="h-5 w-5" />
+            </motion.button>
+          </Link>
         </div>
         
       </div>

@@ -19,6 +19,7 @@ import Dashboard from './pages/Dashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import UserManagement from './pages/UserManagement';
+import AdminManager from './pages/AdminManager';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import SaaSDashboard from './pages/SaaSDashboard';
@@ -31,6 +32,7 @@ import PortfolioManagement from './components/PortfolioManagement';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
+import ScrollToTopButton from './components/ScrollToTopButton';
 import CustomCursor from './components/CustomCursor';
 
 function AppContent() {
@@ -63,6 +65,7 @@ function AppContent() {
     <AuthProvider>
       <CustomCursor />
       <ScrollToTop />
+      <ScrollToTopButton />
       <div className={`min-h-screen ${
         isAdminLogin
           ? (adminDarkMode ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' : 'bg-gray-50 text-gray-900')
@@ -93,6 +96,7 @@ function AppContent() {
               <Routes>
                 <Route path="/admin/dashboard" element={<AdminDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/users" element={<UserManagement />} />
+                <Route path="/admin/admins" element={<AdminManager darkMode={adminDarkMode} />} />
                 <Route path="/admin/saas" element={<SaaSDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/portfolio" element={<PortfolioManagement darkMode={adminDarkMode} />} />
                 <Route path="/admin/analytics" element={<Analytics />} />

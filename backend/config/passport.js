@@ -9,7 +9,7 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const bcrypt = require('bcryptjs');
 const { pool } = require('./database');
-const transporter = require('./email');
+const { transporter, sendEmail } = require('./email');
 const { welcomeEmailTemplate } = require('../utils/emailTemplates');
 
 // ============================================

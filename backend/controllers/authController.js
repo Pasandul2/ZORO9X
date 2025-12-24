@@ -7,7 +7,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const transporter = require('../config/email');
+const { transporter, sendEmail } = require('../config/email');
 const { verificationEmailTemplate, passwordResetTemplate, welcomeEmailTemplate } = require('../utils/emailTemplates');
 
 // ============================================
