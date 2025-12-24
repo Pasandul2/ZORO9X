@@ -50,7 +50,16 @@ const SystemsMarketplace: React.FC<SystemsMarketplaceProps> = ({ darkMode }) => 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/systems`);
       if (response.ok) {
         const data = await response.json();
-        setSystems(data.systems);
+        // Ensure features is always an array
+        const systemsWithParsedFeatures = data.systems.map((system: any) => ({
+          ...system,
+          features: Array.isArray(system.features) 
+            ? system.features 
+            : typeof system.features === 'string' 
+            ? JSON.parse(system.features || '[]')
+            : []
+        }));
+        setSystems(systemsWithParsedFeatures);
       }
       setLoading(false);
     } catch (error) {
@@ -64,7 +73,16 @@ const SystemsMarketplace: React.FC<SystemsMarketplaceProps> = ({ darkMode }) => 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/systems/${systemId}`);
       if (response.ok) {
         const data = await response.json();
-        setSelectedSystem(data.system);
+        // Ensure features is always an array
+        const systemWithParsedFeatures = {
+          ...data.system,
+          features: Array.isArray(data.system.features) 
+            ? data.system.features 
+            : typeof data.system.features === 'string' 
+            ? JSON.parse(data.system.features || '[]')
+            : []
+        };
+        setSelectedSystem(systemWithParsedFeatures);
       }
     } catch (error) {
       console.error('Error fetching system details:', error);
@@ -277,13 +295,13 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index, onViewDetails, onP
           Key Features:
         </h4>
         <div className="space-y-2">
-          {system.features.slice(0, 4).map((feature: string, idx: number) => (
+          {(Array.isArray(system.features) ? system.features : []).slice(0, 4).map((feature: string, idx: number) => (
             <div key={idx} className="flex items-start gap-2">
               <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
               <span className="text-sm">{feature}</span>
             </div>
           ))}
-          {system.features.length > 4 && (
+          {Array.isArray(system.features) && system.features.length > 4 && (
             <p className="text-xs text-purple-400 pl-6">
               +{system.features.length - 4} more features
             </p>
@@ -345,7 +363,7 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index, onViewDetails, onP
                   </div>
                   
                   {/* Plan-specific Features */}
-                  {plan.features && plan.features.length > 0 && (
+                  {plan.features && Array.isArray(plan.features) && plan.features.length > 0 && (
                     <div className="mt-3 space-y-1">
                       {plan.features.slice(0, 3).map((feature: string, fIdx: number) => (
                         <div key={fIdx} className="flex items-start gap-2 text-xs">

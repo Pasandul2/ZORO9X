@@ -67,7 +67,8 @@ const authenticateAdmin = (req, res, next) => {
     return res.status(401).json({ message: 'Authentication required' });
   }
   
-  if (req.user.role !== 'admin') {
+  // Check if user has admin or super_admin role
+  if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
     return res.status(403).json({ message: 'Admin access required' });
   }
   

@@ -38,6 +38,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients'>('overview');
   const [showAddSystem, setShowAddSystem] = useState(false);
   const [showEditSystem, setShowEditSystem] = useState(false);
+  const [showManagePlans, setShowManagePlans] = useState(false);
   const [selectedSystem, setSelectedSystem] = useState<System | null>(null);
   const navigate = useNavigate();
 
@@ -68,7 +69,16 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       const systemsResponse = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/systems`);
       if (systemsResponse.ok) {
         const systemsData = await systemsResponse.json();
-        setSystems(systemsData.systems);
+        // Ensure features is always an array
+        const systemsWithParsedFeatures = systemsData.systems.map((system: any) => ({
+          ...system,
+          features: Array.isArray(system.features) 
+            ? system.features 
+            : typeof system.features === 'string' 
+            ? JSON.parse(system.features || '[]')
+            : []
+        }));
+        setSystems(systemsWithParsedFeatures);
       }
 
       // Fetch clients
@@ -189,6 +199,18 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
           />
         )}
 
+        {/* Manage Plans Modal */}
+        {showManagePlans && selectedSystem && (
+          <ManagePlansModal
+            darkMode={darkMode}
+            system={selectedSystem}
+            onClose={() => {
+              setShowManagePlans(false);
+              setSelectedSystem(null);
+            }}
+          />
+        )}
+
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <motion.div
@@ -280,10 +302,14 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                     setSelectedSystem(system);
                     setShowEditSystem(true);
                   }}
+                  onManagePlans={() => {
+                    setSelectedSystem(system);
+                    setShowManagePlans(true);
+                  }}
                   onDelete={async (id: number) => {
                     if (confirm('Are you sure you want to delete this system?')) {
                       try {
-                        const response = await fetch(`http://localhost:3000/api/saas/admin/systems/${id}`, {
+                        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${id}`, {
                           method: 'DELETE',
                           headers: {
                             'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
@@ -385,7 +411,7 @@ const StatCard: React.FC<any> = ({ title, value, icon, color, darkMode }) => {
 };
 
 // System Card Component
-const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onDelete }) => {
+const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, onDelete }) => {
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
@@ -415,19 +441,26 @@ const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onDelete }) => {
         {system.description}
       </p>
       
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <button
           onClick={onEdit}
-          className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg flex items-center justify-center gap-2"
+          className="bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg flex items-center justify-center gap-1 text-sm"
         >
-          <Edit className="w-4 h-4" />
+          <Edit className="w-3 h-3" />
           Edit
         </button>
         <button
-          onClick={() => onDelete(system.id)}
-          className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg flex items-center justify-center gap-2"
+          onClick={onManagePlans}
+          className="bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg flex items-center justify-center gap-1 text-sm"
         >
-          <Trash2 className="w-4 h-4" />
+          <Package className="w-3 h-3" />
+          Plans
+        </button>
+        <button
+          onClick={() => onDelete(system.id)}
+          className="bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg flex items-center justify-center gap-1 text-sm"
+        >
+          <Trash2 className="w-3 h-3" />
           Delete
         </button>
       </div>
@@ -454,7 +487,7 @@ const AddSystemModal: React.FC<any> = ({ darkMode, onClose, onSuccess }) => {
 
     try {
       const featuresArray = formData.features.split('\n').filter((f: string) => f.trim());
-      const response = await fetch('http://localhost:3000/api/saas/admin/systems', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -480,11 +513,11 @@ const AddSystemModal: React.FC<any> = ({ darkMode, onClose, onSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-2xl rounded-2xl p-8 ${
+        className={`w-full max-w-2xl rounded-2xl p-8 my-8 ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}
       >
@@ -638,7 +671,7 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
 
     try {
       const featuresArray = formData.features.split('\n').filter((f: string) => f.trim());
-      const response = await fetch(`http://localhost:3000/api/saas/admin/systems/${system.id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${system.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -664,11 +697,11 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-2xl rounded-2xl p-8 max-h-[90vh] overflow-y-auto ${
+        className={`w-full max-w-2xl rounded-2xl p-8 my-8 ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}
       >
@@ -806,6 +839,363 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
             </button>
           </div>
         </form>
+      </motion.div>
+    </div>
+  );
+};
+
+// Manage Plans Modal
+const ManagePlansModal: React.FC<any> = ({ darkMode, system, onClose }) => {
+  const [plans, setPlans] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddPlan, setShowAddPlan] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any>(null);
+
+  const [planForm, setPlanForm] = useState({
+    name: '',
+    description: '',
+    price: '',
+    billing_cycle: 'monthly',
+    features: '',
+    max_users: '',
+    max_storage_gb: '',
+    support_level: 'email'
+  });
+
+  useEffect(() => {
+    fetchPlans();
+  }, []);
+
+  const fetchPlans = async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/systems/${system.id}/plans`);
+      if (response.ok) {
+        const data = await response.json();
+        setPlans(data.plans || []);
+      }
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching plans:', error);
+      setLoading(false);
+    }
+  };
+
+  const handleAddPlan = () => {
+    setPlanForm({
+      name: '',
+      description: '',
+      price: '',
+      billing_cycle: 'monthly',
+      features: '',
+      max_users: '',
+      max_storage_gb: '',
+      support_level: 'email'
+    });
+    setEditingPlan(null);
+    setShowAddPlan(true);
+  };
+
+  const handleEditPlan = (plan: any) => {
+    setPlanForm({
+      name: plan.name,
+      description: plan.description,
+      price: plan.price.toString(),
+      billing_cycle: plan.billing_cycle,
+      features: Array.isArray(plan.features) ? plan.features.join('\n') : '',
+      max_users: plan.max_users?.toString() || '',
+      max_storage_gb: plan.max_storage_gb?.toString() || '',
+      support_level: plan.support_level || 'email'
+    });
+    setEditingPlan(plan);
+    setShowAddPlan(true);
+  };
+
+  const handleSavePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const featuresArray = planForm.features.split('\n').filter((f: string) => f.trim());
+      const payload = {
+        system_id: system.id,
+        name: planForm.name,
+        description: planForm.description,
+        price: parseFloat(planForm.price),
+        billing_cycle: planForm.billing_cycle,
+        features: JSON.stringify(featuresArray),
+        max_users: parseInt(planForm.max_users) || null,
+        max_storage_gb: parseFloat(planForm.max_storage_gb) || null,
+        support_level: planForm.support_level
+      };
+
+      const url = editingPlan 
+        ? `${import.meta.env.VITE_API_URL}/api/saas/admin/plans/${editingPlan.id}`
+        : `${import.meta.env.VITE_API_URL}/api/saas/admin/plans`;
+      
+      const response = await fetch(url, {
+        method: editingPlan ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        setShowAddPlan(false);
+        fetchPlans();
+      } else {
+        alert('Failed to save plan');
+      }
+    } catch (error) {
+      console.error('Error saving plan:', error);
+      alert('An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeletePlan = async (planId: number) => {
+    if (!confirm('Are you sure you want to delete this plan?')) return;
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/plans/${planId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+        }
+      });
+
+      if (response.ok) {
+        fetchPlans();
+      }
+    } catch (error) {
+      console.error('Error deleting plan:', error);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className={`w-full max-w-4xl rounded-2xl p-8 my-8 ${
+          darkMode ? 'bg-gray-800' : 'bg-white'
+        }`}
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-2xl font-bold">Manage Plans</h2>
+            <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              {system.name}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {!showAddPlan ? (
+          <>
+            <button
+              onClick={handleAddPlan}
+              className="w-full mb-4 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg flex items-center justify-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              Add New Plan
+            </button>
+
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+              </div>
+            ) : plans.length === 0 ? (
+              <p className={`text-center py-8 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                No plans yet. Add your first plan!
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {plans.map((plan) => (
+                  <div
+                    key={plan.id}
+                    className={`p-4 rounded-lg border ${
+                      darkMode ? 'bg-gray-700 border-purple-500/20' : 'bg-gray-50 border-purple-200'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold">{plan.name}</h3>
+                        <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                          {plan.description}
+                        </p>
+                        <div className="flex gap-4 mt-2 text-sm">
+                          <span className="text-purple-400 font-bold">${plan.price}/{plan.billing_cycle}</span>
+                          <span>Max Users: {plan.max_users || 'Unlimited'}</span>
+                          <span>Storage: {plan.max_storage_gb || 'Unlimited'}GB</span>
+                          <span>Support: {plan.support_level}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEditPlan(plan)}
+                          className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePlan(plan.id)}
+                          className="p-2 bg-red-600 hover:bg-red-500 text-white rounded"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <form onSubmit={handleSavePlan} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Plan Name</label>
+                <input
+                  type="text"
+                  required
+                  value={planForm.name}
+                  onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                  placeholder="e.g., Basic, Pro, Enterprise"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Price</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={planForm.price}
+                  onChange={(e) => setPlanForm({ ...planForm, price: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                  placeholder="99.99"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Description</label>
+              <textarea
+                required
+                value={planForm.description}
+                onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
+                className={`w-full px-4 py-3 rounded-lg ${
+                  darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                }`}
+                rows={2}
+                placeholder="Plan description..."
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Billing Cycle</label>
+                <select
+                  value={planForm.billing_cycle}
+                  onChange={(e) => setPlanForm({ ...planForm, billing_cycle: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                  <option value="quarterly">Quarterly</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Support Level</label>
+                <select
+                  value={planForm.support_level}
+                  onChange={(e) => setPlanForm({ ...planForm, support_level: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                >
+                  <option value="email">Email</option>
+                  <option value="priority">Priority</option>
+                  <option value="24/7">24/7</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Max Users</label>
+                <input
+                  type="number"
+                  value={planForm.max_users}
+                  onChange={(e) => setPlanForm({ ...planForm, max_users: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                  placeholder="Leave empty for unlimited"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Storage (GB)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={planForm.max_storage_gb}
+                  onChange={(e) => setPlanForm({ ...planForm, max_storage_gb: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-lg ${
+                    darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                  }`}
+                  placeholder="Leave empty for unlimited"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Features (one per line)</label>
+              <textarea
+                value={planForm.features}
+                onChange={(e) => setPlanForm({ ...planForm, features: e.target.value })}
+                className={`w-full px-4 py-3 rounded-lg ${
+                  darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
+                }`}
+                rows={4}
+                placeholder="Feature 1&#10;Feature 2&#10;Feature 3"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAddPlan(false)}
+                className={`flex-1 py-3 rounded-lg ${
+                  darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg disabled:opacity-50"
+              >
+                {loading ? 'Saving...' : editingPlan ? 'Update Plan' : 'Create Plan'}
+              </button>
+            </div>
+          </form>
+        )}
       </motion.div>
     </div>
   );

@@ -90,41 +90,55 @@ router.post('/validate-key', saasController.validateApiKey);
  * Get admin dashboard statistics
  * Requires admin authentication
  */
-router.get('/admin/dashboard', authenticateAdmin, saasController.getDashboardStats);
+router.get('/admin/dashboard', authenticateToken, authenticateAdmin, saasController.getDashboardStats);
 
 /**
  * GET /api/saas/admin/clients
  * Get all clients and their subscriptions
  * Requires admin authentication
  */
-router.get('/admin/clients', authenticateAdmin, saasController.getAllClientsAndSubscriptions);
+router.get('/admin/clients', authenticateToken, authenticateAdmin, saasController.getAllClientsAndSubscriptions);
 
 /**
  * POST /api/saas/admin/systems
  * Create a new system
  * Requires admin authentication
  */
-router.post('/admin/systems', authenticateAdmin, saasController.createSystem);
+router.post('/admin/systems', authenticateToken, authenticateAdmin, saasController.createSystem);
 
 /**
  * PUT /api/saas/admin/systems/:id
  * Update a system
  * Requires admin authentication
  */
-router.put('/admin/systems/:id', authenticateAdmin, saasController.updateSystem);
+router.put('/admin/systems/:id', authenticateToken, authenticateAdmin, saasController.updateSystem);
 
 /**
  * DELETE /api/saas/admin/systems/:id
  * Delete a system
  * Requires admin authentication
  */
-router.delete('/admin/systems/:id', authenticateAdmin, saasController.deleteSystem);
+router.delete('/admin/systems/:id', authenticateToken, authenticateAdmin, saasController.deleteSystem);
 
 /**
  * POST /api/saas/admin/plans
  * Create a new subscription plan
  * Requires admin authentication
  */
-router.post('/admin/plans', authenticateAdmin, saasController.createPlan);
+router.post('/admin/plans', authenticateToken, authenticateAdmin, saasController.createPlan);
+
+/**
+ * PUT /api/saas/admin/plans/:id
+ * Update a subscription plan
+ * Requires admin authentication
+ */
+router.put('/admin/plans/:id', authenticateToken, authenticateAdmin, saasController.updatePlan);
+
+/**
+ * DELETE /api/saas/admin/plans/:id
+ * Delete a subscription plan
+ * Requires admin authentication
+ */
+router.delete('/admin/plans/:id', authenticateToken, authenticateAdmin, saasController.deletePlan);
 
 module.exports = router;

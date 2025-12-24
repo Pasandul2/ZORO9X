@@ -664,3 +664,64 @@ exports.getDashboardStats = async (req, res) => {
     });
   }
 };
+
+/**
+ * Update a subscription plan
+ */
+exports.updatePlan = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, price, billing_cycle, features, max_users, max_storage_gb, support_level } = req.body;
+    
+    await pool.execute(
+      'UPDATE subscription_plans SET name = ?, description = ?, price = ?, billing_cycle = ?, features = ?, max_users = ?, max_storage_gb = ?, support_level = ? WHERE id = ?',
+      [name, description, price, billing_cycle, features, max_users, max_storage_gb, support_level, id]
+    );
+    
+    res.json({
+      success: true,
+      message: 'Plan updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating plan:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update plan'
+    });
+  }
+};
+
+/**
+ * Delete a subscription plan
+ */
+exports.deletePlan = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if plan is being used by any active subscriptions
+    const [subscriptions] = await pool.execute(
+      'SELECT COUNT(*) as count FROM client_subscriptions WHERE plan_id = ? AND status = ?',
+      [id, 'active']
+    );
+    
+    if (subscriptions[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete plan with active subscriptions'
+      });
+    }
+    
+    await pool.execute('DELETE FROM subscription_plans WHERE id = ?', [id]);
+    
+    res.json({
+      success: true,
+      message: 'Plan deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting plan:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete plan'
+    });
+  }
+};

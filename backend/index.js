@@ -19,6 +19,7 @@ const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
 const portfolioRoutes = require('./routes/portfolio');
+const saasRoutes = require('./routes/saas');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -99,6 +100,9 @@ app.use('/api/admin', adminRoutes);
 
 // Portfolio routes (public and admin)
 app.use('/api/portfolio', portfolioRoutes);
+
+// SaaS routes (systems, subscriptions, admin)
+app.use('/api/saas', saasRoutes);
 
 // ============================================
 // ERROR HANDLING MIDDLEWARE
