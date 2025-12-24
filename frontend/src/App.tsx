@@ -32,6 +32,7 @@ import PortfolioManagement from './components/PortfolioManagement';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
+import ScrollToTopButton from './components/ScrollToTopButton';
 import CustomCursor from './components/CustomCursor';
 
 function AppContent() {
@@ -64,6 +65,7 @@ function AppContent() {
     <AuthProvider>
       <CustomCursor />
       <ScrollToTop />
+      <ScrollToTopButton />
       <div className={`min-h-screen ${
         isAdminLogin
           ? (adminDarkMode ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white' : 'bg-gray-50 text-gray-900')
