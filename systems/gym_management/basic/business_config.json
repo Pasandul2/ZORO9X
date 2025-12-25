@@ -1,0 +1,20 @@
+{
+  "api_key": "test_api_key_12345678901234567890123456789012",
+  "company_name": "Test Gym",
+  "subscription_id": 1,
+  "plan": "Basic Plan",
+  "tier": "basic",
+  "start_date": "2025-01-01",
+  "end_date": "2026-12-31",
+  "business_details": {
+    "name": "Test Gym Company",
+    "address": "123 Test Street, Test City",
+    "phone": "+1234567890",
+    "email": "test@testgym.com",
+    "has_logo": false
+  },
+  "database_config": {
+    "database_name": "test_gym_db",
+    "subdomain": "testgym"
+  }
+}

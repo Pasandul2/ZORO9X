@@ -18,8 +18,8 @@ class InstallationWizard:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("ZORO9X Gym Management - Installation Wizard")
-        self.root.geometry("700x600")
-        self.root.configure(bg='#1a1a2e')
+        self.root.geometry("750x550")
+        self.root.configure(bg='#f5f7fa')
         self.root.resizable(False, False)
         
         self.current_step = 0
@@ -56,69 +56,98 @@ class InstallationWizard:
         return {}
     
     def create_ui(self):
-        """Create the main UI structure"""
-        # Header
-        header = tk.Frame(self.root, bg='#6c5ce7', height=80)
+        """Create the main UI structure with modern design"""
+        # Modern header
+        header = tk.Frame(self.root, bg='#2563eb', height=70)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         
         title = tk.Label(
             header,
             text="🏋️ ZORO9X Gym Management System",
-            font=('Arial', 20, 'bold'),
-            bg='#6c5ce7',
+            font=('Segoe UI', 16, 'bold'),
+            bg='#2563eb',
             fg='white'
         )
-        title.pack(pady=25)
+        title.pack(pady=10)
         
-        # Content frame
-        self.content_frame = tk.Frame(self.root, bg='#1a1a2e')
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=30)
+        subtitle = tk.Label(
+            header,
+            text="Installation Wizard",
+            font=('Segoe UI', 9),
+            bg='#2563eb',
+            fg='#dbeafe'
+        )
+        subtitle.pack()
         
-        # Footer with buttons
-        footer = tk.Frame(self.root, bg='#16213e', height=70)
+        # Content frame with card-like appearance
+        content_container = tk.Frame(self.root, bg='#f5f7fa')
+        content_container.pack(fill=tk.BOTH, expand=True, padx=25, pady=10)
+        
+        self.content_frame = tk.Frame(content_container, bg='white', relief=tk.SOLID, bd=1)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.content_frame.config(highlightbackground='#e2e8f0', highlightcolor='#e2e8f0')
+        
+        # Footer with modern buttons
+        footer = tk.Frame(self.root, bg='white', height=60)
         footer.pack(fill=tk.X, side=tk.BOTTOM)
         footer.pack_propagate(False)
         
+        # Add separator line
+        separator = tk.Frame(footer, bg='#e2e8f0', height=1)
+        separator.pack(fill=tk.X)
+        
+        button_frame = tk.Frame(footer, bg='white')
+        button_frame.pack(fill=tk.BOTH, expand=True)
+        
         self.back_btn = tk.Button(
-            footer,
-            text="← Back",
-            font=('Arial', 11),
-            bg='#0f3460',
-            fg='white',
-            padx=20,
-            pady=10,
+            button_frame,
+            text="←  Back",
+            font=('Segoe UI', 9),
+            bg='#f1f5f9',
+            fg='#64748b',
+            activebackground='#e2e8f0',
+            activeforeground='#475569',
+            bd=0,
+            padx=18,
+            pady=7,
             cursor='hand2',
             command=self.previous_step,
             state=tk.DISABLED
         )
-        self.back_btn.pack(side=tk.LEFT, padx=20, pady=15)
-        
-        self.next_btn = tk.Button(
-            footer,
-            text="Next →",
-            font=('Arial', 11),
-            bg='#6c5ce7',
-            fg='white',
-            padx=20,
-            pady=10,
-            cursor='hand2',
-            command=self.next_step
-        )
-        self.next_btn.pack(side=tk.RIGHT, padx=20, pady=15)
+        self.back_btn.pack(side=tk.LEFT, padx=20, pady=10)
         
         self.cancel_btn = tk.Button(
-            footer,
+            button_frame,
             text="Cancel",
-            font=('Arial', 11),
-            bg='#e74c3c',
-            fg='white',
-            padx=20,
-            pady=10,
+            font=('Segoe UI', 9),
+            bg='#f1f5f9',
+            fg='#64748b',
+            activebackground='#fee2e2',
+            activeforeground='#dc2626',
+            bd=0,
+            padx=18,
+            pady=7,
             cursor='hand2',
             command=self.cancel_installation
         )
-        self.cancel_btn.pack(side=tk.RIGHT, padx=10, pady=15)
+        self.cancel_btn.pack(side=tk.LEFT, padx=5, pady=10)
+        
+        self.next_btn = tk.Button(
+            button_frame,
+            text="Next  →",
+            font=('Segoe UI', 9, 'bold'),
+            bg='#2563eb',
+            fg='white',
+            activebackground='#1d4ed8',
+            activeforeground='white',
+            bd=0,
+            padx=22,
+            pady=7,
+            cursor='hand2',
+            command=self.next_step
+        )
+        self.next_btn.pack(side=tk.RIGHT, padx=20, pady=10)
     
     def clear_content(self):
         """Clear the content frame"""
@@ -137,9 +166,9 @@ class InstallationWizard:
             self.next_btn.pack_forget()
             self.cancel_btn.pack_forget()
         elif self.current_step == len(self.steps) - 2:
-            self.next_btn.config(text="Install", bg='#00b894')
+            self.next_btn.config(text="Install", bg='#10b981')
         else:
-            self.next_btn.config(text="Next →", bg='#6c5ce7')
+            self.next_btn.config(text="Next  →", bg='#2563eb')
     
     def next_step(self):
         """Go to next step"""
@@ -164,31 +193,94 @@ class InstallationWizard:
             self.root.quit()
     
     def welcome_step(self):
-        """Welcome screen"""
-        welcome_text = """
-Welcome to ZORO9X Gym Management System!
-
-This wizard will guide you through the installation process.
-
-Features included in Basic Edition:
-• Member Management
-• Attendance Tracking
-• Payment Management
-• Classes Management
-• Dashboard & Reports
-
-Click 'Next' to continue.
-        """
+        """Welcome screen with modern design"""
+        # Welcome icon and title
+        title_frame = tk.Frame(self.content_frame, bg='white')
+        title_frame.pack(pady=6)
         
-        label = tk.Label(
-            self.content_frame,
-            text=welcome_text,
-            font=('Arial', 12),
-            bg='#1a1a2e',
-            fg='white',
-            justify=tk.LEFT
+        icon_label = tk.Label(
+            title_frame,
+            text="🏋️",
+            font=('Segoe UI', 26),
+            bg='white'
         )
-        label.pack(pady=40)
+        icon_label.pack()
+        
+        title = tk.Label(
+            title_frame,
+            text="Welcome to ZORO9X Gym Management",
+            font=('Segoe UI', 13, 'bold'),
+            bg='white',
+            fg='#1e293b'
+        )
+        title.pack(pady=(4, 2))
+        
+        subtitle = tk.Label(
+            title_frame,
+            text="Professional gym management made simple",
+            font=('Segoe UI', 9),
+            bg='white',
+            fg='#64748b'
+        )
+        subtitle.pack()
+        
+        # Features list with icons
+        features_frame = tk.Frame(self.content_frame, bg='white')
+        features_frame.pack(pady=5, padx=30, fill=tk.X)
+        
+        features_title = tk.Label(
+            features_frame,
+            text="Features Included:",
+            font=('Segoe UI', 10, 'bold'),
+            bg='white',
+            fg='#1e293b',
+            anchor='w'
+        )
+        features_title.pack(anchor='w', pady=(0, 5))
+        
+        features = [
+            ("👥", "Member Management", "Track and manage gym members"),
+            ("📝", "Attendance Tracking", "Monitor check-ins and visits"),
+            ("💰", "Payment Management", "Handle memberships and billing"),
+            ("🏋️", "Classes Management", "Schedule and organize classes"),
+            ("📊", "Dashboard & Reports", "Visualize your gym's performance"),
+        ]
+        
+        for icon, title, desc in features:
+            feature_row = tk.Frame(features_frame, bg='white')
+            feature_row.pack(fill=tk.X, pady=3)
+            
+            icon_label = tk.Label(
+                feature_row,
+                text=icon,
+                font=('Segoe UI', 14),
+                bg='white',
+                width=2
+            )
+            icon_label.pack(side=tk.LEFT, padx=(0, 8))
+            
+            text_frame = tk.Frame(feature_row, bg='white')
+            text_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            title_label = tk.Label(
+                text_frame,
+                text=title,
+                font=('Segoe UI', 9, 'bold'),
+                bg='white',
+                fg='#1e293b',
+                anchor='w'
+            )
+            title_label.pack(anchor='w')
+            
+            desc_label = tk.Label(
+                text_frame,
+                text=desc,
+                font=('Segoe UI', 8),
+                bg='white',
+                fg='#64748b',
+                anchor='w'
+            )
+            desc_label.pack(anchor='w')
     
     def license_agreement_step(self):
         """License agreement screen"""
@@ -249,16 +341,25 @@ By clicking 'Next', you accept the terms of this agreement.
         title = tk.Label(
             self.content_frame,
             text="System Configuration",
-            font=('Arial', 16, 'bold'),
-            bg='#1a1a2e',
-            fg='white'
+            font=('Segoe UI', 16, 'bold'),
+            bg='white',
+            fg='#1e293b'
         )
-        title.pack(pady=20)
+        title.pack(pady=(20, 10))
+        
+        subtitle = tk.Label(
+            self.content_frame,
+            text="Configure your system credentials and database",
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#64748b'
+        )
+        subtitle.pack(pady=(0, 20))
         
         # Scrollable frame for configuration
-        canvas = tk.Canvas(self.content_frame, bg='#1a1a2e', highlightthickness=0)
+        canvas = tk.Canvas(self.content_frame, bg='white', highlightthickness=0)
         scrollbar = tk.Scrollbar(self.content_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='#1a1a2e')
+        scrollable_frame = tk.Frame(canvas, bg='white')
         
         scrollable_frame.bind(
             "<Configure>",
@@ -274,39 +375,43 @@ By clicking 'Next', you accept the terms of this agreement.
         # API Key Section
         api_frame = tk.LabelFrame(
             scrollable_frame,
-            text="API Key Configuration",
-            font=('Arial', 12, 'bold'),
-            bg='#16213e',
-            fg='white',
+            text=" \ud83d\udd11  API Key Configuration",
+            font=('Segoe UI', 11, 'bold'),
+            bg='white',
+            fg='#1e293b',
             padx=20,
-            pady=15
+            pady=15,
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#e2e8f0',
+            highlightthickness=1
         )
-        api_frame.pack(fill='x', pady=(0, 20), padx=10)
+        api_frame.pack(fill='x', pady=(0, 15), padx=10)
         
         # Check if API key is pre-configured
         if self.api_key:
             tk.Label(
                 api_frame,
-                text="✓ API Key: Pre-configured from your purchase",
-                font=('Arial', 11),
-                bg='#16213e',
-                fg='#00b894'
+                text="\u2713 API Key: Pre-configured from your purchase",
+                font=('Segoe UI', 10),
+                bg='white',
+                fg='#10b981'
             ).pack(anchor='w', pady=5)
             
             tk.Label(
                 api_frame,
                 text=f"Key: {self.api_key[:8]}{'*' * 24}",
-                font=('Arial', 10),
-                bg='#16213e',
-                fg='#a8dadc'
+                font=('Segoe UI', 9),
+                bg='white',
+                fg='#64748b'
             ).pack(anchor='w', pady=5)
         else:
             info_label = tk.Label(
                 api_frame,
                 text="Enter your API key from your ZORO9X account:",
-                font=('Arial', 11),
-                bg='#16213e',
-                fg='#a8dadc',
+                font=('Segoe UI', 10),
+                bg='white',
+                fg='#64748b',
                 justify=tk.LEFT
             )
             info_label.pack(anchor='w', pady=(0, 10))
@@ -314,27 +419,33 @@ By clicking 'Next', you accept the terms of this agreement.
             tk.Label(
                 api_frame,
                 text="API Key:",
-                font=('Arial', 11),
-                bg='#16213e',
-                fg='white'
+                font=('Segoe UI', 10, 'bold'),
+                bg='white',
+                fg='#1e293b'
             ).pack(anchor='w', pady=(0, 5))
             
             self.api_key_entry = tk.Entry(
                 api_frame,
-                font=('Arial', 11),
+                font=('Segoe UI', 10),
                 width=45,
-                show='*'
+                show='*',
+                relief=tk.SOLID,
+                bd=1,
+                highlightbackground='#cbd5e1',
+                highlightthickness=1
             )
             self.api_key_entry.pack(fill='x', pady=(0, 10))
             
             self.validate_btn = tk.Button(
                 api_frame,
                 text="Validate API Key",
-                font=('Arial', 10, 'bold'),
-                bg='#3b82f6',
+                font=('Segoe UI', 9, 'bold'),
+                bg='#2563eb',
                 fg='white',
                 relief='flat',
                 cursor='hand2',
+                padx=15,
+                pady=5,
                 command=self.validate_api_key_only
             )
             self.validate_btn.pack(anchor='w')
@@ -342,35 +453,43 @@ By clicking 'Next', you accept the terms of this agreement.
             self.validation_label = tk.Label(
                 api_frame,
                 text="",
-                font=('Arial', 10),
-                bg='#16213e'
+                font=('Segoe UI', 9),
+                bg='white'
             )
             self.validation_label.pack(anchor='w', pady=(5, 0))
         
         # Company Name Section
         company_frame = tk.LabelFrame(
             scrollable_frame,
-            text="Business Information",
-            font=('Arial', 12, 'bold'),
-            bg='#16213e',
-            fg='white',
+            text=" \ud83c\udfdb\ufe0f  Business Information",
+            font=('Segoe UI', 11, 'bold'),
+            bg='white',
+            fg='#1e293b',
             padx=20,
-            pady=15
+            pady=15,
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#e2e8f0',
+            highlightthickness=1
         )
-        company_frame.pack(fill='x', pady=(0, 20), padx=10)
+        company_frame.pack(fill='x', pady=(0, 15), padx=10)
         
         tk.Label(
             company_frame,
             text="Company/Gym Name:",
-            font=('Arial', 11),
-            bg='#16213e',
-            fg='white'
+            font=('Segoe UI', 10, 'bold'),
+            bg='white',
+            fg='#1e293b'
         ).pack(anchor='w', pady=(0, 5))
         
         self.company_entry = tk.Entry(
             company_frame,
-            font=('Arial', 11),
-            width=45
+            font=('Segoe UI', 10),
+            width=45,
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#cbd5e1',
+            highlightthickness=1
         )
         self.company_entry.pack(fill='x')
         
@@ -381,27 +500,35 @@ By clicking 'Next', you accept the terms of this agreement.
         # Database Configuration Section
         db_frame = tk.LabelFrame(
             scrollable_frame,
-            text="Database Configuration",
-            font=('Arial', 12, 'bold'),
-            bg='#16213e',
-            fg='white',
+            text=" \ud83d\udce6  Database Configuration",
+            font=('Segoe UI', 11, 'bold'),
+            bg='white',
+            fg='#1e293b',
             padx=20,
-            pady=15
+            pady=15,
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#e2e8f0',
+            highlightthickness=1
         )
         db_frame.pack(fill='x', padx=10)
         
         tk.Label(
             db_frame,
             text="Database Name:",
-            font=('Arial', 11),
-            bg='#16213e',
-            fg='white'
+            font=('Segoe UI', 10, 'bold'),
+            bg='white',
+            fg='#1e293b'
         ).pack(anchor='w', pady=(0, 5))
         
         self.db_name_entry = tk.Entry(
             db_frame,
-            font=('Arial', 11),
-            width=45
+            font=('Segoe UI', 10),
+            width=45,
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#cbd5e1',
+            highlightthickness=1
         )
         self.db_name_entry.pack(fill='x', pady=(0, 10))
         
@@ -418,19 +545,19 @@ By clicking 'Next', you accept the terms of this agreement.
         
         tk.Label(
             db_frame,
-            text="ℹ The database will be created automatically during installation.\nUse lowercase letters, numbers, and underscores only.",
-            font=('Arial', 9),
-            bg='#16213e',
-            fg='#a8dadc',
+            text="\u2139 The database will be created automatically during installation.\nUse lowercase letters, numbers, and underscores only.",
+            font=('Segoe UI', 9),
+            bg='white',
+            fg='#64748b',
             justify=tk.LEFT
         ).pack(anchor='w', pady=(5, 0))
         
         self.validation_label = tk.Label(
             self.content_frame,
             text="",
-            font=('Arial', 10),
-            bg='#1a1a2e',
-            fg='#e74c3c'
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#ef4444'
         )
         self.validation_label.pack(pady=10)
     
@@ -523,39 +650,63 @@ By clicking 'Next', you accept the terms of this agreement.
         title = tk.Label(
             self.content_frame,
             text="Installation Location",
-            font=('Arial', 16, 'bold'),
-            bg='#1a1a2e',
-            fg='white'
+            font=('Segoe UI', 16, 'bold'),
+            bg='white',
+            fg='#1e293b'
         )
-        title.pack(pady=20)
+        title.pack(pady=(20, 10))
+        
+        subtitle = tk.Label(
+            self.content_frame,
+            text="Choose where to install the application",
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#64748b'
+        )
+        subtitle.pack(pady=(0, 20))
         
         info = tk.Label(
             self.content_frame,
             text="Choose where to install the application:",
-            font=('Arial', 11),
-            bg='#1a1a2e',
-            fg='white'
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#64748b'
         )
         info.pack(pady=10)
         
-        path_frame = tk.Frame(self.content_frame, bg='#1a1a2e')
-        path_frame.pack(pady=20)
+        # Path frame with modern styling
+        path_container = tk.Frame(
+            self.content_frame,
+            bg='white',
+            relief=tk.SOLID,
+            bd=1,
+            highlightbackground='#e2e8f0',
+            highlightthickness=1
+        )
+        path_container.pack(pady=20, padx=40, fill=tk.X)
+        
+        path_frame = tk.Frame(path_container, bg='white')
+        path_frame.pack(pady=10, padx=10, fill=tk.X)
         
         self.path_entry = tk.Entry(
             path_frame,
-            font=('Arial', 11),
-            width=40
+            font=('Segoe UI', 10),
+            width=45,
+            relief=tk.FLAT,
+            bd=0,
+            bg='white'
         )
         self.path_entry.insert(0, self.install_path)
-        self.path_entry.pack(side=tk.LEFT, padx=5)
+        self.path_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         
         browse_btn = tk.Button(
             path_frame,
-            text="Browse...",
-            font=('Arial', 11),
-            bg='#0f3460',
-            fg='white',
-            padx=15,
+            text="\ud83d\udcc2 Browse...",
+            font=('Segoe UI', 9),
+            bg='#f1f5f9',
+            fg='#475569',
+            relief='flat',
+            padx=12,
             pady=5,
             cursor='hand2',
             command=self.browse_location
@@ -564,27 +715,27 @@ By clicking 'Next', you accept the terms of this agreement.
         
         space_label = tk.Label(
             self.content_frame,
-            text="Required space: ~500 MB",
-            font=('Arial', 10),
-            bg='#1a1a2e',
-            fg='#a8dadc'
+            text="\ud83d\udcbe Required space: ~500 MB",
+            font=('Segoe UI', 9),
+            bg='white',
+            fg='#64748b'
         )
         space_label.pack(pady=10)
         
         # Desktop shortcut checkbox
-        shortcut_frame = tk.Frame(self.content_frame, bg='#1a1a2e')
+        shortcut_frame = tk.Frame(self.content_frame, bg='white')
         shortcut_frame.pack(pady=20)
         
         self.shortcut_var = tk.BooleanVar(value=True)
         shortcut_check = tk.Checkbutton(
             shortcut_frame,
-            text="Create desktop shortcut",
-            font=('Arial', 11),
-            bg='#1a1a2e',
-            fg='white',
-            selectcolor='#0f3460',
-            activebackground='#1a1a2e',
-            activeforeground='white',
+            text="\u2713 Create desktop shortcut",
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#1e293b',
+            selectcolor='white',
+            activebackground='white',
+            activeforeground='#2563eb',
             variable=self.shortcut_var,
             cursor='hand2'
         )
@@ -607,30 +758,51 @@ By clicking 'Next', you accept the terms of this agreement.
         
         title = tk.Label(
             self.content_frame,
-            text="Installing...",
-            font=('Arial', 16, 'bold'),
-            bg='#1a1a2e',
-            fg='white'
+            text="Installing",
+            font=('Segoe UI', 18, 'bold'),
+            bg='white',
+            fg='#1e293b'
         )
-        title.pack(pady=20)
+        title.pack(pady=(40, 10))
+        
+        subtitle = tk.Label(
+            self.content_frame,
+            text="Please wait while we install your gym management system...",
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#64748b'
+        )
+        subtitle.pack(pady=(0, 30))
         
         self.progress_label = tk.Label(
             self.content_frame,
             text="Preparing installation...",
-            font=('Arial', 11),
-            bg='#1a1a2e',
-            fg='white'
+            font=('Segoe UI', 10),
+            bg='white',
+            fg='#475569'
         )
         self.progress_label.pack(pady=10)
         
-        progress_bar = tk.Canvas(
+        # Progress bar container with modern styling
+        progress_container = tk.Frame(
             self.content_frame,
-            width=400,
-            height=30,
-            bg='#16213e',
-            highlightthickness=0
+            bg='#e2e8f0',
+            width=420,
+            height=10,
+            relief=tk.FLAT
         )
-        progress_bar.pack(pady=20)
+        progress_container.pack(pady=20, padx=40)
+        progress_container.pack_propagate(False)
+        
+        progress_bar = tk.Canvas(
+            progress_container,
+            width=420,
+            height=10,
+            bg='#e2e8f0',
+            highlightthickness=0,
+            bd=0
+        )
+        progress_bar.pack()
         
         # Start installation in background
         self.root.after(500, lambda: self.perform_installation(progress_bar))
@@ -653,8 +825,8 @@ By clicking 'Next', you accept the terms of this agreement.
                 self.progress_label.config(text=step_text)
                 progress_bar.create_rectangle(
                     0, 0,
-                    progress * 4, 30,
-                    fill='#6c5ce7',
+                    (progress / 100) * 420, 10,
+                    fill='#2563eb',
                     outline=''
                 )
                 self.root.update()
@@ -857,61 +1029,84 @@ By clicking 'Next', you accept the terms of this agreement.
     
     def completion_step(self):
         """Installation completion screen"""
+        # Success icon
+        icon_label = tk.Label(
+            self.content_frame,
+            text="\u2705",
+            font=('Segoe UI', 38),
+            bg='white'
+        )
+        icon_label.pack(pady=(12, 5))
+        
         title = tk.Label(
             self.content_frame,
-            text="✓ Installation Complete!",
-            font=('Arial', 20, 'bold'),
-            bg='#1a1a2e',
-            fg='#00b894'
+            text="Installation Complete!",
+            font=('Segoe UI', 15, 'bold'),
+            bg='white',
+            fg='#10b981'
         )
-        title.pack(pady=30)
+        title.pack(pady=(0, 5))
         
-        shortcut_text = "• Desktop shortcut\n" if self.shortcut_var.get() else ""
+        subtitle = tk.Label(
+            self.content_frame,
+            text="Your gym management system is ready to use",
+            font=('Segoe UI', 9),
+            bg='white',
+            fg='#64748b'
+        )
+        subtitle.pack(pady=(0, 10))
+        
+        shortcut_text = "• Desktop shortcut created\n" if self.shortcut_var.get() else ""
         info = tk.Label(
             self.content_frame,
             text=f"""
-ZORO9X Gym Management System has been successfully installed!
-
-Installation Location:
+\ud83d\udcc1 Installation Location:
 {self.install_path}
 
-You can now launch the application from:
-{shortcut_text}• Installation folder ({self.install_path})
+\u2713 What's installed:
+• Gym Management Application
+• Database Configuration
+• {shortcut_text if shortcut_text else ''}Business Branding
 
-Thank you for choosing ZORO9X!
+\ud83d\ude80 Next Steps:
+1. Click 'Launch' to start the application
+2. Login with your credentials
+3. Start managing your gym!
             """,
-            font=('Arial', 11),
-            bg='#1a1a2e',
-            fg='white',
-            justify=tk.CENTER
+            font=('Segoe UI', 8),
+            bg='white',
+            fg='#475569',
+            justify=tk.LEFT
         )
-        info.pack(pady=20)
+        info.pack(pady=6)
         
         finish_btn = tk.Button(
             self.content_frame,
-            text="🚀 Launch Application",
-            font=('Arial', 13, 'bold'),
-            bg='#6c5ce7',
+            text="\ud83d\ude80  Launch Application",
+            font=('Segoe UI', 9, 'bold'),
+            bg='#2563eb',
             fg='white',
-            padx=30,
-            pady=15,
+            relief='flat',
+            padx=22,
+            pady=7,
             cursor='hand2',
             command=self.launch_and_exit
         )
-        finish_btn.pack(pady=20)
+        finish_btn.pack(pady=8)
         
         close_btn = tk.Button(
             self.content_frame,
             text="Close Installer",
-            font=('Arial', 11),
-            bg='#0f3460',
-            fg='white',
-            padx=20,
-            pady=10,
+            font=('Segoe UI', 8),
+            bg='#f1f5f9',
+            fg='#64748b',
+            relief='flat',
+            padx=18,
+            pady=6,
             cursor='hand2',
             command=self.root.quit
         )
-        close_btn.pack(pady=10)
+        close_btn.pack(pady=4)
     
     def launch_and_exit(self):
         """Launch the application and exit installer"""

@@ -345,81 +345,131 @@ class GymManagementApp:
         conn.close()
     
     def create_main_ui(self):
-        """Create the main application UI"""
+        """Create the main application UI with modern design"""
         # Create main container
-        main_frame = tk.Frame(self.root, bg='#1a1a2e')
+        main_frame = tk.Frame(self.root, bg='#f5f7fa')
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Header
-        header = tk.Frame(main_frame, bg='#16213e', height=80)
-        header.pack(fill=tk.X)
-        header.pack_propagate(False)
-        
-        # Logo (if available)
-        if self.logo_image:
-            logo_label = tk.Label(
-                header,
-                image=self.logo_image,
-                bg='#16213e'
-            )
-            logo_label.pack(side=tk.LEFT, padx=20, pady=10)
-        
-        title_label = tk.Label(
-            header,
-            text=f"🏋️ {self.company_name}",
-            font=('Arial', 24, 'bold'),
-            bg='#16213e',
-            fg='white'
-        )
-        title_label.pack(side=tk.LEFT, padx=(0 if self.logo_image else 20, 20), pady=20)
-        
-        edition_label = tk.Label(
-            header,
-            text="Basic Edition",
-            font=('Arial', 12),
-            bg='#16213e',
-            fg='#a8dadc'
-        )
-        edition_label.pack(side=tk.LEFT, pady=20)
-        
         # Sidebar
-        sidebar = tk.Frame(main_frame, bg='#0f3460', width=250)
+        sidebar = tk.Frame(main_frame, bg='#2563eb', width=250)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
         
-        # Content area
-        self.content_frame = tk.Frame(main_frame, bg='#1a1a2e')
-        self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Logo and company name in sidebar
+        logo_frame = tk.Frame(sidebar, bg='#1d4ed8', height=100)
+        logo_frame.pack(fill=tk.X)
+        logo_frame.pack_propagate(False)
         
-        # Sidebar buttons
-        buttons = [
-            ("📊 Dashboard", self.show_dashboard),
-            ("👥 Members", self.show_members),
-            ("✅ Attendance", self.show_attendance),
-            ("💰 Payments", self.show_payments),
-            ("🏃 Classes", self.show_classes),
-            ("📈 Reports", self.show_reports),
+        if self.logo_image:
+            logo_label = tk.Label(
+                logo_frame,
+                image=self.logo_image,
+                bg='#1d4ed8'
+            )
+            logo_label.pack(pady=10)
+        
+        company_label = tk.Label(
+            logo_frame,
+            text=self.company_name,
+            font=('Segoe UI', 14, 'bold'),
+            bg='#1d4ed8',
+            fg='white'
+        )
+        company_label.pack(pady=(0 if self.logo_image else 20, 10))
+        
+        # Navigation menu
+        nav_frame = tk.Frame(sidebar, bg='#2563eb')
+        nav_frame.pack(fill=tk.BOTH, expand=True, pady=20)
+        
+        nav_items = [
+            ("Dashboard", "📊", self.show_dashboard),
+            ("Members", "👥", self.show_members),
+            ("Attendance", "📝", self.show_attendance),
+            ("Payments", "💰", self.show_payments),
+            ("Classes", "🏋️", self.show_classes),
         ]
         
-        for text, command in buttons:
+        for text, icon, command in nav_items:
             btn = tk.Button(
-                sidebar,
-                text=text,
-                font=('Arial', 12),
-                bg='#0f3460',
+                nav_frame,
+                text=f"  {icon}  {text}",
+                font=('Segoe UI', 11),
+                bg='#2563eb',
                 fg='white',
-                activebackground='#1a508b',
+                activebackground='#1d4ed8',
                 activeforeground='white',
                 bd=0,
                 padx=20,
                 pady=15,
-                anchor='w',
                 cursor='hand2',
+                anchor='w',
                 command=command
             )
-            btn.pack(fill=tk.X, pady=2)
-            btn.bind('<Enter>', lambda e, b=btn: b.config(bg='#1a508b'))
-            btn.bind('<Leave>', lambda e, b=btn: b.config(bg='#0f3460'))
+            btn.pack(fill=tk.X, padx=10, pady=2)
+            btn.bind('<Enter>', lambda e, b=btn: b.config(bg='#1d4ed8'))
+            btn.bind('<Leave>', lambda e, b=btn: b.config(bg='#2563eb'))
+        
+        # Logout button at bottom
+        logout_btn = tk.Button(
+            sidebar,
+            text="  🚪  Logout",
+            font=('Segoe UI', 11, 'bold'),
+            bg='#dc2626',
+            fg='white',
+            activebackground='#b91c1c',
+            activeforeground='white',
+            bd=0,
+            padx=20,
+            pady=15,
+            cursor='hand2',
+            command=self.root.quit
+        )
+        logout_btn.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        
+        # Main content area
+        content_container = tk.Frame(main_frame, bg='#f5f7fa')
+        content_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Top header bar
+        top_header = tk.Frame(content_container, bg='white', height=70)
+        top_header.pack(fill=tk.X)
+        top_header.pack_propagate(False)
+        
+        # Page title
+        self.page_title = tk.Label(
+            top_header,
+            text="Dashboard",
+            font=('Segoe UI', 20, 'bold'),
+            bg='white',
+            fg='#1e293b'
+        )
+        self.page_title.pack(side=tk.LEFT, padx=30, pady=20)
+        
+        # Current time and date
+        time_frame = tk.Frame(top_header, bg='white')
+        time_frame.pack(side=tk.RIGHT, padx=30)
+        
+        time_label = tk.Label(
+            time_frame,
+            text=datetime.now().strftime('%I:%M:%S %p'),
+            font=('Segoe UI', 12, 'bold'),
+            bg='white',
+            fg='#2563eb'
+        )
+        time_label.pack()
+        
+        date_label = tk.Label(
+            time_frame,
+            text=datetime.now().strftime('%A, %B %d, %Y'),
+            font=('Segoe UI', 9),
+            bg='white',
+            fg='#64748b'
+        )
+        date_label.pack()
+        
+        # Content frame
+        self.content_frame = tk.Frame(content_container, bg='#f5f7fa')
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Show dashboard by default
         self.show_dashboard()
@@ -430,22 +480,13 @@ class GymManagementApp:
             widget.destroy()
     
     def show_dashboard(self):
-        """Show dashboard with statistics"""
+        """Show dashboard with modern card statistics"""
         self.clear_content()
+        self.page_title.config(text="Dashboard")
         
-        # Title
-        title = tk.Label(
-            self.content_frame,
-            text="Dashboard",
-            font=('Arial', 24, 'bold'),
-            bg='#1a1a2e',
-            fg='white'
-        )
-        title.pack(pady=20)
-        
-        # Statistics cards
-        cards_frame = tk.Frame(self.content_frame, bg='#1a1a2e')
-        cards_frame.pack(pady=20)
+        # Statistics cards container
+        cards_container = tk.Frame(self.content_frame, bg='#f5f7fa')
+        cards_container.pack(fill=tk.X, pady=(0, 20))
         
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
@@ -460,55 +501,119 @@ class GymManagementApp:
         cursor.execute("SELECT SUM(amount) FROM payments WHERE DATE(payment_date) = DATE('now')")
         today_revenue = cursor.fetchone()[0] or 0
         
-        cursor.execute("SELECT COUNT(*) FROM members WHERE DATE(join_date) >= DATE('now', '-7 days')")
-        new_members = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM memberships WHERE status='active' AND DATE(end_date) <= DATE('now', '+7 days')")
+        expiring_soon = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT SUM(amount) FROM payments WHERE DATE(payment_date, 'start of month') = DATE('now', 'start of month')")
+        month_revenue = cursor.fetchone()[0] or 0
         
         conn.close()
         
-        # Create stat cards
+        # Create modern stat cards
         stats = [
-            ("Active Members", str(active_members), "#6c5ce7"),
-            ("Today's Check-ins", str(today_attendance), "#00b894"),
-            ("Today's Revenue", f"${today_revenue:.2f}", "#fdcb6e"),
-            ("New Members (7d)", str(new_members), "#74b9ff"),
+            ("👥", "Active Members", str(active_members), "#3b82f6", "Members"),
+            ("📝", "Today's Check-ins", str(today_attendance), "#10b981", "Check-ins"),
+            ("💰", "Today's Revenue", f"${today_revenue:.2f}", "#f59e0b", "Revenue"),
+            ("⏰", "Expiring Soon", str(expiring_soon), "#ef4444", "Memberships"),
+            ("📊", "Monthly Revenue", f"${month_revenue:.2f}", "#8b5cf6", "This Month"),
         ]
         
-        for i, (label, value, color) in enumerate(stats):
-            card = tk.Frame(cards_frame, bg=color, width=250, height=120)
-            card.grid(row=0, column=i, padx=15, pady=10)
-            card.pack_propagate(False)
+        for i, (icon, label, value, color, subtitle) in enumerate(stats):
+            card = tk.Frame(cards_container, bg='white', relief=tk.SOLID, bd=1, highlightthickness=0)
+            card.grid(row=i//3, column=i%3, padx=10, pady=10, sticky='ew')
+            card.config(highlightbackground='#e2e8f0', highlightcolor='#e2e8f0')
             
-            value_label = tk.Label(
-                card,
-                text=value,
-                font=('Arial', 32, 'bold'),
+            # Configure grid to make cards responsive
+            cards_container.grid_columnconfigure(i%3, weight=1)
+            
+            # Icon background (rounded square look)
+            icon_frame = tk.Frame(card, bg=color, width=60, height=60)
+            icon_frame.pack(side=tk.LEFT, padx=20, pady=20)
+            icon_frame.pack_propagate(False)
+            
+            icon_label = tk.Label(
+                icon_frame,
+                text=icon,
+                font=('Segoe UI', 24),
                 bg=color,
                 fg='white'
             )
-            value_label.pack(pady=10)
+            icon_label.place(relx=0.5, rely=0.5, anchor='center')
             
-            text_label = tk.Label(
-                card,
+            # Stats text
+            stats_frame = tk.Frame(card, bg='white')
+            stats_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 20), pady=20)
+            
+            label_text = tk.Label(
+                stats_frame,
                 text=label,
-                font=('Arial', 12),
-                bg=color,
-                fg='white'
+                font=('Segoe UI', 10),
+                bg='white',
+                fg='#64748b',
+                anchor='w'
             )
-            text_label.pack()
+            label_text.pack(anchor='w')
+            
+            value_text = tk.Label(
+                stats_frame,
+                text=value,
+                font=('Segoe UI', 22, 'bold'),
+                bg='white',
+                fg='#1e293b',
+                anchor='w'
+            )
+            value_text.pack(anchor='w')
+        
+        # Quick Actions section
+        actions_label = tk.Label(
+            self.content_frame,
+            text="Quick Actions",
+            font=('Segoe UI', 16, 'bold'),
+            bg='#f5f7fa',
+            fg='#1e293b'
+        )
+        actions_label.pack(anchor='w', pady=(20, 10))
+        
+        actions_frame = tk.Frame(self.content_frame, bg='#f5f7fa')
+        actions_frame.pack(fill=tk.X)
+        
+        actions = [
+            ("➕ Add Member", "#10b981", self.show_members),
+            ("📝 Mark Attendance", "#f59e0b", self.show_attendance),
+            ("💰 Record Payment", "#8b5cf6", self.show_payments),
+        ]
+        
+        for text, color, command in actions:
+            btn = tk.Button(
+                actions_frame,
+                text=text,
+                font=('Segoe UI', 11, 'bold'),
+                bg=color,
+                fg='white',
+                activebackground=color,
+                activeforeground='white',
+                bd=0,
+                padx=30,
+                pady=15,
+                cursor='hand2',
+                command=command
+            )
+            btn.pack(side=tk.LEFT, padx=5)
     
     def show_members(self):
         """Show members management"""
         self.clear_content()
+        self.page_title.config(text="Members")
         
         # Title and Add Button
-        top_frame = tk.Frame(self.content_frame, bg='#1a1a2e')
-        top_frame.pack(fill=tk.X, pady=20, padx=20)
+        top_frame = tk.Frame(self.content_frame, bg='#f5f7fa')
+        top_frame.pack(fill=tk.X, pady=(0, 20))
         
-        title = tk.Label(
+        add_btn = tk.Button(
             top_frame,
-            text="Members Management",
-            font=('Arial', 24, 'bold'),
-            bg='#1a1a2e',
+            text="+ Add Member",
+            font=('Segoe UI', 11, 'bold'),
+            bg='#10b981',
             fg='white'
         )
         title.pack(side=tk.LEFT)
