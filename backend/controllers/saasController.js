@@ -725,3 +725,382 @@ exports.deletePlan = async (req, res) => {
     });
   }
 };
+
+/**
+ * Download system application
+ */
+exports.downloadSystem = async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+    
+    // Verify subscription belongs to user and is active
+    const [subscriptions] = await pool.execute(`
+      SELECT cs.*, s.name as system_name, s.python_file_path, sp.name as plan_name
+      FROM client_subscriptions cs
+      JOIN clients c ON cs.client_id = c.id
+      JOIN systems s ON cs.system_id = s.id
+      JOIN subscription_plans sp ON cs.plan_id = sp.id
+      WHERE cs.id = ? AND c.user_id = ? AND cs.status = 'active'
+    `, [subscriptionId, userId]);
+    
+    if (subscriptions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Active subscription not found'
+      });
+    }
+    
+    const subscription = subscriptions[0];
+    
+    // Determine tier from plan name
+    const tier = subscription.plan_name.toLowerCase().includes('premium') ? 'premium' : 'basic';
+    
+    // Construct file path
+    const path = require('path');
+    const fs = require('fs');
+    const archiver = require('archiver');
+    
+    // Path to system folder
+    const systemFolder = path.join(__dirname, '../../systems', subscription.python_file_path, tier);
+    
+    if (!fs.existsSync(systemFolder)) {
+      return res.status(404).json({
+        success: false,
+        message: 'System files not found'
+      });
+    }
+    
+    // Set response headers for download
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${subscription.system_name}_${tier}.zip"`);
+    
+    // Create zip archive
+    const archive = archiver('zip', {
+      zlib: { level: 9 }
+    });
+    
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create download package'
+      });
+    });
+    
+    // Pipe archive to response
+    archive.pipe(res);
+    
+    // Add files to archive
+    archive.directory(systemFolder, false);
+    
+    // Add configuration file with API key
+    const config = {
+      api_key: subscription.api_key,
+      company_name: subscription.company_name,
+      subscription_id: subscription.id,
+      plan: subscription.plan_name,
+      start_date: subscription.start_date,
+      end_date: subscription.end_date
+    };
+    
+    archive.append(JSON.stringify(config, null, 2), { name: 'subscription_config.json' });
+    
+    // Finalize the archive
+    await archive.finalize();
+    
+    // Log download
+    await pool.execute(`
+      INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
+      VALUES (?, ?, ?, ?, ?)
+    `, [subscription.id, subscription.api_key, '/download', 'GET', req.ip]);
+    
+  } catch (error) {
+    console.error('Error downloading system:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download system'
+    });
+  }
+};
+
+/**
+ * Generate customized system with business branding
+ */
+exports.generateCustomSystem = async (req, res) => {
+  try {
+    const { subscription_id, business_name, address, phone, email } = req.body;
+    const userId = req.user.id;
+    const logoFile = req.file;
+    
+    // Verify subscription belongs to user and is active
+    const [subscriptions] = await pool.execute(`
+      SELECT cs.*, s.name as system_name, s.python_file_path, sp.name as plan_name
+      FROM client_subscriptions cs
+      JOIN clients c ON cs.client_id = c.id
+      JOIN systems s ON cs.system_id = s.id
+      JOIN subscription_plans sp ON cs.plan_id = sp.id
+      WHERE cs.id = ? AND c.user_id = ? AND cs.status = 'active'
+    `, [subscription_id, userId]);
+    
+    if (subscriptions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Active subscription not found'
+      });
+    }
+    
+    const subscription = subscriptions[0];
+    
+    // Determine tier from plan name
+    const tier = subscription.plan_name.toLowerCase().includes('premium') ? 'premium' : 'basic';
+    
+    // Construct file paths
+    const path = require('path');
+    const fs = require('fs');
+    const archiver = require('archiver');
+    
+    // Path to system folder
+    const systemFolder = path.join(__dirname, '../../systems', subscription.python_file_path, tier);
+    
+    if (!fs.existsSync(systemFolder)) {
+      return res.status(404).json({
+        success: false,
+        message: 'System files not found'
+      });
+    }
+    
+    // Create temporary directory for customized files
+    const tempDir = path.join(__dirname, '../uploads/temp', `custom_${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    
+    try {
+      // Copy all files from system folder to temp directory
+      const copyRecursive = (src, dest) => {
+        const exists = fs.existsSync(src);
+        const stats = exists && fs.statSync(src);
+        const isDirectory = exists && stats.isDirectory();
+        
+        if (isDirectory) {
+          fs.mkdirSync(dest, { recursive: true });
+          fs.readdirSync(src).forEach(childItemName => {
+            copyRecursive(
+              path.join(src, childItemName),
+              path.join(dest, childItemName)
+            );
+          });
+        } else {
+          fs.copyFileSync(src, dest);
+        }
+      };
+      
+      copyRecursive(systemFolder, tempDir);
+      
+      // Copy logo if uploaded
+      if (logoFile) {
+        const logoDestPath = path.join(tempDir, 'logo' + path.extname(logoFile.originalname));
+        fs.copyFileSync(logoFile.path, logoDestPath);
+        // Delete uploaded file
+        fs.unlinkSync(logoFile.path);
+      }
+      
+      // Create customization config file
+      const customConfig = {
+        api_key: subscription.api_key,
+        company_name: business_name,
+        subscription_id: subscription.id,
+        plan: subscription.plan_name,
+        tier: tier,
+        start_date: subscription.start_date,
+        end_date: subscription.end_date,
+        business_details: {
+          name: business_name,
+          address: address || '',
+          phone: phone,
+          email: email || '',
+          has_logo: !!logoFile
+        },
+        database_config: {
+          database_name: subscription.database_name,
+          subdomain: subscription.subdomain
+        }
+      };
+      
+      // Write config file
+      fs.writeFileSync(
+        path.join(tempDir, 'business_config.json'),
+        JSON.stringify(customConfig, null, 2)
+      );
+      
+      // Create Windows launcher batch file
+      const batchContent = `@echo off
+title ${business_name} - System Installer
+color 0A
+echo.
+echo ================================================
+echo    ${business_name}
+echo    System Installation Wizard
+echo ================================================
+echo.
+echo Checking Python installation...
+echo.
+
+REM Check if Python is installed
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ERROR: Python is not installed!
+    echo.
+    echo Please install Python 3.8 or higher from:
+    echo https://www.python.org/downloads/
+    echo.
+    echo Make sure to check "Add Python to PATH" during installation.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Python found! Starting installation wizard...
+echo.
+python installer.py
+
+if %errorlevel% neq 0 (
+    echo.
+    echo Installation failed or was cancelled.
+    echo.
+    pause
+)
+`;
+      
+      fs.writeFileSync(path.join(tempDir, 'INSTALL.bat'), batchContent);
+      
+      // Create enhanced README
+      const readmeContent = `# ${business_name} - ${subscription.system_name}
+
+## Installation Instructions
+
+### Quick Start (Windows)
+1. **Double-click** \`INSTALL.bat\` to start the installation wizard
+2. Follow the on-screen instructions
+
+### Manual Installation (All Platforms)
+\`\`\`bash
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Run the installer
+python installer.py
+\`\`\`
+
+### Prerequisites
+- Python 3.8 or higher
+- Windows 10/11 (or compatible OS)
+- Internet connection for first-time setup
+
+### What's Included
+- ✅ Pre-configured for ${business_name}
+- ✅ API key already set up
+- ✅ Custom branding and logo
+- ✅ Database configuration
+- ✅ Installation wizard
+
+### Support
+If you encounter any issues during installation:
+1. Make sure Python is installed and added to PATH
+2. Run Command Prompt as Administrator
+3. Contact ZORO9X support: support@zoro9x.com
+
+### Subscription Details
+- Plan: ${subscription.plan_name}
+- Valid Until: ${new Date(subscription.end_date).toLocaleDateString()}
+- API Key: ${subscription.api_key.substring(0, 8)}...
+
+---
+Powered by ZORO9X - Professional Business Management Solutions
+`;
+      
+      fs.writeFileSync(path.join(tempDir, 'README.md'), readmeContent);
+      
+      // Modify gym_app.py to load business config
+      const gymAppPath = path.join(tempDir, 'gym_app.py');
+      if (fs.existsSync(gymAppPath)) {
+        let gymAppContent = fs.readFileSync(gymAppPath, 'utf8');
+        
+        // Add business config loading
+        const configLoadCode = `
+# Load business configuration
+BUSINESS_CONFIG_FILE = 'business_config.json'
+
+def load_business_config():
+    if os.path.exists(BUSINESS_CONFIG_FILE):
+        with open(BUSINESS_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+BUSINESS_CONFIG = load_business_config()
+`;
+        
+        // Insert after imports
+        const importEndIndex = gymAppContent.lastIndexOf('import');
+        const nextNewlineIndex = gymAppContent.indexOf('\n', importEndIndex);
+        gymAppContent = gymAppContent.slice(0, nextNewlineIndex + 1) + configLoadCode + gymAppContent.slice(nextNewlineIndex + 1);
+        
+        // Replace company name placeholder
+        gymAppContent = gymAppContent.replace(
+          /self\.company_name = self\.config\.get\('company_name', 'My Gym'\)/g,
+          `self.company_name = BUSINESS_CONFIG.get('business_details', {}).get('name', '${business_name}')`
+        );
+        
+        fs.writeFileSync(gymAppPath, gymAppContent);
+      }
+      
+      // Set response headers for download
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${subscription.system_name}_${tier}_installer.zip"`);
+      
+      // Create zip archive
+      const archive = archiver('zip', {
+        zlib: { level: 9 }
+      });
+      
+      archive.on('error', (err) => {
+        console.error('Archive error:', err);
+        throw err;
+      });
+      
+      // Pipe archive to response
+      archive.pipe(res);
+      
+      // Add all files from temp directory
+      archive.directory(tempDir, false);
+      
+      // Finalize the archive
+      await archive.finalize();
+      
+      // Clean up temp directory after a delay
+      setTimeout(() => {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }, 5000);
+      
+      // Log download
+      await pool.execute(`
+        INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
+        VALUES (?, ?, ?, ?, ?)
+      `, [subscription.id, subscription.api_key, '/generate-custom-system', 'POST', req.ip]);
+      
+    } catch (error) {
+      // Clean up temp directory on error
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+      throw error;
+    }
+    
+  } catch (error) {
+    console.error('Error generating custom system:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate customized system'
+    });
+  }
+};
+

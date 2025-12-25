@@ -517,7 +517,7 @@ const AddSystemModal: React.FC<any> = ({ darkMode, onClose, onSuccess }) => {
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-2xl rounded-2xl p-8 my-8 ${
+        className={`w-full max-w-2xl rounded-2xl p-8 my-8 h-[95vh] overflow-y-scroll ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}
       >
@@ -979,7 +979,7 @@ const ManagePlansModal: React.FC<any> = ({ darkMode, system, onClose }) => {
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-4xl rounded-2xl p-8 my-8 ${
+        className={`w-full max-w-4xl rounded-2xl p-8 my-8 h-[95vh] overflow-y-scroll ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}
       >

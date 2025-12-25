@@ -6,9 +6,38 @@
 
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 const saasController = require('../controllers/saasController');
 const { authenticateToken } = require('../middleware/auth');
 const { authenticateAdmin } = require('../middleware/auth');
+
+// Configure multer for logo uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, '../uploads/logos'));
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'logo-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // ============================================
 // PUBLIC ROUTES - Systems Marketplace
@@ -70,6 +99,20 @@ router.put('/subscriptions/:id/cancel', authenticateToken, saasController.cancel
  * Requires authentication
  */
 router.get('/subscriptions/:subscriptionId/usage', authenticateToken, saasController.getApiUsageStats);
+
+/**
+ * GET /api/saas/download/:subscriptionId
+ * Download system application
+ * Requires authentication
+ */
+router.get('/download/:subscriptionId', authenticateToken, saasController.downloadSystem);
+
+/**
+ * POST /api/saas/generate-custom-system
+ * Generate customized system with business branding
+ * Requires authentication
+ */
+router.post('/generate-custom-system', authenticateToken, upload.single('logo'), saasController.generateCustomSystem);
 
 // ============================================
 // API KEY VALIDATION

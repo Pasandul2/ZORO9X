@@ -1,23 +1,56 @@
-# SaaS Systems - Windows Applications
+# 🚀 ZORO9X SaaS Systems
 
-This folder contains Python-based Windows desktop applications for various SaaS systems offered through the ZORO9X platform.
+This directory contains all downloadable desktop applications available through the ZORO9X platform.
+
+## Directory Structure
+
+```
+systems/
+├── gym_management/
+│   ├── basic/                 # Basic tier
+│   │   ├── gym_app.py         # Main application
+│   │   ├── installer.py       # Installation wizard
+│   │   ├── requirements.txt   # Python dependencies
+│   │   └── README.md          # Documentation
+│   └── premium/               # Premium tier
+│       └── README.md          # Premium features list
+├── restaurant_management/
+│   ├── basic/                 # Basic tier (coming soon)
+│   └── premium/               # Premium tier (coming soon)
+└── README.md                  # This file
+```
 
 ## Available Systems
 
-### 1. Gym Management System (`gym_management.py`)
-Complete gym management solution with the following features:
-- Member Management
-- Payment & Billing System
-- Attendance Tracking
-- Workout Plans & Scheduling
-- Staff Management
-- Equipment Tracking
-- Reports & Analytics
-- Access Control System
+### 🏋️ Gym Management System
 
-### 2. Restaurant Management System (`restaurant_management.py`)
-Full-featured restaurant management with:
-- POS (Point of Sale) System
+**Basic Edition** - Perfect for small to medium gyms
+- Member management (add, edit, delete, search)
+- Attendance tracking with quick check-in
+- Payment management and history
+- Classes management
+- Dashboard with real-time statistics
+- SQLite local database
+- License validation with offline grace period
+
+**Premium Edition** - Enterprise-grade features
+- All Basic features plus:
+- Advanced analytics and forecasting
+- Email/SMS notifications
+- Online booking portal
+- Payment gateway integration (Stripe, PayPal)
+- Multi-location support
+- Custom branding
+- Advanced exports (Excel, PDF)
+- Member photos and health tracking
+- Mobile app integration
+- Enhanced security with audit logs
+
+### 🍽️ Restaurant Management System
+
+**Status:** Coming Soon
+
+Basic and Premium editions for restaurant operations management.
 - Table Management
 - Inventory Control
 - Kitchen Display System

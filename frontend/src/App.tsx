@@ -24,6 +24,7 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import SaaSDashboard from './pages/SaaSDashboard';
 import SystemsMarketplace from './pages/SystemsMarketplace';
+import SystemPlansPage from './pages/SystemPlansPage';
 import ClientDashboard from './pages/ClientDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
@@ -119,6 +120,7 @@ function AppContent() {
                 <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/marketplace" element={<SystemsMarketplace darkMode={darkMode} />} />
+                <Route path="/marketplace/system/:systemId/plans" element={<SystemPlansPage darkMode={darkMode} />} />
                 <Route path="/client-dashboard" element={<ClientDashboard darkMode={darkMode} />} />
                 <Route path="/services/:serviceId" element={<ServiceDetail />} />
                 <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />

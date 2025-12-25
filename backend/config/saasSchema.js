@@ -304,7 +304,7 @@ async function seedInitialSystems() {
           name: 'Gym Management System',
           description: 'Complete gym management solution with member tracking, payment processing, workout plans, and attendance monitoring.',
           category: 'Fitness',
-          python_file_path: 'systems/gym_management.py',
+          python_file_path: 'gym_management',
           icon_url: '/images/systems/gym-icon.png',
           features: JSON.stringify([
             'Member Management',
@@ -320,7 +320,7 @@ async function seedInitialSystems() {
           name: 'Restaurant Management System',
           description: 'Full-featured restaurant management with POS, inventory, table management, and kitchen display system.',
           category: 'Food & Beverage',
-          python_file_path: 'systems/restaurant_management.py',
+          python_file_path: 'restaurant_management',
           icon_url: '/images/systems/restaurant-icon.png',
           features: JSON.stringify([
             'POS System',

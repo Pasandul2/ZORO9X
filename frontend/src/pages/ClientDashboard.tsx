@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Package, Key, Database, Calendar, DollarSign, 
   Activity, AlertCircle, Copy, Download, ExternalLink,
-  TrendingUp, Users, Server
+  TrendingUp, Users, Server, Check, Upload, Building2, Phone, Mail
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -36,6 +36,15 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [usageStats, setUsageStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string>('');
+  const [showCustomizationDialog, setShowCustomizationDialog] = useState(false);
+  const [customizationData, setCustomizationData] = useState({
+    business_name: '',
+    address: '',
+    phone: '',
+    email: '',
+    logo: null as File | null
+  });
+  const [isGenerating, setIsGenerating] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -94,8 +103,109 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
     setTimeout(() => setCopiedKey(''), 2000);
   };
 
-  const downloadSystemFile = (pythonFilePath: string) => {
-    alert(`Download ${pythonFilePath} - Implementation coming soon`);
+  const initiateDownload = () => {
+    setShowCustomizationDialog(true);
+    // Pre-fill business name from subscription
+    if (selectedSubscription) {
+      setCustomizationData(prev => ({
+        ...prev,
+        business_name: selectedSubscription.company_name || ''
+      }));
+    }
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please upload an image file');
+        return;
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Logo file size must be less than 5MB');
+        return;
+      }
+      setCustomizationData(prev => ({ ...prev, logo: file }));
+    }
+  };
+
+  const downloadSystemFile = async () => {
+    if (!selectedSubscription) return;
+    
+    // Validate required fields
+    if (!customizationData.business_name || !customizationData.phone) {
+      alert('Please fill in Business Name and Phone (required fields)');
+      return;
+    }
+
+    setIsGenerating(true);
+    const token = localStorage.getItem('token');
+    
+    try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('subscription_id', selectedSubscription.id.toString());
+      formData.append('business_name', customizationData.business_name);
+      formData.append('address', customizationData.address);
+      formData.append('phone', customizationData.phone);
+      formData.append('email', customizationData.email);
+      if (customizationData.logo) {
+        formData.append('logo', customizationData.logo);
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/generate-custom-system`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        }
+      );
+
+      if (response.ok) {
+        // Get filename from Content-Disposition header
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'system_installer.zip';
+        
+        if (contentDisposition) {
+          const matches = /filename="([^"]+)"/.exec(contentDisposition);
+          if (matches && matches[1]) {
+            filename = matches[1];
+          }
+        }
+        
+        // Download the file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Close dialog and reset
+        setShowCustomizationDialog(false);
+        setCustomizationData({
+          business_name: '',
+          address: '',
+          phone: '',
+          email: '',
+          logo: null
+        });
+      } else {
+        const error = await response.json();
+        alert(error.message || 'Failed to generate system. Please try again.');
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      alert('Error generating customized system');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCancelSubscription = async (subscriptionId: number) => {
@@ -388,7 +498,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => downloadSystemFile('gym_management.py')}
+                  onClick={initiateDownload}
                   className="w-full bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg font-semibold flex items-center justify-center gap-2"
                 >
                   <Download className="w-5 h-5" />
@@ -464,14 +574,180 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
           </motion.div>
         )}
       </div>
+
+      {/* Customization Dialog */}
+      {showCustomizationDialog && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => !isGenerating && setShowCustomizationDialog(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9 }}
+            animate={{ scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className={`rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto ${
+              darkMode ? 'bg-gray-900' : 'bg-white'
+            }`}
+          >
+            <h2 className="text-3xl font-bold mb-2">Customize Your System</h2>
+            <p className={`mb-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              Provide your business details to generate a personalized installation package.
+            </p>
+
+            <div className="space-y-5">
+              {/* Logo Upload */}
+              <div>
+                <label className="block font-semibold mb-2">
+                  Business Logo
+                  <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
+                </label>
+                <div className={`border-2 border-dashed rounded-lg p-6 text-center ${
+                  darkMode ? 'border-gray-700' : 'border-gray-300'
+                }`}>
+                  <input
+                    type="file"
+                    id="logo-upload"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                    disabled={isGenerating}
+                  />
+                  <label htmlFor="logo-upload" className="cursor-pointer">
+                    {customizationData.logo ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <Check className="w-5 h-5 text-green-400" />
+                        <span className="text-green-400">{customizationData.logo.name}</span>
+                      </div>
+                    ) : (
+                      <div>
+                        <Upload className="w-12 h-12 mx-auto mb-2 text-purple-500" />
+                        <p className="text-sm">Click to upload logo (PNG, JPG - Max 5MB)</p>
+                      </div>
+                    )}
+                  </label>
+                </div>
+              </div>
+
+              {/* Business Name */}
+              <div>
+                <label className="block font-semibold mb-2">
+                  Business Name <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={customizationData.business_name}
+                    onChange={(e) => setCustomizationData(prev => ({ ...prev, business_name: e.target.value }))}
+                    placeholder="Enter your business/gym name"
+                    className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
+                      darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                    }`}
+                    disabled={isGenerating}
+                  />
+                </div>
+              </div>
+
+              {/* Phone */}
+              <div>
+                <label className="block font-semibold mb-2">
+                  Phone Number <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="tel"
+                    value={customizationData.phone}
+                    onChange={(e) => setCustomizationData(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="+993-XX-XXX-XXX"
+                    className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
+                      darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                    }`}
+                    disabled={isGenerating}
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="block font-semibold mb-2">
+                  Email Address
+                  <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <input
+                    type="email"
+                    value={customizationData.email}
+                    onChange={(e) => setCustomizationData(prev => ({ ...prev, email: e.target.value }))}
+                    placeholder="contact@yourbusiness.com"
+                    className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
+                      darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                    }`}
+                    disabled={isGenerating}
+                  />
+                </div>
+              </div>
+
+              {/* Address */}
+              <div>
+                <label className="block font-semibold mb-2">
+                  Business Address
+                  <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
+                </label>
+                <textarea
+                  value={customizationData.address}
+                  onChange={(e) => setCustomizationData(prev => ({ ...prev, address: e.target.value }))}
+                  placeholder="Street address, City, Country"
+                  rows={3}
+                  className={`w-full px-4 py-3 rounded-lg border ${
+                    darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                  }`}
+                  disabled={isGenerating}
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-4 mt-8">
+              <button
+                onClick={() => setShowCustomizationDialog(false)}
+                disabled={isGenerating}
+                className={`flex-1 py-3 rounded-lg font-semibold ${
+                  darkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={downloadSystemFile}
+                disabled={isGenerating || !customizationData.business_name || !customizationData.phone}
+                className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isGenerating ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-5 h-5" />
+                    Generate & Download
+                  </>
+                )}
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 mt-4 text-center">
+              * Required fields must be filled to continue
+            </p>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 };
-
-const Check: React.FC<{ className?: string }> = ({ className }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-  </svg>
-);
 
 export default ClientDashboard;
