@@ -735,21 +735,37 @@ By clicking 'Next', you accept the terms of this agreement.
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # Create members table
+        # Create members table (matching gym_app.py schema)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT,
+                first_name TEXT NOT NULL,
+                last_name TEXT NOT NULL,
+                email TEXT UNIQUE,
                 phone TEXT,
+                date_of_birth DATE,
+                gender TEXT,
                 address TEXT,
-                membership_type TEXT,
-                start_date TEXT,
-                end_date TEXT,
-                status TEXT DEFAULT 'active',
-                photo_path TEXT,
+                emergency_contact TEXT,
+                emergency_phone TEXT,
+                join_date DATE DEFAULT CURRENT_DATE,
+                membership_status TEXT DEFAULT 'active',
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create memberships table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS memberships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                member_id INTEGER,
+                plan_name TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT DEFAULT 'active',
+                FOREIGN KEY (member_id) REFERENCES members (id)
             )
         ''')
         
@@ -758,9 +774,9 @@ By clicking 'Next', you accept the terms of this agreement.
             CREATE TABLE IF NOT EXISTS attendance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER,
-                check_in TEXT NOT NULL,
-                check_out TEXT,
-                date TEXT NOT NULL,
+                check_in_time TIMESTAMP NOT NULL,
+                check_out_time TIMESTAMP,
+                date DATE NOT NULL,
                 notes TEXT,
                 FOREIGN KEY (member_id) REFERENCES members (id)
             )
@@ -772,7 +788,7 @@ By clicking 'Next', you accept the terms of this agreement.
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER,
                 amount REAL NOT NULL,
-                payment_date TEXT NOT NULL,
+                payment_date DATE NOT NULL,
                 payment_method TEXT,
                 description TEXT,
                 receipt_number TEXT,
@@ -787,6 +803,7 @@ By clicking 'Next', you accept the terms of this agreement.
                 name TEXT NOT NULL,
                 instructor TEXT,
                 schedule TEXT,
+                duration INTEGER,
                 max_capacity INTEGER,
                 current_enrollment INTEGER DEFAULT 0,
                 description TEXT,
@@ -800,7 +817,7 @@ By clicking 'Next', you accept the terms of this agreement.
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 class_id INTEGER,
                 member_id INTEGER,
-                enrollment_date TEXT,
+                enrollment_date DATE,
                 FOREIGN KEY (class_id) REFERENCES classes (id),
                 FOREIGN KEY (member_id) REFERENCES members (id)
             )

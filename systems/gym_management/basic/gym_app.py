@@ -46,7 +46,7 @@ class GymManagementApp:
         
         # Database configuration
         db_name = self.config.get('database_name', 'gym_database')
-        self.self.db_file = self.config.get('database_path', f'{db_name}.db')
+        self.db_file = self.config.get('database_path', f'{db_name}.db')
         
         # Load business configuration
         self.business_config = BUSINESS_CONFIG
@@ -76,10 +76,12 @@ class GymManagementApp:
         if not self.api_key:
             self.show_setup_wizard()
         else:
-            if self.validate_license():
+            # Try to validate, but allow offline usage
+            validation_result = self.validate_license()
+            if validation_result or self.business_config:  # Allow if validation succeeds OR business_config exists
                 self.create_main_ui()
             else:
-                messagebox.showerror("License Error", "Failed to validate license. Please contact support.")
+                messagebox.showerror("License Error", "Failed to validate license. Please check your internet connection or contact support.")
                 self.root.quit()
     
     def load_config(self):
@@ -112,6 +114,21 @@ class GymManagementApp:
     def validate_license(self):
         """Validate API key with server"""
         try:
+            # If business_config exists, allow offline mode
+            if self.business_config:
+                # Check if subscription is still valid based on end_date
+                end_date_str = self.business_config.get('end_date')
+                if end_date_str:
+                    try:
+                        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+                        if datetime.now() < end_date:
+                            self.license_valid = True
+                            self.last_validation = datetime.now()
+                            return True
+                    except:
+                        pass
+            
+            # Try online validation
             response = requests.post(
                 f'{API_BASE_URL}/validate-key',
                 json={'api_key': self.api_key},
@@ -139,10 +156,17 @@ class GymManagementApp:
             return False
         except Exception as e:
             print(f"License validation error: {e}")
-            # Allow offline grace period of 3 days
+            
+            # If business_config exists, allow offline mode
+            if self.business_config:
+                print("Using offline mode with business_config")
+                return True
+            
+            # Allow offline grace period of 3 days if previously validated
             if self.last_validation:
                 grace_period = datetime.now() - self.last_validation
                 return grace_period.days < 3
+            
             return False
     
     def background_license_check(self):
@@ -243,7 +267,7 @@ class GymManagementApp:
     
     def init_database(self):
         """Initialize SQLite database"""
-        conn = sqlite3.connect(self.self.db_file)
+        conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
         
         # Members table
@@ -423,7 +447,7 @@ class GymManagementApp:
         cards_frame = tk.Frame(self.content_frame, bg='#1a1a2e')
         cards_frame.pack(pady=20)
         
-        conn = sqlite3.connect(self.self.db_file)
+        conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
         
         # Get statistics
@@ -663,7 +687,7 @@ class GymManagementApp:
                 return
             
             try:
-                conn = sqlite3.connect(self.self.db_file)
+                conn = sqlite3.connect(self.db_file)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -834,7 +858,7 @@ class GymManagementApp:
                 messagebox.showerror("Error", "Please enter Member ID or Phone")
                 return
             
-            conn = sqlite3.connect(self.self.db_file)
+            conn = sqlite3.connect(self.db_file)
             cursor = conn.cursor()
             
             # Find member
