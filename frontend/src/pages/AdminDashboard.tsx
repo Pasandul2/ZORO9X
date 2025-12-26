@@ -297,6 +297,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = () => {
           </motion.button>
         </div>
       </motion.div>
+
+      {/* System Generator - New Action */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.7 }}
+        className="bg-gradient-to-br from-cyan-900/50 to-blue-900/50 backdrop-blur-sm rounded-2xl p-8 border border-cyan-700/30 hover:border-cyan-500/50 transition-all"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
+              🚀 System Generator
+            </h3>
+            <p className="text-cyan-200 text-sm mb-4">Create new SaaS systems with Basic & Premium tiers automatically</p>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => navigate('/admin/generate-system')}
+              className="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white font-bold py-3 px-8 rounded-lg shadow-lg shadow-cyan-900/50 transition-all"
+            >
+              Generate New System
+            </motion.button>
+          </div>
+          <div className="text-6xl">⚡</div>
+        </div>
+      </motion.div>
     </div>
   );
 };

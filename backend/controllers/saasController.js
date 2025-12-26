@@ -761,8 +761,19 @@ exports.downloadSystem = async (req, res) => {
     const fs = require('fs');
     const archiver = require('archiver');
     
+    // Clean up python_file_path - remove 'systems/' prefix if present, ensure trailing slash
+    let cleanPath = subscription.python_file_path;
+    if (cleanPath.startsWith('systems/')) {
+      cleanPath = cleanPath.substring(8); // Remove 'systems/' prefix
+    }
+    if (!cleanPath.endsWith('/')) {
+      cleanPath += '/';
+    }
+    
     // Path to system folder
-    const systemFolder = path.join(__dirname, '../../systems', subscription.python_file_path, tier);
+    const systemFolder = path.join(__dirname, '../../systems', cleanPath, tier);
+    
+    console.log('Download path:', systemFolder);
     
     if (!fs.existsSync(systemFolder)) {
       return res.status(404).json({

@@ -307,7 +307,6 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
     contact_email: '',
     contact_phone: '',
     business_address: '',
-    business_type: '',
     logo: null as File | null,
     website: '',
     tax_id: ''
@@ -396,20 +395,6 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
         return (
           <div className="space-y-4">
             <h3 className="text-xl font-bold mb-4">Step 2: Business Details</h3>
-            <select
-              value={formData.business_type}
-              onChange={(e) => setFormData({ ...formData, business_type: e.target.value })}
-              className={`w-full px-4 py-3 rounded-lg ${
-                darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
-              }`}
-            >
-              <option value="">Select Business Type</option>
-              <option value="gym">Gym / Fitness Center</option>
-              <option value="restaurant">Restaurant / Cafe</option>
-              <option value="retail">Retail Store</option>
-              <option value="services">Service Business</option>
-              <option value="other">Other</option>
-            </select>
             <input
               type="text"
               placeholder="Website (optional)"

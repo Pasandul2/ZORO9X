@@ -15,6 +15,12 @@ const {
   deleteAdmin,
   resendAdminInvitation
 } = require('../controllers/adminController');
+const { 
+  generateSystem,
+  getGeneratedSystems,
+  deleteGeneratedSystem,
+  regenerateSystem
+} = require('../controllers/systemGenerator');
 const { verifyToken } = require('../middleware/auth');
 
 /**
@@ -72,5 +78,37 @@ router.delete('/admins/:id', verifyToken, deleteAdmin);
  * @access  Private (Super Admin only)
  */
 router.post('/admins/:id/resend-invitation', verifyToken, resendAdminInvitation);
+
+// ============================================
+// SYSTEM GENERATOR ROUTES
+// ============================================
+
+/**
+ * @route   POST /api/admin/generate-system
+ * @desc    Auto-generate new system with Basic & Premium versions
+ * @access  Private (Admin only)
+ */
+router.post('/generate-system', verifyToken, generateSystem);
+
+/**
+ * @route   GET /api/admin/generated-systems
+ * @desc    Get all generated systems
+ * @access  Private (Admin only)
+ */
+router.get('/generated-systems', verifyToken, getGeneratedSystems);
+
+/**
+ * @route   DELETE /api/admin/generated-systems/:id
+ * @desc    Delete generated system and its files
+ * @access  Private (Admin only)
+ */
+router.delete('/generated-systems/:id', verifyToken, deleteGeneratedSystem);
+
+/**
+ * @route   POST /api/admin/generated-systems/:id/regenerate
+ * @desc    Regenerate system files
+ * @access  Private (Admin only)
+ */
+router.post('/generated-systems/:id/regenerate', verifyToken, regenerateSystem);
 
 module.exports = router;

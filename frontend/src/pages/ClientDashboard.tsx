@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Package, Key, Database, Calendar, DollarSign, 
   Activity, AlertCircle, Copy, Download, ExternalLink,
-  TrendingUp, Users, Server, Check, Upload, Building2, Phone, Mail
+  TrendingUp, Users, Server, Check, Upload, Building2, Phone, Mail,
+  Eye, EyeOff
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -36,6 +37,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [usageStats, setUsageStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string>('');
+  const [showApiKey, setShowApiKey] = useState(false);
   const [showCustomizationDialog, setShowCustomizationDialog] = useState(false);
   const [customizationData, setCustomizationData] = useState({
     business_name: '',
@@ -412,7 +414,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                     <label className="text-sm text-gray-400 mb-2 block">API Key</label>
                     <div className="flex gap-2">
                       <input
-                        type="text"
+                        type={showApiKey ? "text" : "password"}
                         value={selectedSubscription.api_key}
                         readOnly
                         className={`flex-1 px-4 py-3 rounded-lg font-mono text-sm ${
@@ -420,8 +422,16 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                         }`}
                       />
                       <button
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="px-4 py-3 bg-gray-600 hover:bg-gray-500 rounded-lg"
+                        title={showApiKey ? "Hide API Key" : "Show API Key"}
+                      >
+                        {showApiKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                      <button
                         onClick={() => copyToClipboard(selectedSubscription.api_key, 'api')}
                         className="px-4 py-3 bg-purple-600 hover:bg-purple-500 rounded-lg"
+                        title="Copy API Key"
                       >
                         {copiedKey === 'api' ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
                       </button>

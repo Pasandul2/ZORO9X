@@ -143,11 +143,11 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setShowAddSystem(true)}
-            className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-lg flex items-center gap-2"
+            onClick={() => navigate('/admin/generate-system')}
+            className="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-white px-6 py-3 rounded-lg flex items-center gap-2 shadow-lg"
           >
             <Plus className="w-5 h-5" />
-            Add New System
+            🚀 Generate New System
           </motion.button>
         </motion.div>
 

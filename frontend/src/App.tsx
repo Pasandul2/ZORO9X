@@ -23,6 +23,7 @@ import AdminManager from './pages/AdminManager';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import SaaSDashboard from './pages/SaaSDashboard';
+import SystemGenerator from './pages/SystemGenerator';
 import SystemsMarketplace from './pages/SystemsMarketplace';
 import SystemPlansPage from './pages/SystemPlansPage';
 import ClientDashboard from './pages/ClientDashboard';
@@ -101,6 +102,7 @@ function AppContent() {
                 <Route path="/admin/saas" element={<SaaSDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/portfolio" element={<PortfolioManagement darkMode={adminDarkMode} />} />
                 <Route path="/admin/analytics" element={<Analytics />} />
+                <Route path="/admin/generate-system" element={<SystemGenerator darkMode={adminDarkMode} />} />
                 <Route path="/admin/database" element={<div className="text-white text-center py-20"><h1 className="text-3xl font-bold">Database Management</h1><p className="text-gray-400 mt-4">Coming Soon</p></div>} />
                 <Route path="/admin/reports" element={<div className="text-white text-center py-20"><h1 className="text-3xl font-bold">Reports & Exports</h1><p className="text-gray-400 mt-4">Coming Soon</p></div>} />
                 <Route path="/admin/settings" element={<Settings />} />
