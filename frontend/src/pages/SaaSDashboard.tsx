@@ -3,7 +3,8 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { 
   Server, Users, DollarSign, TrendingUp, Package, 
-  Plus, Edit, Trash2, X 
+  Plus, Edit, Trash2, X, Shield, AlertTriangle, CheckCircle, 
+  XCircle, Clock, Monitor, AlertCircle 
 } from 'lucide-react';
 
 interface SaasDashboardProps {
@@ -35,16 +36,29 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [systems, setSystems] = useState<System[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients' | 'security'>('overview');
   const [showAddSystem, setShowAddSystem] = useState(false);
   const [showEditSystem, setShowEditSystem] = useState(false);
   const [showManagePlans, setShowManagePlans] = useState(false);
   const [selectedSystem, setSelectedSystem] = useState<System | null>(null);
+  
+  // Security states
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [pendingDevices, setPendingDevices] = useState<any[]>([]);
+  const [securityTab, setSecurityTab] = useState<'devices' | 'alerts'>('devices');
+  const [filterStatus, setFilterStatus] = useState<string>('pending');
+  
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'security') {
+      fetchSecurityData();
+    }
+  }, [activeTab, filterStatus]);
 
   const fetchDashboardData = async () => {
     const token = localStorage.getItem('adminToken');
@@ -95,6 +109,112 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       setLoading(false);
+    }
+  };
+
+  const fetchSecurityData = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      
+      // Fetch security alerts
+      const alertsRes = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/alerts?status=${filterStatus}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const alertsData = await alertsRes.json();
+      
+      // Fetch pending devices
+      const devicesRes = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const devicesData = await devicesRes.json();
+      
+      setAlerts(alertsData.alerts || []);
+      setPendingDevices(devicesData.devices || []);
+    } catch (error) {
+      console.error('Error fetching security data:', error);
+    }
+  };
+
+  const approveDevice = async (deviceId: number) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices/${deviceId}/approve`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (res.ok) {
+        alert('Device approved successfully!');
+        fetchSecurityData();
+      }
+    } catch (error) {
+      console.error('Error approving device:', error);
+      alert('Failed to approve device');
+    }
+  };
+
+  const rejectDevice = async (deviceId: number, reason: string) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices/${deviceId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reason })
+      });
+      
+      if (res.ok) {
+        alert('Device rejected successfully!');
+        fetchSecurityData();
+      }
+    } catch (error) {
+      console.error('Error rejecting device:', error);
+      alert('Failed to reject device');
+    }
+  };
+
+  const resolveAlert = async (alertId: number, action: string) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/alerts/${alertId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action_taken: action, resolution_notes: `Resolved by admin` })
+      });
+      
+      if (res.ok) {
+        alert('Alert resolved!');
+        fetchSecurityData();
+      }
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+      alert('Failed to resolve alert');
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'text-red-600 bg-red-100';
+      case 'high': return 'text-orange-600 bg-orange-100';
+      case 'medium': return 'text-yellow-600 bg-yellow-100';
+      case 'low': return 'text-blue-600 bg-blue-100';
+      default: return 'text-gray-600 bg-gray-100';
+    }
+  };
+
+  const getAlertIcon = (type: string) => {
+    switch (type) {
+      case 'concurrent_use': return <AlertTriangle className="w-5 h-5" />;
+      case 'device_limit_exceeded': return <Monitor className="w-5 h-5" />;
+      default: return <AlertCircle className="w-5 h-5" />;
     }
   };
 
@@ -153,11 +273,11 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-8">
-          {['overview', 'systems', 'clients'].map((tab) => (
+          {['overview', 'systems', 'clients', 'security'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
-              className={`px-6 py-3 rounded-lg font-semibold capitalize transition-colors ${
+              className={`px-6 py-3 rounded-lg font-semibold capitalize transition-colors flex items-center gap-2 ${
                 activeTab === tab
                   ? 'bg-purple-600 text-white'
                   : darkMode
@@ -165,7 +285,13 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   : 'bg-white text-gray-600 hover:bg-gray-100'
               }`}
             >
+              {tab === 'security' && <Shield className="w-4 h-4" />}
               {tab}
+              {tab === 'security' && pendingDevices.length > 0 && (
+                <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                  {pendingDevices.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -375,6 +501,280 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                 ))}
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {/* Security Tab */}
+        {activeTab === 'security' && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            {/* Security Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className={`rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Pending Devices</p>
+                    <p className="text-3xl font-bold text-white mt-2">{pendingDevices.length}</p>
+                  </div>
+                  <Clock className="w-10 h-10 text-yellow-500" />
+                </div>
+              </div>
+              
+              <div className={`rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Critical Alerts</p>
+                    <p className="text-3xl font-bold text-red-500 mt-2">
+                      {alerts.filter((a: any) => a.severity === 'critical' && a.status === 'pending').length}
+                    </p>
+                  </div>
+                  <AlertTriangle className="w-10 h-10 text-red-500" />
+                </div>
+              </div>
+              
+              <div className={`rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Concurrent Use</p>
+                    <p className="text-3xl font-bold text-orange-500 mt-2">
+                      {alerts.filter((a: any) => a.alert_type === 'concurrent_use' && a.status === 'pending').length}
+                    </p>
+                  </div>
+                  <Monitor className="w-10 h-10 text-orange-500" />
+                </div>
+              </div>
+              
+              <div className={`rounded-lg p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg border ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Resolved Today</p>
+                    <p className="text-3xl font-bold text-green-500 mt-2">
+                      {alerts.filter((a: any) => a.status === 'resolved').length}
+                    </p>
+                  </div>
+                  <CheckCircle className="w-10 h-10 text-green-500" />
+                </div>
+              </div>
+            </div>
+
+            {/* Security Sub-tabs */}
+            <div className="flex gap-4 mb-6">
+              <button
+                onClick={() => setSecurityTab('devices')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                  securityTab === 'devices'
+                    ? 'bg-cyan-500 text-white'
+                    : darkMode
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <Monitor className="w-4 h-4" />
+                Pending Devices ({pendingDevices.length})
+              </button>
+              <button
+                onClick={() => setSecurityTab('alerts')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                  securityTab === 'alerts'
+                    ? 'bg-cyan-500 text-white'
+                    : darkMode
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                <AlertTriangle className="w-4 h-4" />
+                Security Alerts ({alerts.filter((a: any) => a.status === 'pending').length})
+              </button>
+            </div>
+
+            {/* Pending Devices Table */}
+            {securityTab === 'devices' && (
+              <div className={`rounded-lg border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} overflow-hidden`}>
+                <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
+                  <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Pending Device Activations</h2>
+                  <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Review and approve device activation requests</p>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                      <tr>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Company</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>System</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Device</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>IP Address</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Devices</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Requested</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                      {pendingDevices.map((device: any) => {
+                        const deviceInfo = typeof device.device_info === 'string' 
+                          ? JSON.parse(device.device_info) 
+                          : device.device_info;
+                        
+                        return (
+                          <tr key={device.id} className={darkMode ? 'hover:bg-gray-750' : 'hover:bg-gray-50'}>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>{device.company_name}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{device.system_name}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>{device.device_name}</div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{deviceInfo?.os} {deviceInfo?.os_version}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{device.ip_address}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {device.active_count} / {device.max_activations}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {new Date(device.first_activated).toLocaleString()}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => approveDevice(device.id)}
+                                  className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg flex items-center gap-1"
+                                >
+                                  <CheckCircle className="w-4 h-4" />
+                                  Approve
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const reason = prompt('Enter rejection reason:');
+                                    if (reason) rejectDevice(device.id, reason);
+                                  }}
+                                  className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg flex items-center gap-1"
+                                >
+                                  <XCircle className="w-4 h-4" />
+                                  Reject
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  
+                  {pendingDevices.length === 0 && (
+                    <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      No pending device activations
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Security Alerts Table */}
+            {securityTab === 'alerts' && (
+              <div className={`rounded-lg border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} overflow-hidden`}>
+                <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'} flex items-center justify-between`}>
+                  <div>
+                    <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Security Alerts</h2>
+                    <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Monitor and respond to security threats</p>
+                  </div>
+                  
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-cyan-500 ${
+                      darkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="reviewed">Reviewed</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="">All</option>
+                  </select>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                      <tr>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Severity</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Type</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Company</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Details</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Time</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                      {alerts.map((alert: any) => {
+                        const details = typeof alert.details === 'string' 
+                          ? JSON.parse(alert.details) 
+                          : alert.details;
+                        
+                        return (
+                          <tr key={alert.id} className={darkMode ? 'hover:bg-gray-750' : 'hover:bg-gray-50'}>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getSeverityColor(alert.severity)}`}>
+                                {alert.severity.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`flex items-center gap-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                {getAlertIcon(alert.alert_type)}
+                                <span className="text-sm">{alert.alert_type.replace(/_/g, ' ')}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>{alert.company_name}</div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{alert.system_name}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{details?.message}</div>
+                              {details?.current_ip && (
+                                <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>IP: {details.current_ip}</div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {new Date(alert.created_at).toLocaleString()}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              {alert.status === 'pending' && (
+                                <button
+                                  onClick={() => resolveAlert(alert.id, 'reviewed')}
+                                  className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg"
+                                >
+                                  Resolve
+                                </button>
+                              )}
+                              {alert.status === 'resolved' && (
+                                <span className="text-green-500 text-sm">✓ Resolved</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  
+                  {alerts.length === 0 && (
+                    <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      No security alerts found
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </div>

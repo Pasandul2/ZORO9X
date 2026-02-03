@@ -14,6 +14,7 @@ const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
 const { createUserTable, createPortfolioTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
+const { initializeClientTables } = require('./config/clientSchema');
 const { migrate } = require('./migrations/add_admin_columns');
 const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('./config/saasSchema');
 const authRoutes = require('./routes/auth');
@@ -21,6 +22,9 @@ const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
 const portfolioRoutes = require('./routes/portfolio');
 const saasRoutes = require('./routes/saas');
+const clientRoutes = require('./routes/clients');
+const quotationRoutes = require('./routes/quotations');
+const invoiceRoutes = require('./routes/invoices');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -105,6 +109,15 @@ app.use('/api/portfolio', portfolioRoutes);
 // SaaS routes (systems, subscriptions, admin)
 app.use('/api/saas', saasRoutes);
 
+// Client management routes
+app.use('/api/clients', clientRoutes);
+
+// Quotation management routes
+app.use('/api/quotations', quotationRoutes);
+
+// Invoice management routes
+app.use('/api/invoices', invoiceRoutes);
+
 // ============================================
 // ERROR HANDLING MIDDLEWARE
 // ============================================
@@ -157,7 +170,10 @@ async function startServer() {
     // Step 4: Create portfolio table if not exists
     await createPortfolioTable();
 
-    // Step 4: Initialize SaaS tables and seed initial data
+    // Step 5: Initialize client, quotation, and invoice tables
+    await initializeClientTables();
+
+    // Step 6: Initialize SaaS tables and seed initial data
     await initializeSaaSTables();
     await seedInitialSystems();
     await seedInitialPlans();

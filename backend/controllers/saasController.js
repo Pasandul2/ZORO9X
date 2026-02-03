@@ -6,6 +6,18 @@
 
 const { pool } = require('../config/database');
 const crypto = require('crypto');
+const securityController = require('./securityController');
+const dbSync = require('../utils/databaseSync');
+
+// Export security controller methods
+exports.activateDevice = securityController.activateDevice;
+exports.validateApiKey = securityController.validateApiKey;
+exports.getSecurityAlerts = securityController.getSecurityAlerts;
+exports.getPendingDevices = securityController.getPendingDevices;
+exports.approveDevice = securityController.approveDevice;
+exports.rejectDevice = securityController.rejectDevice;
+exports.resolveSecurityAlert = securityController.resolveSecurityAlert;
+exports.getSubscriptionDevices = securityController.getSubscriptionDevices;
 
 /**
  * Get all available systems
@@ -464,59 +476,6 @@ exports.getSubscriptionById = async (req, res) => {
 };
 
 /**
- * Validate API key and log usage
- */
-exports.validateApiKey = async (req, res) => {
-  try {
-    const { apiKey } = req.body;
-    const { ip, headers } = req;
-    
-    const [subscriptions] = await pool.execute(
-      `SELECT cs.*, c.company_name, s.name as system_name
-       FROM client_subscriptions cs
-       JOIN clients c ON cs.client_id = c.id
-       JOIN systems s ON cs.system_id = s.id
-       WHERE cs.api_key = ? AND cs.status = 'active'`,
-      [apiKey]
-    );
-    
-    if (subscriptions.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or inactive API key'
-      });
-    }
-    
-    const subscription = subscriptions[0];
-    
-    // Log API usage
-    await pool.execute(
-      `INSERT INTO api_usage_logs 
-       (subscription_id, api_key, endpoint, method, ip_address, user_agent) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [subscription.id, apiKey, req.path, req.method, ip, headers['user-agent']]
-    );
-    
-    res.json({
-      success: true,
-      valid: true,
-      subscription: {
-        id: subscription.id,
-        company_name: subscription.company_name,
-        system_name: subscription.system_name,
-        database_name: subscription.database_name
-      }
-    });
-  } catch (error) {
-    console.error('Error validating API key:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to validate API key'
-    });
-  }
-};
-
-/**
  * Get API usage statistics
  */
 exports.getApiUsageStats = async (req, res) => {
@@ -568,6 +527,60 @@ exports.getApiUsageStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch API usage'
+    });
+  }
+};
+
+/**
+ * Get security information for a subscription
+ */
+exports.getSecurityInfo = async (req, res) => {
+  try {
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+    
+    // Verify ownership
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.*, c.user_id
+       FROM client_subscriptions cs
+       JOIN clients c ON cs.client_id = c.id
+       WHERE cs.id = ? AND c.user_id = ?`,
+      [subscriptionId, userId]
+    );
+    
+    if (subscriptions.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+    
+    const subscription = subscriptions[0];
+    
+    // Get last seen from device activations
+    const [devices] = await pool.execute(
+      `SELECT MAX(last_seen) as last_seen
+       FROM device_activations
+       WHERE subscription_id = ? AND status = 'active'`,
+      [subscriptionId]
+    );
+    
+    res.json({
+      success: true,
+      security: {
+        device_count: subscription.device_count || 0,
+        max_devices: subscription.max_devices || 3,
+        activation_count: subscription.activation_count || 0,
+        max_activations: subscription.max_activations || 3,
+        is_activated: subscription.is_activated || false,
+        last_seen: devices[0]?.last_seen || null
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching security info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch security information'
     });
   }
 };
@@ -863,6 +876,41 @@ exports.generateCustomSystem = async (req, res) => {
     
     const subscription = subscriptions[0];
     
+    // Get user email for remote database naming
+    const [users] = await pool.execute(
+      'SELECT email FROM users WHERE id = ?',
+      [userId]
+    );
+    const userEmail = users[0]?.email;
+    
+    // Create remote backup database for this subscription
+    let remoteDbResult = null;
+    try {
+      // Create empty remote database (tables will be synced from client)
+      // Note: table_schema column doesn't exist in systems table yet
+      // Tables will be created automatically when client first syncs
+      const tables = []; // Empty initially, will be populated by client sync
+      
+      remoteDbResult = await dbSync.createRemoteDatabase(
+        userEmail,
+        subscription.system_name,
+        subscription.database_name,
+        tables
+      );
+      
+      console.log('Remote backup database created:', remoteDbResult.database_name);
+      
+      // Store remote database name in subscription
+      await pool.execute(
+        `UPDATE client_subscriptions SET remote_database_name = ? WHERE id = ?`,
+        [remoteDbResult.database_name, subscription_id]
+      );
+      
+    } catch (dbError) {
+      console.error('Error creating remote database:', dbError);
+      // Continue anyway - remote sync is optional
+    }
+    
     // Determine tier from plan name
     const tier = subscription.plan_name.toLowerCase().includes('premium') ? 'premium' : 'basic';
     
@@ -933,7 +981,10 @@ exports.generateCustomSystem = async (req, res) => {
         },
         database_config: {
           database_name: subscription.database_name,
-          subdomain: subscription.subdomain
+          subdomain: subscription.subdomain,
+          remote_database_name: remoteDbResult?.database_name || '',
+          sync_enabled: true,
+          sync_url: `${process.env.API_URL || 'http://localhost:5001'}/api/saas/sync`
         }
       };
       
@@ -1111,6 +1162,183 @@ BUSINESS_CONFIG = load_business_config()
     res.status(500).json({
       success: false,
       message: 'Failed to generate customized system'
+    });
+  }
+};
+
+/**
+ * Sync data from client to server (backup)
+ */
+exports.syncToServer = async (req, res) => {
+  try {
+    const { api_key, table_name, data, operation = 'upsert' } = req.body;
+    
+    if (!api_key || !table_name || !data) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: api_key, table_name, data'
+      });
+    }
+    
+    // Verify API key and get subscription info
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.*, c.email as client_email, s.name as system_name
+       FROM client_subscriptions cs
+       JOIN clients c ON cs.client_id = c.id
+       JOIN systems s ON cs.system_id = s.id
+       WHERE cs.api_key = ? AND cs.status IN ('active', 'trial')`,
+      [api_key]
+    );
+    
+    if (subscriptions.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or inactive API key'
+      });
+    }
+    
+    const subscription = subscriptions[0];
+    const remoteDatabaseName = subscription.remote_database_name;
+    
+    if (!remoteDatabaseName) {
+      return res.status(404).json({
+        success: false,
+        message: 'Remote database not configured for this subscription'
+      });
+    }
+    
+    // Sync data to remote database
+    const result = await dbSync.syncToRemote(remoteDatabaseName, table_name, data);
+    
+    res.json({
+      success: true,
+      message: 'Data synced successfully',
+      remote_database: remoteDatabaseName
+    });
+    
+  } catch (error) {
+    console.error('Error syncing to server:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync data to server',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Sync data from server to client (restore)
+ */
+exports.syncFromServer = async (req, res) => {
+  try {
+    const { api_key, table_name, where_clause = {} } = req.body;
+    
+    if (!api_key || !table_name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: api_key, table_name'
+      });
+    }
+    
+    // Verify API key and get subscription info
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.*, c.email as client_email, s.name as system_name
+       FROM client_subscriptions cs
+       JOIN clients c ON cs.client_id = c.id
+       JOIN systems s ON cs.system_id = s.id
+       WHERE cs.api_key = ? AND cs.status IN ('active', 'trial')`,
+      [api_key]
+    );
+    
+    if (subscriptions.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or inactive API key'
+      });
+    }
+    
+    const subscription = subscriptions[0];
+    const remoteDatabaseName = subscription.remote_database_name;
+    
+    if (!remoteDatabaseName) {
+      return res.status(404).json({
+        success: false,
+        message: 'Remote database not configured for this subscription'
+      });
+    }
+    
+    // Get data from remote database
+    const result = await dbSync.syncFromRemote(remoteDatabaseName, table_name, where_clause);
+    
+    res.json({
+      success: true,
+      data: result.data,
+      count: result.data.length,
+      remote_database: remoteDatabaseName
+    });
+    
+  } catch (error) {
+    console.error('Error syncing from server:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync data from server',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all tables from remote database
+ */
+exports.getRemoteTables = async (req, res) => {
+  try {
+    const { api_key } = req.query;
+    
+    if (!api_key) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameter: api_key'
+      });
+    }
+    
+    // Verify API key and get subscription info
+    const [subscriptions] = await pool.execute(
+      `SELECT remote_database_name FROM client_subscriptions
+       WHERE api_key = ? AND status IN ('active', 'trial')`,
+      [api_key]
+    );
+    
+    if (subscriptions.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or inactive API key'
+      });
+    }
+    
+    const remoteDatabaseName = subscriptions[0].remote_database_name;
+    
+    if (!remoteDatabaseName) {
+      return res.status(404).json({
+        success: false,
+        message: 'Remote database not configured for this subscription'
+      });
+    }
+    
+    // Get tables
+    const result = await dbSync.getRemoteTables(remoteDatabaseName);
+    
+    res.json({
+      success: true,
+      tables: result.tables,
+      remote_database: remoteDatabaseName
+    });
+    
+  } catch (error) {
+    console.error('Error getting remote tables:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get remote tables',
+      error: error.message
     });
   }
 };

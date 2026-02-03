@@ -1,13 +1,5 @@
-/**
- * Installer Template Generator
- * Generates custom installation wizards for each system
- */
-
-function generateInstaller({ systemName, category, features, tier }) {
-  const featuresList = features.map(f => `("✨", "${f}", "Feature included in ${tier} plan")`).join(',\n            ');
-  
-  return `"""
-ZORO9X ${systemName} - Installation Wizard
+"""
+ZORO9X Restaurant Management System - Installation Wizard
 """
 
 import tkinter as tk
@@ -25,7 +17,7 @@ API_BASE_URL = 'http://localhost:5001/api/saas'
 class InstallationWizard:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("ZORO9X ${systemName} - Installation Wizard")
+        self.root.title("ZORO9X Restaurant Management System - Installation Wizard")
         self.root.geometry("750x550")
         self.root.configure(bg='#f5f7fa')
         self.root.resizable(False, False)
@@ -40,14 +32,14 @@ class InstallationWizard:
             self.completion_step
         ]
         
-        self.install_path = str(Path.home() / 'ZORO9X' / '${systemName.replace(/\s+/g, '')}')
+        self.install_path = str(Path.home() / 'ZORO9X' / 'RestaurantManagementSystem')
         self.create_desktop_shortcut = True
         
         # Load business config
         self.business_config = self.load_business_config()
         self.api_key = self.business_config.get('api_key', '')
         self.company_name = self.business_config.get('business_details', {}).get('name', '')
-        self.database_name = self.business_config.get('database_config', {}).get('database_name', '${category}_database')
+        self.database_name = self.business_config.get('database_config', {}).get('database_name', 'restaurant_management_database')
         
         self.create_ui()
         self.show_current_step()
@@ -72,7 +64,7 @@ class InstallationWizard:
         
         tk.Label(
             header,
-            text="🚀 ${systemName}",
+            text="🚀 Restaurant Management System",
             font=('Segoe UI', 18, 'bold'),
             bg='#2563eb',
             fg='white'
@@ -150,7 +142,7 @@ class InstallationWizard:
         # Welcome content
         tk.Label(
             scrollable_frame,
-            text="Welcome to ${systemName}!",
+            text="Welcome to Restaurant Management System!",
             font=('Segoe UI', 16, 'bold'),
             bg='white',
             fg='#1e293b'
@@ -158,7 +150,7 @@ class InstallationWizard:
         
         tk.Label(
             scrollable_frame,
-            text="${tier.toUpperCase()} Edition",
+            text="PREMIUM Edition",
             font=('Segoe UI', 11),
             bg='white',
             fg='#64748b'
@@ -178,7 +170,10 @@ class InstallationWizard:
         ).pack(anchor='w', pady=(0, 10))
         
         features = [
-            ${featuresList}
+            ("✨", "Dashboard", "Feature included in premium plan"),
+            ("✨", "Advanced Analytics", "Feature included in premium plan"),
+            ("✨", "Custom Reports", "Feature included in premium plan"),
+            ("✨", "f3", "Feature included in premium plan")
         ]
         
         for icon, title, desc in features:
@@ -255,7 +250,7 @@ class InstallationWizard:
         license_content = """End User License Agreement (EULA)
 
 1. Grant of License
-ZORO9X grants you a non-exclusive license to use ${systemName}.
+ZORO9X grants you a non-exclusive license to use Restaurant Management System.
 
 2. Restrictions
 You may not modify, reverse engineer, or distribute this software.
@@ -445,7 +440,7 @@ By proceeding, you agree to these terms."""
     
     def installing_step(self):
         """Step 5: Installation progress"""
-        # Save path before clearing content (widget will be destroyed)
+        # Save values before clearing content (widgets will be destroyed)
         self.install_path = self.path_entry.get()
         self.create_desktop_shortcut = self.shortcut_var.get()
         self.clear_content()
@@ -496,7 +491,7 @@ By proceeding, you agree to these terms."""
                 
                 elif "Copying application" in step_text:
                     script_dir = os.path.dirname(os.path.abspath(__file__))
-                    for file in ['${category}_app.py', 'requirements.txt', 'README.md']:
+                    for file in ['restaurant_management_app.py', 'requirements.txt', 'README.md']:
                         src = os.path.join(script_dir, file)
                         if os.path.exists(src):
                             shutil.copy(src, self.install_path)
@@ -530,7 +525,7 @@ By proceeding, you agree to these terms."""
                         'database_name': self.database_name,
                         'database_path': f'{self.database_name}.db'
                     }
-                    config_path = os.path.join(self.install_path, '${category}_config.json')
+                    config_path = os.path.join(self.install_path, 'restaurant_management_config.json')
                     with open(config_path, 'w') as f:
                         json.dump(config, f, indent=2)
                 
@@ -552,12 +547,12 @@ By proceeding, you agree to these terms."""
         try:
             from win32com.client import Dispatch
             desktop = Path.home() / 'Desktop'
-            shortcut_path = desktop / f'${systemName}.lnk'
+            shortcut_path = desktop / f'Restaurant Management System.lnk'
             
             shell = Dispatch('WScript.Shell')
             shortcut = shell.CreateShortCut(str(shortcut_path))
             shortcut.Targetpath = sys.executable
-            shortcut.Arguments = f'"{self.install_path}/${category}_app.py"'
+            shortcut.Arguments = f'"{self.install_path}/restaurant_management_app.py"'
             shortcut.WorkingDirectory = self.install_path
             shortcut.IconLocation = sys.executable
             shortcut.save()
@@ -585,7 +580,7 @@ By proceeding, you agree to these terms."""
         
         tk.Label(
             self.content_frame,
-            text="${systemName} has been successfully installed.",
+            text="Restaurant Management System has been successfully installed.",
             font=('Segoe UI', 10),
             bg='white',
             fg='#64748b'
@@ -605,7 +600,7 @@ By proceeding, you agree to these terms."""
     def launch_application(self):
         """Launch the installed application"""
         try:
-            app_path = os.path.join(self.install_path, '${category}_app.py')
+            app_path = os.path.join(self.install_path, 'restaurant_management_app.py')
             subprocess.Popen([sys.executable, app_path], cwd=self.install_path)
             self.root.quit()
         except Exception as e:
@@ -636,9 +631,3 @@ By proceeding, you agree to these terms."""
 if __name__ == '__main__':
     wizard = InstallationWizard()
     wizard.run()
-`;
-}
-
-module.exports = {
-  generateInstaller
-};

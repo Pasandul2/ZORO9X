@@ -142,6 +142,7 @@ exports.generateSystem = async (req, res) => {
     // 5. Create requirements.txt (only installable packages)
     const requirements = `requests
 Pillow
+pyinstaller
 `;
     
     fs.writeFileSync(path.join(basicPath, 'requirements.txt'), requirements);
@@ -176,6 +177,77 @@ For support, contact: support@zoro9x.com
     fs.writeFileSync(path.join(basicPath, 'README.md'), readme);
     fs.writeFileSync(path.join(premiumPath, 'README.md'), readme);
     console.log('✅ Created README.md');
+    
+    // 7. Create PyInstaller spec file for compilation
+    const specFile = `# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(
+    ['main.py'],
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=['tkinter', 'sqlite3', 'requests', 'PIL'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='${category}_management',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)
+`;
+    
+    fs.writeFileSync(path.join(basicPath, 'build.spec'), specFile);
+    fs.writeFileSync(path.join(premiumPath, 'build.spec'), specFile);
+    console.log('✅ Created PyInstaller spec files');
+    
+    // 8. Create build script for compilation
+    const buildScript = `@echo off
+echo Building ${name}...
+echo.
+
+REM Install dependencies
+pip install -r requirements.txt
+
+REM Compile with PyInstaller (with encryption)
+pyinstaller --key="ZORO9X_SECURE_KEY_${Date.now()}" build.spec
+
+echo.
+echo Build complete! Executable is in the dist folder.
+pause
+`;
+    
+    fs.writeFileSync(path.join(basicPath, 'BUILD.bat'), buildScript);
+    fs.writeFileSync(path.join(premiumPath, 'BUILD.bat'), buildScript);
+    console.log('✅ Created BUILD.bat scripts');
     
     // 7. Insert system into database
     const [systemResult] = await connection.execute(

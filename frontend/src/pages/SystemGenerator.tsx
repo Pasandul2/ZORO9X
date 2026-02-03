@@ -150,24 +150,24 @@ const SystemGenerator: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen bg-gray-900 py-8 px-4">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl shadow-sm p-8 mb-6"
+          className="bg-gray-800 rounded-xl shadow-sm p-8 mb-6"
         >
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-white mb-2">
             🚀 System Generator
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-300">
             Automatically generate complete Python desktop applications with Basic & Premium tiers
           </p>
         </motion.div>
 
         {/* Progress Steps */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <div className="bg-gray-800 rounded-xl shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between">
             {['Basic Info', 'Features', 'Generate'].map((label, index) => (
               <div key={index} className="flex items-center">
@@ -177,13 +177,13 @@ const SystemGenerator: React.FC = () => {
                       ? 'bg-green-500 text-white'
                       : step === index + 1
                       ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-500'
+                      : 'bg-gray-600 text-gray-300'
                   }`}
                 >
                   {step > index + 1 ? '✓' : index + 1}
                 </div>
-                <span className="ml-2 text-sm font-medium text-gray-700">{label}</span>
-                {index < 3 && <div className="w-16 h-1 bg-gray-200 mx-4"></div>}
+                <span className="ml-2 text-sm font-medium text-gray-300">{label}</span>
+                {index < 3 && <div className="w-16 h-1 bg-gray-600 mx-4"></div>}
               </div>
             ))}
           </div>
@@ -194,15 +194,15 @@ const SystemGenerator: React.FC = () => {
           key={step}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="bg-white rounded-xl shadow-sm p-8"
+          className="bg-gray-800 rounded-xl shadow-sm p-8"
         >
           {/* Step 1: Basic Information */}
           {step === 1 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Basic Information</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">Basic Information</h2>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   System Name *
                 </label>
                 <input
@@ -210,12 +210,12 @@ const SystemGenerator: React.FC = () => {
                   value={systemName}
                   onChange={(e) => setSystemName(e.target.value)}
                   placeholder="e.g., Restaurant Management"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Category *
                 </label>
                 <input
@@ -223,15 +223,15 @@ const SystemGenerator: React.FC = () => {
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   placeholder="e.g., restaurant, salon, hotel"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
                 />
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-gray-400">
                   Use lowercase, no spaces (e.g., "restaurant" not "Restaurant Management")
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Description
                 </label>
                 <textarea
@@ -239,12 +239,12 @@ const SystemGenerator: React.FC = () => {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Brief description of the system..."
                   rows={4}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-300 mb-2">
                   Icon URL (optional)
                 </label>
                 <input
@@ -252,7 +252,7 @@ const SystemGenerator: React.FC = () => {
                   value={iconUrl}
                   onChange={(e) => setIconUrl(e.target.value)}
                   placeholder="/images/restaurant-icon.png"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 bg-gray-700 border border-gray-600 text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-400"
                 />
               </div>
 
@@ -269,11 +269,11 @@ const SystemGenerator: React.FC = () => {
           {/* Step 2: Features */}
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">System Features</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">System Features</h2>
 
               {/* Basic Features */}
-              <div className="border border-gray-200 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              <div className="border border-gray-600 rounded-lg p-6 bg-gray-700">
+                <h3 className="text-lg font-semibold text-white mb-4">
                   📦 Basic Edition Features
                 </h3>
                 
@@ -281,12 +281,12 @@ const SystemGenerator: React.FC = () => {
                   {basicFeatures.map((feature, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between bg-blue-50 px-4 py-2 rounded-lg"
+                      className="flex items-center justify-between bg-blue-900/30 px-4 py-2 rounded-lg border border-blue-700/50"
                     >
-                      <span className="text-gray-700">{feature}</span>
+                      <span className="text-gray-200">{feature}</span>
                       <button
                         onClick={() => removeBasicFeature(index)}
-                        className="text-red-500 hover:text-red-700"
+                        className="text-red-400 hover:text-red-300"
                       >
                         ✕
                       </button>
@@ -301,7 +301,7 @@ const SystemGenerator: React.FC = () => {
                     onChange={(e) => setNewBasicFeature(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addBasicFeature()}
                     placeholder="Add feature..."
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-4 py-2 bg-gray-600 border border-gray-500 text-white rounded-lg focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
                   />
                   <button
                     onClick={addBasicFeature}
@@ -313,8 +313,8 @@ const SystemGenerator: React.FC = () => {
               </div>
 
               {/* Premium Features */}
-              <div className="border border-yellow-200 bg-yellow-50 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              <div className="border border-yellow-600 bg-yellow-900/20 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">
                   ⭐ Premium Edition Features
                 </h3>
                 
@@ -322,12 +322,12 @@ const SystemGenerator: React.FC = () => {
                   {premiumFeatures.map((feature, index) => (
                     <div
                       key={index}
-                      className="flex items-center justify-between bg-yellow-100 px-4 py-2 rounded-lg"
+                      className="flex items-center justify-between bg-yellow-900/40 px-4 py-2 rounded-lg border border-yellow-700/50"
                     >
-                      <span className="text-gray-700">{feature}</span>
+                      <span className="text-gray-200">{feature}</span>
                       <button
                         onClick={() => removePremiumFeature(index)}
-                        className="text-red-500 hover:text-red-700"
+                        className="text-red-400 hover:text-red-300"
                       >
                         ✕
                       </button>
@@ -342,7 +342,7 @@ const SystemGenerator: React.FC = () => {
                     onChange={(e) => setNewPremiumFeature(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addPremiumFeature()}
                     placeholder="Add premium feature..."
-                    className="flex-1 px-4 py-2 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500"
+                    className="flex-1 px-4 py-2 bg-gray-600 border border-gray-500 text-white rounded-lg focus:ring-2 focus:ring-yellow-500 placeholder-gray-400"
                   />
                   <button
                     onClick={addPremiumFeature}
@@ -356,7 +356,7 @@ const SystemGenerator: React.FC = () => {
               <div className="flex gap-4">
                 <button
                   onClick={() => setStep(1)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300"
+                  className="flex-1 bg-gray-700 text-gray-200 py-3 rounded-lg font-semibold hover:bg-gray-600"
                 >
                   ← Back
                 </button>
@@ -373,22 +373,22 @@ const SystemGenerator: React.FC = () => {
           {/* Step 3: Review & Generate */}
           {step === 3 && !generatedSystem && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Review & Generate</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">Review & Generate</h2>
 
-              <div className="bg-gray-50 rounded-lg p-6 space-y-4">
+              <div className="bg-gray-700 rounded-lg p-6 space-y-4">
                 <div>
-                  <h3 className="font-semibold text-gray-700">System Name:</h3>
-                  <p className="text-gray-900">{systemName}</p>
+                  <h3 className="font-semibold text-gray-300">System Name:</h3>
+                  <p className="text-white">{systemName}</p>
                 </div>
 
                 <div>
-                  <h3 className="font-semibold text-gray-700">Category:</h3>
-                  <p className="text-gray-900">{category}</p>
+                  <h3 className="font-semibold text-gray-300">Category:</h3>
+                  <p className="text-white">{category}</p>
                 </div>
 
                 <div>
-                  <h3 className="font-semibold text-gray-700">Basic Features ({basicFeatures.length}):</h3>
-                  <ul className="list-disc list-inside text-gray-700">
+                  <h3 className="font-semibold text-gray-300">Basic Features ({basicFeatures.length}):</h3>
+                  <ul className="list-disc list-inside text-gray-300">
                     {basicFeatures.map((f, i) => (
                       <li key={i}>{f}</li>
                     ))}
@@ -396,8 +396,8 @@ const SystemGenerator: React.FC = () => {
                 </div>
 
                 <div>
-                  <h3 className="font-semibold text-gray-700">Premium Features ({premiumFeatures.length}):</h3>
-                  <ul className="list-disc list-inside text-gray-700">
+                  <h3 className="font-semibold text-gray-300">Premium Features ({premiumFeatures.length}):</h3>
+                  <ul className="list-disc list-inside text-gray-300">
                     {premiumFeatures.map((f, i) => (
                       <li key={i}>{f}</li>
                     ))}
@@ -405,8 +405,8 @@ const SystemGenerator: React.FC = () => {
                 </div>
 
                 <div>
-                  <h3 className="font-semibold text-gray-700">Database Tables ({tables.length}):</h3>
-                  <ul className="list-disc list-inside text-gray-700">
+                  <h3 className="font-semibold text-gray-300">Database Tables ({tables.length}):</h3>
+                  <ul className="list-disc list-inside text-gray-300">
                     {tables.map((t, i) => (
                       <li key={i}>
                         {t.name} ({t.fields.length} fields)
@@ -416,11 +416,11 @@ const SystemGenerator: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-blue-900">
+              <div className="bg-blue-900/30 border border-blue-600 rounded-lg p-4">
+                <p className="text-blue-300">
                   <strong>🚀 Ready to generate!</strong> This will create:
                 </p>
-                <ul className="list-disc list-inside text-blue-800 mt-2">
+                <ul className="list-disc list-inside text-blue-200 mt-2">
                   <li>Basic version Python application</li>
                   <li>Premium version Python application</li>
                   <li>Installation wizard for both versions</li>
@@ -432,7 +432,7 @@ const SystemGenerator: React.FC = () => {
               <div className="flex gap-4">
                 <button
                   onClick={() => setStep(2)}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300"
+                  className="flex-1 bg-gray-700 text-gray-200 py-3 rounded-lg font-semibold hover:bg-gray-600"
                   disabled={loading}
                 >
                   ← Back
@@ -440,7 +440,7 @@ const SystemGenerator: React.FC = () => {
                 <button
                   onClick={handleGenerate}
                   disabled={loading}
-                  className="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400"
+                  className="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-600"
                 >
                   {loading ? 'Generating...' : '✨ Generate System'}
                 </button>
@@ -452,11 +452,11 @@ const SystemGenerator: React.FC = () => {
           {step === 3 && generatedSystem && (
             <div className="text-center space-y-6">
               <div className="text-6xl">✅</div>
-              <h2 className="text-3xl font-bold text-green-600">System Generated Successfully!</h2>
+              <h2 className="text-3xl font-bold text-green-400">System Generated Successfully!</h2>
               
-              <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-left">
-                <h3 className="font-semibold text-green-900 mb-3">Created:</h3>
-                <ul className="space-y-2 text-green-800">
+              <div className="bg-green-900/20 border border-green-600 rounded-lg p-6 text-left">
+                <h3 className="font-semibold text-green-300 mb-3">Created:</h3>
+                <ul className="space-y-2 text-green-200">
                   <li>✓ System ID: {generatedSystem.id}</li>
                   <li>✓ Basic Path: {generatedSystem.basic_path}</li>
                   <li>✓ Premium Path: {generatedSystem.premium_path}</li>
@@ -467,16 +467,16 @@ const SystemGenerator: React.FC = () => {
                 </ul>
               </div>
 
-              <div className="flex gap-4">
+              <div className="space-y-3">
                 <button
-                  onClick={() => window.location.href = '/admin'}
-                  className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700"
+                  onClick={() => window.location.href = '/admin/saas'}
+                  className="w-full bg-blue-600 text-white py-4 rounded-lg font-semibold hover:bg-blue-700 text-lg"
                 >
-                  Go to Dashboard
+                  ← Back to Dashboard
                 </button>
                 <button
                   onClick={() => window.location.reload()}
-                  className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-300"
+                  className="w-full bg-gray-700 text-gray-200 py-3 rounded-lg font-semibold hover:bg-gray-600"
                 >
                   Generate Another System
                 </button>

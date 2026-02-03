@@ -27,10 +27,14 @@ import SystemGenerator from './pages/SystemGenerator';
 import SystemsMarketplace from './pages/SystemsMarketplace';
 import SystemPlansPage from './pages/SystemPlansPage';
 import ClientDashboard from './pages/ClientDashboard';
+import SecurityDashboard from './pages/SecurityDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
 import Portfolio from './pages/Portfolio';
 import PortfolioManagement from './components/PortfolioManagement';
+import ClientManagement from './pages/ClientManagement';
+import QuotationGenerator from './pages/QuotationGenerator';
+import InvoiceGenerator from './pages/InvoiceGenerator';
 import WhatsApp from './components/WhatsApp';
 import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
@@ -101,6 +105,9 @@ function AppContent() {
                 <Route path="/admin/admins" element={<AdminManager darkMode={adminDarkMode} />} />
                 <Route path="/admin/saas" element={<SaaSDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/portfolio" element={<PortfolioManagement darkMode={adminDarkMode} />} />
+                <Route path="/admin/clients" element={<ClientManagement />} />
+                <Route path="/admin/quotations" element={<QuotationGenerator />} />
+                <Route path="/admin/invoices" element={<InvoiceGenerator />} />
                 <Route path="/admin/analytics" element={<Analytics />} />
                 <Route path="/admin/generate-system" element={<SystemGenerator darkMode={adminDarkMode} />} />
                 <Route path="/admin/database" element={<div className="text-white text-center py-20"><h1 className="text-3xl font-bold">Database Management</h1><p className="text-gray-400 mt-4">Coming Soon</p></div>} />

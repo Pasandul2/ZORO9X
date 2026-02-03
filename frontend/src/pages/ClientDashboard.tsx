@@ -5,7 +5,7 @@ import {
   Package, Key, Database, Calendar, DollarSign, 
   Activity, AlertCircle, Copy, Download, ExternalLink,
   TrendingUp, Users, Server, Check, Upload, Building2, Phone, Mail,
-  Eye, EyeOff
+  Eye, EyeOff, Shield, Clock, HardDrive, Wifi, WifiOff
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -29,12 +29,31 @@ interface Subscription {
   company_name: string;
   system_features: string[];
   plan_features: string[];
+  // Security fields
+  device_count?: number;
+  max_devices?: number;
+  activation_count?: number;
+  max_activations?: number;
+  is_activated?: boolean;
+}
+
+interface SecurityInfo {
+  device_count: number;
+  max_devices: number;
+  activation_count: number;
+  max_activations: number;
+  downloads_remaining: number;
+  last_seen: string | null;
+  days_offline: number;
+  grace_period_days: number;
+  is_activated: boolean;
 }
 
 const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [usageStats, setUsageStats] = useState<any>(null);
+  const [securityInfo, setSecurityInfo] = useState<SecurityInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string>('');
   const [showApiKey, setShowApiKey] = useState(false);
@@ -48,6 +67,48 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const navigate = useNavigate();
+
+  // Helper component for progress bar
+  const ProgressBar: React.FC<{ 
+    current: number; 
+    max: number; 
+    label: string; 
+    color?: string;
+    showNumbers?: boolean;
+  }> = ({ current, max, label, color = 'purple', showNumbers = true }) => {
+    const percentage = max > 0 ? (current / max) * 100 : 0;
+    const remaining = max - current;
+    
+    const colorClasses = {
+      purple: 'bg-purple-600',
+      green: 'bg-green-600',
+      blue: 'bg-blue-600',
+      yellow: 'bg-yellow-600',
+      red: 'bg-red-600'
+    };
+    
+    return (
+      <div>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-sm font-medium text-gray-300">{label}</span>
+          {showNumbers && (
+            <span className="text-sm font-bold">
+              {current}/{max}
+            </span>
+          )}
+        </div>
+        <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+          <div 
+            className={`h-full ${colorClasses[color as keyof typeof colorClasses]} transition-all duration-500 rounded-full`}
+            style={{ width: `${Math.min(percentage, 100)}%` }}
+          />
+        </div>
+        {remaining > 0 && (
+          <p className="text-xs text-gray-400 mt-1">{remaining} remaining</p>
+        )}
+      </div>
+    );
+  };
 
   useEffect(() => {
     fetchSubscriptions();
@@ -96,6 +157,52 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
       }
     } catch (error) {
       console.error('Error fetching usage stats:', error);
+    }
+    
+    // Fetch security information
+    try {
+      const secResponse = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/security`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (secResponse.ok) {
+        const secData = await secResponse.json();
+        
+        // Calculate days offline
+        let daysOffline = 0;
+        if (secData.security.last_seen) {
+          const lastSeen = new Date(secData.security.last_seen);
+          const now = new Date();
+          daysOffline = Math.floor((now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24));
+        }
+        
+        setSecurityInfo({
+          device_count: secData.security.device_count || 0,
+          max_devices: secData.security.max_devices || 3,
+          activation_count: secData.security.activation_count || 0,
+          max_activations: secData.security.max_activations || 3,
+          downloads_remaining: (secData.security.max_activations || 3) - (secData.security.activation_count || 0),
+          last_seen: secData.security.last_seen || null,
+          days_offline: daysOffline,
+          grace_period_days: 7,
+          is_activated: secData.security.is_activated || false
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching security info:', error);
+      // Set default security info if API fails
+      setSecurityInfo({
+        device_count: 0,
+        max_devices: 3,
+        activation_count: 0,
+        max_activations: 3,
+        downloads_remaining: 3,
+        last_seen: null,
+        days_offline: 0,
+        grace_period_days: 7,
+        is_activated: false
+      });
     }
   };
 
@@ -551,6 +658,112 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                         <p className="text-sm font-semibold">
                           {new Date(usageStats.last_request).toLocaleString()}
                         </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Security Features */}
+              {securityInfo && (
+                <div className={`rounded-2xl p-6 border ${
+                  darkMode ? 'bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-700' : 'bg-purple-50 border-purple-200'
+                }`}>
+                  <h3 className="font-bold mb-4 flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-purple-400" />
+                    Security Features
+                  </h3>
+                  
+                  <div className="space-y-5">
+                    {/* Activation Status */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-300">Status</span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        securityInfo.is_activated 
+                          ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                          : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                      }`}>
+                        {securityInfo.is_activated ? '✓ Activated' : '⚠ Not Activated'}
+                      </span>
+                    </div>
+
+                    {/* Active Devices */}
+                    <ProgressBar 
+                      current={securityInfo.device_count} 
+                      max={securityInfo.max_devices} 
+                      label="Active Devices"
+                      color={securityInfo.device_count >= securityInfo.max_devices ? 'red' : 'green'}
+                    />
+
+                    {/* Downloads/Activations */}
+                    <ProgressBar 
+                      current={securityInfo.activation_count} 
+                      max={securityInfo.max_activations} 
+                      label="System Downloads"
+                      color={securityInfo.downloads_remaining === 0 ? 'red' : securityInfo.downloads_remaining === 1 ? 'yellow' : 'blue'}
+                    />
+
+                    {/* Grace Period */}
+                    <ProgressBar 
+                      current={securityInfo.days_offline} 
+                      max={securityInfo.grace_period_days} 
+                      label="Offline Days"
+                      color={securityInfo.days_offline >= securityInfo.grace_period_days ? 'red' : securityInfo.days_offline >= 5 ? 'yellow' : 'green'}
+                    />
+
+                    {/* Last Seen */}
+                    <div className="pt-3 border-t border-gray-700">
+                      <div className="flex items-center gap-2 mb-2">
+                        {securityInfo.last_seen ? (
+                          <>
+                            <Wifi className="w-4 h-4 text-green-400" />
+                            <span className="text-xs font-semibold text-green-400">Online</span>
+                          </>
+                        ) : (
+                          <>
+                            <WifiOff className="w-4 h-4 text-gray-400" />
+                            <span className="text-xs font-semibold text-gray-400">Never Connected</span>
+                          </>
+                        )}
+                      </div>
+                      {securityInfo.last_seen && (
+                        <p className="text-xs text-gray-400">
+                          Last seen: {new Date(securityInfo.last_seen).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Warning Messages */}
+                    {securityInfo.downloads_remaining === 0 && (
+                      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div className="flex gap-2">
+                          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-300">
+                            Download limit reached. Contact support to increase limit.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {securityInfo.days_offline >= securityInfo.grace_period_days && (
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                        <div className="flex gap-2">
+                          <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-yellow-300">
+                            Grace period expired. System requires internet connection.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {securityInfo.device_count >= securityInfo.max_devices && (
+                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                        <div className="flex gap-2">
+                          <HardDrive className="w-4 h-4 text-orange-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-orange-300">
+                            Device limit reached. New activations require admin approval.
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

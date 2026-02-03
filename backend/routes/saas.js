@@ -101,6 +101,13 @@ router.put('/subscriptions/:id/cancel', authenticateToken, saasController.cancel
 router.get('/subscriptions/:subscriptionId/usage', authenticateToken, saasController.getApiUsageStats);
 
 /**
+ * GET /api/saas/subscriptions/:subscriptionId/security
+ * Get security information for a subscription
+ * Requires authentication
+ */
+router.get('/subscriptions/:subscriptionId/security', authenticateToken, saasController.getSecurityInfo);
+
+/**
  * GET /api/saas/download/:subscriptionId
  * Download system application
  * Requires authentication
@@ -115,12 +122,18 @@ router.get('/download/:subscriptionId', authenticateToken, saasController.downlo
 router.post('/generate-custom-system', authenticateToken, upload.single('logo'), saasController.generateCustomSystem);
 
 // ============================================
-// API KEY VALIDATION
+// API KEY VALIDATION & DEVICE ACTIVATION
 // ============================================
 
 /**
+ * POST /api/saas/activate-device
+ * Activate a new device for a subscription
+ */
+router.post('/activate-device', saasController.activateDevice);
+
+/**
  * POST /api/saas/validate-key
- * Validate API key and log usage
+ * Validate API key, check device, and log usage
  */
 router.post('/validate-key', saasController.validateApiKey);
 
@@ -183,5 +196,76 @@ router.put('/admin/plans/:id', authenticateToken, authenticateAdmin, saasControl
  * Requires admin authentication
  */
 router.delete('/admin/plans/:id', authenticateToken, authenticateAdmin, saasController.deletePlan);
+
+// ============================================
+// ADMIN ROUTES - Security Management
+// ============================================
+
+/**
+ * GET /api/saas/admin/security/alerts
+ * Get all security alerts
+ * Requires admin authentication
+ */
+router.get('/admin/security/alerts', authenticateToken, authenticateAdmin, saasController.getSecurityAlerts);
+
+/**
+ * GET /api/saas/admin/security/devices
+ * Get pending device activations
+ * Requires admin authentication
+ */
+router.get('/admin/security/devices', authenticateToken, authenticateAdmin, saasController.getPendingDevices);
+
+/**
+ * POST /api/saas/admin/security/devices/:id/approve
+ * Approve a device activation
+ * Requires admin authentication
+ */
+router.post('/admin/security/devices/:id/approve', authenticateToken, authenticateAdmin, saasController.approveDevice);
+
+/**
+ * POST /api/saas/admin/security/devices/:id/reject
+ * Reject a device activation
+ * Requires admin authentication
+ */
+router.post('/admin/security/devices/:id/reject', authenticateToken, authenticateAdmin, saasController.rejectDevice);
+
+/**
+ * POST /api/saas/admin/security/alerts/:id/resolve
+ * Resolve a security alert
+ * Requires admin authentication
+ */
+router.post('/admin/security/alerts/:id/resolve', authenticateToken, authenticateAdmin, saasController.resolveSecurityAlert);
+
+/**
+ * GET /api/saas/admin/security/subscriptions/:id/devices
+ * Get all devices for a subscription
+ * Requires admin authentication
+ */
+router.get('/admin/security/subscriptions/:id/devices', authenticateToken, authenticateAdmin, saasController.getSubscriptionDevices);
+
+// ============================================
+// DATABASE SYNC ROUTES (No authentication - uses API key)
+// ============================================
+
+/**
+ * POST /api/saas/sync/to-server
+ * Sync data from client to server (backup)
+ * Requires API key in request body
+ */
+router.post('/sync/to-server', saasController.syncToServer);
+
+/**
+ * POST /api/saas/sync/from-server
+ * Sync data from server to client (restore)
+ * Requires API key in request body
+ */
+router.post('/sync/from-server', saasController.syncFromServer);
+
+/**
+ * GET /api/saas/sync/tables
+ * Get all tables from remote database
+ * Requires API key in query string
+ */
+router.get('/sync/tables', saasController.getRemoteTables);
 
 module.exports = router;

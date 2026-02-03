@@ -130,6 +130,7 @@ async function createClientSubscriptionsTable() {
         database_name VARCHAR(100) UNIQUE NOT NULL,
         subdomain VARCHAR(100) UNIQUE,
         api_key VARCHAR(255) UNIQUE NOT NULL,
+        remote_database_name VARCHAR(100),
         status ENUM('active', 'trial', 'expired', 'cancelled') DEFAULT 'trial',
         start_date DATE NOT NULL,
         end_date DATE NOT NULL,
@@ -137,6 +138,11 @@ async function createClientSubscriptionsTable() {
         last_payment_date TIMESTAMP NULL,
         next_billing_date DATE NULL,
         total_amount DECIMAL(10, 2),
+        device_count INT DEFAULT 0,
+        max_devices INT DEFAULT 3,
+        activation_count INT DEFAULT 0,
+        max_activations INT DEFAULT 3,
+        is_activated BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
@@ -280,6 +286,9 @@ async function initializeSaaSTables() {
     await createApiUsageLogsTable();
     await createPaymentsTable();
     await createSystemNotificationsTable();
+    await createDeviceActivationsTable();
+    await createSecurityAlertsTable();
+    await createLicenseTokensTable();
     
     console.log('\n🎉 All SaaS tables initialized successfully!\n');
   } catch (error) {
@@ -417,6 +426,125 @@ async function seedInitialPlans() {
   }
 }
 
+/**
+ * Create device_activations table - Track device activations per subscription
+ */
+async function createDeviceActivationsTable() {
+  try {
+    const connection = await pool.getConnection();
+    
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS device_activations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        subscription_id INT NOT NULL,
+        device_fingerprint VARCHAR(255) NOT NULL,
+        device_name VARCHAR(255),
+        device_info TEXT,
+        status ENUM('pending', 'active', 'rejected', 'revoked') DEFAULT 'pending',
+        first_activated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        ip_address VARCHAR(45),
+        location VARCHAR(100),
+        approved_by INT NULL,
+        approved_at TIMESTAMP NULL,
+        rejection_reason TEXT,
+        FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+        FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_device_sub (subscription_id, device_fingerprint),
+        INDEX idx_subscription_id (subscription_id),
+        INDEX idx_device_fingerprint (device_fingerprint),
+        INDEX idx_status (status)
+      )
+    `;
+    
+    await connection.execute(createTableQuery);
+    console.log('✅ Device activations table created/verified successfully!');
+    connection.release();
+    
+  } catch (error) {
+    console.error('❌ Error creating device_activations table:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Create security_alerts table - Track suspicious activities for admin review
+ */
+async function createSecurityAlertsTable() {
+  try {
+    const connection = await pool.getConnection();
+    
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS security_alerts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        subscription_id INT NOT NULL,
+        alert_type ENUM('concurrent_use', 'device_limit_exceeded', 'suspicious_location', 'rapid_activations') NOT NULL,
+        severity ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+        status ENUM('pending', 'reviewed', 'resolved', 'ignored') DEFAULT 'pending',
+        details JSON,
+        device_fingerprint VARCHAR(255),
+        ip_address VARCHAR(45),
+        location VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed_by INT NULL,
+        reviewed_at TIMESTAMP NULL,
+        resolution_notes TEXT,
+        action_taken ENUM('none', 'blocked', 'warning_sent', 'subscription_suspended') DEFAULT 'none',
+        FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+        INDEX idx_subscription_id (subscription_id),
+        INDEX idx_alert_type (alert_type),
+        INDEX idx_status (status),
+        INDEX idx_severity (severity),
+        INDEX idx_created_at (created_at)
+      )
+    `;
+    
+    await connection.execute(createTableQuery);
+    console.log('✅ Security alerts table created/verified successfully!');
+    connection.release();
+    
+  } catch (error) {
+    console.error('❌ Error creating security_alerts table:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Create license_tokens table - Store offline validation tokens
+ */
+async function createLicenseTokensTable() {
+  try {
+    const connection = await pool.getConnection();
+    
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS license_tokens (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        subscription_id INT NOT NULL,
+        device_fingerprint VARCHAR(255) NOT NULL,
+        token VARCHAR(500) NOT NULL,
+        issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        last_used TIMESTAMP NULL,
+        is_revoked BOOLEAN DEFAULT false,
+        FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+        INDEX idx_subscription_id (subscription_id),
+        INDEX idx_device_fingerprint (device_fingerprint),
+        INDEX idx_token (token),
+        INDEX idx_expires_at (expires_at)
+      )
+    `;
+    
+    await connection.execute(createTableQuery);
+    console.log('✅ License tokens table created/verified successfully!');
+    connection.release();
+    
+  } catch (error) {
+    console.error('❌ Error creating license_tokens table:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeSaaSTables,
   seedInitialSystems,
@@ -427,5 +555,8 @@ module.exports = {
   createClientSubscriptionsTable,
   createApiUsageLogsTable,
   createPaymentsTable,
-  createSystemNotificationsTable
+  createSystemNotificationsTable,
+  createDeviceActivationsTable,
+  createSecurityAlertsTable,
+  createLicenseTokensTable
 };
