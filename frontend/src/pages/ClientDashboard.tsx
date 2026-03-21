@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Package, Key, Database, Calendar, DollarSign, 
   Activity, AlertCircle, Copy, Download, ExternalLink,
-  TrendingUp, Users, Server, Check, Upload, Building2, Phone, Mail,
+  TrendingUp, Users, Server, Check, Phone, Mail, Edit, Building2,
   Eye, EyeOff, Shield, Clock, HardDrive, Wifi, WifiOff
 } from 'lucide-react';
 
@@ -27,6 +27,12 @@ interface Subscription {
   start_date: string;
   end_date: string;
   company_name: string;
+  contact_email?: string;
+  contact_phone?: string;
+  business_address?: string;
+  website?: string;
+  tax_id?: string;
+  logo_url?: string;
   system_features: string[];
   plan_features: string[];
   // Security fields
@@ -47,26 +53,100 @@ interface SecurityInfo {
   days_offline: number;
   grace_period_days: number;
   is_activated: boolean;
+  subscription_status?: string;
+  payment_status?: string;
+}
+
+interface ActiveDevice {
+  id: number;
+  device_name: string;
+  mac_address: string | null;
+  ip_address: string | null;
+  first_activated: string | null;
+  last_seen: string | null;
+}
+
+interface BusinessInfo {
+  subscription_id: number;
+  system_id: number;
+  client_id: number;
+  company_name: string;
+  contact_email: string;
+  contact_phone: string;
+  business_address: string;
+  website: string;
+  tax_id: string;
+  logo_url: string | null;
+  system_logo: string | null;
+}
+
+interface BusinessRequestStatus {
+  id: number;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
 }
 
 const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
+  const MIN_DOWNLOAD_ANIMATION_MS = 2200;
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [usageStats, setUsageStats] = useState<any>(null);
   const [securityInfo, setSecurityInfo] = useState<SecurityInfo | null>(null);
+  const [activeDevices, setActiveDevices] = useState<ActiveDevice[]>([]);
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
+  const [latestBusinessRequest, setLatestBusinessRequest] = useState<BusinessRequestStatus | null>(null);
+  const [showBusinessInfoEditDialog, setShowBusinessInfoEditDialog] = useState(false);
+  const [businessForm, setBusinessForm] = useState({
+    company_name: '',
+    contact_email: '',
+    contact_phone: '',
+    business_address: '',
+    website: '',
+    tax_id: '',
+    use_system_logo: false,
+    remove_logo: false,
+    logo: null as File | null,
+  });
+  const [businessLogoPreview, setBusinessLogoPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string>('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [showCustomizationDialog, setShowCustomizationDialog] = useState(false);
-  const [customizationData, setCustomizationData] = useState({
-    business_name: '',
-    address: '',
-    phone: '',
-    email: '',
-    logo: null as File | null
-  });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDownloadingInstaller, setIsDownloadingInstaller] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadMessage, setDownloadMessage] = useState('Preparing installer package...');
+  const [showDownloadComplete, setShowDownloadComplete] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!businessForm.logo) {
+      setBusinessLogoPreview(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(businessForm.logo);
+    setBusinessLogoPreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [businessForm.logo]);
+
+  useEffect(() => {
+    if (!showDownloadComplete) {
+      return;
+    }
+
+    const hideTimer = window.setTimeout(() => {
+      setShowDownloadComplete(false);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(hideTimer);
+    };
+  }, [showDownloadComplete]);
 
   // Helper component for progress bar
   const ProgressBar: React.FC<{ 
@@ -186,7 +266,9 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
           last_seen: secData.security.last_seen || null,
           days_offline: daysOffline,
           grace_period_days: 7,
-          is_activated: secData.security.is_activated || false
+          is_activated: secData.security.is_activated || false,
+          subscription_status: secData.security.subscription_status,
+          payment_status: secData.security.payment_status
         });
       }
     } catch (error) {
@@ -201,9 +283,31 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         last_seen: null,
         days_offline: 0,
         grace_period_days: 7,
-        is_activated: false
+        is_activated: false,
+        subscription_status: 'unknown',
+        payment_status: 'unknown'
       });
     }
+
+    // Fetch active devices list with MAC addresses
+    try {
+      const devicesResponse = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/devices`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (devicesResponse.ok) {
+        const devicesData = await devicesResponse.json();
+        setActiveDevices(devicesData.devices || []);
+      } else {
+        setActiveDevices([]);
+      }
+    } catch (error) {
+      console.error('Error fetching active devices:', error);
+      setActiveDevices([]);
+    }
+
+    await fetchBusinessInfo(subscriptionId);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -212,81 +316,257 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
     setTimeout(() => setCopiedKey(''), 2000);
   };
 
+  const resolveImageSrc = (url?: string | null) => {
+    if (!url) {
+      return null;
+    }
+
+    return url.startsWith('http') ? url : `${import.meta.env.VITE_API_URL}${url}`;
+  };
+
+  const getDownloadFilename = (response: Response) => {
+    const contentDisposition = response.headers.get('Content-Disposition');
+    const contentType = response.headers.get('Content-Type') || '';
+
+    if (contentDisposition) {
+      const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+      if (utf8Match?.[1]) {
+        return decodeURIComponent(utf8Match[1]);
+      }
+
+      const quotedMatch = /filename="([^"]+)"/i.exec(contentDisposition);
+      if (quotedMatch?.[1]) {
+        return quotedMatch[1];
+      }
+
+      const plainMatch = /filename=([^;]+)/i.exec(contentDisposition);
+      if (plainMatch?.[1]) {
+        return plainMatch[1].trim();
+      }
+    }
+
+    if (contentType.includes('application/zip')) {
+      return 'system_installer_package.zip';
+    }
+
+    return 'system_installer.exe';
+  };
+
   const initiateDownload = () => {
-    setShowCustomizationDialog(true);
-    // Pre-fill business name from subscription
-    if (selectedSubscription) {
-      setCustomizationData(prev => ({
-        ...prev,
-        business_name: selectedSubscription.company_name || ''
-      }));
+    downloadSystemFile();
+  };
+
+  const fetchBusinessInfo = async (subscriptionId: number) => {
+    const token = localStorage.getItem('token');
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/business-info`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setBusinessInfo(data.businessInfo || null);
+      setLatestBusinessRequest(data.latestRequest || null);
+
+      if (data.businessInfo) {
+        setBusinessForm({
+          company_name: data.businessInfo.company_name || '',
+          contact_email: data.businessInfo.contact_email || '',
+          contact_phone: data.businessInfo.contact_phone || '',
+          business_address: data.businessInfo.business_address || '',
+          website: data.businessInfo.website || '',
+          tax_id: data.businessInfo.tax_id || '',
+          use_system_logo: false,
+          remove_logo: false,
+          logo: null,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching business info:', error);
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        alert('Please upload an image file');
-        return;
-      }
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Logo file size must be less than 5MB');
-        return;
-      }
-      setCustomizationData(prev => ({ ...prev, logo: file }));
-    }
-  };
-
-  const downloadSystemFile = async () => {
+  const openBusinessInfoEdit = () => {
     if (!selectedSubscription) return;
-    
-    // Validate required fields
-    if (!customizationData.business_name || !customizationData.phone) {
-      alert('Please fill in Business Name and Phone (required fields)');
+    setShowBusinessInfoEditDialog(true);
+  };
+
+  const handleBusinessLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Logo file size must be less than 5MB');
+      e.target.value = '';
+      return;
+    }
+
+    setBusinessForm((prev) => ({
+      ...prev,
+      logo: file,
+      remove_logo: false,
+      use_system_logo: false,
+    }));
+  };
+
+  const submitBusinessInfoChangeRequest = async () => {
+    if (!selectedSubscription) return;
+
+    if (!businessForm.company_name || !businessForm.contact_email || !businessForm.contact_phone) {
+      alert('Company name, contact email, and contact phone are required');
       return;
     }
 
     setIsGenerating(true);
     const token = localStorage.getItem('token');
-    
+
     try {
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append('subscription_id', selectedSubscription.id.toString());
-      formData.append('business_name', customizationData.business_name);
-      formData.append('address', customizationData.address);
-      formData.append('phone', customizationData.phone);
-      formData.append('email', customizationData.email);
-      if (customizationData.logo) {
-        formData.append('logo', customizationData.logo);
+      const payload = new FormData();
+      payload.append('company_name', businessForm.company_name);
+      payload.append('contact_email', businessForm.contact_email);
+      payload.append('contact_phone', businessForm.contact_phone);
+      payload.append('business_address', businessForm.business_address);
+      payload.append('website', businessForm.website);
+      payload.append('tax_id', businessForm.tax_id);
+      payload.append('use_system_logo', businessForm.use_system_logo ? 'true' : 'false');
+      payload.append('remove_logo', businessForm.remove_logo ? 'true' : 'false');
+
+      if (businessForm.logo) {
+        payload.append('logo', businessForm.logo);
       }
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/saas/generate-custom-system`,
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${selectedSubscription.id}/business-info/change-request`,
         {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}` },
-          body: formData
+          body: payload,
+        }
+      );
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        alert(data?.message || 'Failed to submit business information update request');
+        return;
+      }
+
+      alert(data?.message || 'Business information update request submitted');
+      setShowBusinessInfoEditDialog(false);
+      await fetchBusinessInfo(selectedSubscription.id);
+      await fetchSubscriptions();
+    } catch (error) {
+      console.error('Error submitting business info request:', error);
+      alert('Failed to submit request');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const downloadSystemFile = async () => {
+    if (!selectedSubscription) return;
+
+    setIsDownloadingInstaller(true);
+    setShowDownloadComplete(false);
+    setDownloadProgress(0);
+    setDownloadMessage('Preparing installer package...');
+    const token = localStorage.getItem('token');
+    const downloadStartedAt = Date.now();
+    const progressMessages = [
+      'Preparing installer package...',
+      'Applying secure installer profile...',
+      'Downloading installer files...',
+      'Finalizing secure installer...',
+    ];
+    let measuredProgress = 0;
+    let downloadCompleted = false;
+
+    const progressTimer = window.setInterval(() => {
+      const elapsed = Date.now() - downloadStartedAt;
+      const simulatedProgress = Math.min(
+        Math.floor((elapsed / MIN_DOWNLOAD_ANIMATION_MS) * 92),
+        92
+      );
+      const nextProgress = Math.max(simulatedProgress, measuredProgress);
+      const messageIndex = Math.min(
+        progressMessages.length - 1,
+        Math.floor((nextProgress / 100) * progressMessages.length)
+      );
+
+      setDownloadProgress(nextProgress);
+      setDownloadMessage(progressMessages[messageIndex]);
+    }, 120);
+    
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/download/${selectedSubscription.id}`,
+        {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${token}` }
         }
       );
 
       if (response.ok) {
-        // Get filename from Content-Disposition header
-        const contentDisposition = response.headers.get('Content-Disposition');
-        let filename = 'system_installer.zip';
-        
-        if (contentDisposition) {
-          const matches = /filename="([^"]+)"/.exec(contentDisposition);
-          if (matches && matches[1]) {
-            filename = matches[1];
+        const filename = getDownloadFilename(response);
+
+        let blob: Blob;
+        const totalBytes = Number(response.headers.get('Content-Length') || '0');
+
+        if (response.body) {
+          const reader = response.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let receivedBytes = 0;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            if (value) {
+              chunks.push(value);
+              receivedBytes += value.length;
+
+              if (totalBytes > 0) {
+                measuredProgress = Math.max(
+                  measuredProgress,
+                  Math.min(Math.floor((receivedBytes / totalBytes) * 100), 98)
+                );
+              }
+            }
           }
+
+          blob = new Blob(chunks);
+          if (!totalBytes) {
+            measuredProgress = 96;
+          }
+        } else {
+          blob = await response.blob();
+          measuredProgress = 96;
         }
-        
-        // Download the file
-        const blob = await response.blob();
+
+        const elapsed = Date.now() - downloadStartedAt;
+        const remainingAnimationTime = Math.max(0, MIN_DOWNLOAD_ANIMATION_MS - elapsed);
+        if (remainingAnimationTime > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, remainingAnimationTime));
+        }
+
+        setDownloadProgress(100);
+        setDownloadMessage('Installer download completed successfully.');
+
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -295,25 +575,34 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        
-        // Close dialog and reset
-        setShowCustomizationDialog(false);
-        setCustomizationData({
-          business_name: '',
-          address: '',
-          phone: '',
-          email: '',
-          logo: null
-        });
+        downloadCompleted = true;
+        setShowDownloadComplete(true);
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
       } else {
-        const error = await response.json();
-        alert(error.message || 'Failed to generate system. Please try again.');
+        let message = 'Failed to download installer. Please try again.';
+        try {
+          const error = await response.json();
+          message = error.message || message;
+        } catch {
+          const errorText = await response.text();
+          if (errorText) {
+            message = errorText;
+          }
+        }
+        alert(message);
       }
     } catch (error) {
       console.error('Download error:', error);
-      alert('Error generating customized system');
+      alert('Error downloading installer');
     } finally {
-      setIsGenerating(false);
+      window.clearInterval(progressTimer);
+      if (downloadCompleted) {
+        setIsDownloadingInstaller(false);
+      } else {
+        setDownloadProgress(0);
+        setDownloadMessage('Preparing installer package...');
+        setIsDownloadingInstaller(false);
+      }
     }
   };
 
@@ -507,6 +796,91 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                 </div>
               </div>
 
+              {/* Business Information */}
+              <div className={`rounded-2xl p-6 border ${
+                darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+              }`}>
+                <div className="flex items-center justify-between mb-4 gap-3">
+                  <h2 className="text-2xl font-bold flex items-center gap-2">
+                    <Phone className="w-6 h-6 text-purple-500" />
+                    Business Information
+                  </h2>
+
+                  <button
+                    onClick={openBusinessInfoEdit}
+                    className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold flex items-center gap-2"
+                  >
+                    <Edit className="w-4 h-4" />
+                    Edit (Admin Approval)
+                  </button>
+                </div>
+
+                <div className={`mb-4 p-3 rounded-lg border ${
+                  latestBusinessRequest?.status === 'pending'
+                    ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300'
+                    : latestBusinessRequest?.status === 'rejected'
+                    ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                    : 'bg-green-500/10 border-green-500/30 text-green-300'
+                }`}>
+                  <p className="text-sm font-medium">
+                    Status: {latestBusinessRequest?.status || 'approved'}
+                  </p>
+                  {latestBusinessRequest?.admin_note && (
+                    <p className="text-xs mt-1">Admin note: {latestBusinessRequest.admin_note}</p>
+                  )}
+                </div>
+
+                <div className={`mb-4 p-3 rounded-lg border ${
+                  darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-800'
+                }`}>
+                  These business details are used by your system application after secure API-key validation. Any changes require admin approval.
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-5">
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Company Name</label>
+                    <p className="font-semibold">{businessInfo?.company_name || selectedSubscription.company_name || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Contact Email</label>
+                    <p className="font-semibold">{businessInfo?.contact_email || selectedSubscription.contact_email || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Contact Phone</label>
+                    <p className="font-semibold">{businessInfo?.contact_phone || selectedSubscription.contact_phone || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Website</label>
+                    <p className="font-semibold break-all">{businessInfo?.website || selectedSubscription.website || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Tax ID</label>
+                    <p className="font-semibold">{businessInfo?.tax_id || selectedSubscription.tax_id || '-'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-1 block">Business Address</label>
+                    <p className="font-semibold">{businessInfo?.business_address || selectedSubscription.business_address || '-'}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5">
+                  <label className="text-sm text-gray-400 mb-2 block">Business Logo</label>
+                  {resolveImageSrc(businessInfo?.logo_url || selectedSubscription.logo_url) ? (
+                    <img
+                      src={resolveImageSrc(businessInfo?.logo_url || selectedSubscription.logo_url) || ''}
+                      alt="Business logo"
+                      className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                    />
+                  ) : (
+                    <div className={`w-20 h-20 rounded-lg border flex items-center justify-center text-xs ${
+                      darkMode ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-300 text-gray-500'
+                    }`}>
+                      No logo
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* API Credentials Card */}
               <div className={`rounded-2xl p-6 border ${
                 darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
@@ -605,22 +979,36 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
               }`}>
                 <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                   <Download className="w-6 h-6 text-purple-500" />
-                  Download System
+                  Installer Packages
                 </h2>
                 
                 <p className={`mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Download the Windows application to start using your system.
+                  Standard installer downloads as a ready-to-run EXE. Company details are fetched securely during installation after API key validation.
                 </p>
-                
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={initiateDownload}
-                  className="w-full bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg font-semibold flex items-center justify-center gap-2"
-                >
-                  <Download className="w-5 h-5" />
-                  Download System Application
-                </motion.button>
+
+                <div className={`rounded-xl border p-4 ${darkMode ? 'border-gray-700 bg-gray-800/60' : 'border-gray-200 bg-gray-50'}`}>
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div>
+                      <h3 className="font-semibold">Standard Installer</h3>
+                      <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Download installer EXE without bundled business secrets. Installer verifies API key and loads profile online.
+                      </p>
+                    </div>
+                    <span className="px-2 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400">
+                      Secure
+                    </span>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={initiateDownload}
+                    disabled={isDownloadingInstaller}
+                    className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-70 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-5 h-5" />
+                    {isDownloadingInstaller ? 'Downloading Installer EXE...' : 'Download Standard Installer (.exe)'}
+                  </motion.button>
+                </div>
               </div>
             </div>
 
@@ -685,6 +1073,24 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                       }`}>
                         {securityInfo.is_activated ? '✓ Activated' : '⚠ Not Activated'}
                       </span>
+                    </div>
+
+                    {/* Subscription + Payment State */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-black/20 rounded-lg p-3 border border-gray-700">
+                        <p className="text-xs text-gray-400">Subscription</p>
+                        <p className="text-sm font-semibold text-white mt-1 capitalize">
+                          {securityInfo.subscription_status || 'unknown'}
+                        </p>
+                      </div>
+                      <div className="bg-black/20 rounded-lg p-3 border border-gray-700">
+                        <p className="text-xs text-gray-400">Payment</p>
+                        <p className={`text-sm font-semibold mt-1 capitalize ${
+                          securityInfo.payment_status === 'completed' ? 'text-green-400' : 'text-yellow-400'
+                        }`}>
+                          {securityInfo.payment_status || 'unknown'}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Active Devices */}
@@ -766,6 +1172,29 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                         </div>
                       </div>
                     )}
+
+                    {/* Active Devices with MAC */}
+                    <div className="pt-3 border-t border-gray-700">
+                      <p className="text-sm font-semibold text-gray-200 mb-3">Activated Devices</p>
+                      <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                        {activeDevices.length === 0 ? (
+                          <p className="text-xs text-gray-400">No active devices yet.</p>
+                        ) : (
+                          activeDevices.map((device) => (
+                            <div key={device.id} className="rounded-lg border border-gray-700 bg-black/20 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-medium text-white truncate">{device.device_name || 'Unknown Device'}</p>
+                                <p className="text-xs text-gray-400">{device.last_seen ? new Date(device.last_seen).toLocaleString() : 'Never seen'}</p>
+                              </div>
+                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                <p className="text-gray-300">MAC: <span className="text-cyan-300">{device.mac_address || 'N/A'}</span></p>
+                                <p className="text-gray-300">IP: <span className="text-gray-200">{device.ip_address || 'N/A'}</span></p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -798,13 +1227,57 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         )}
       </div>
 
-      {/* Customization Dialog */}
-      {showCustomizationDialog && (
+      {isDownloadingInstaller && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-xl bg-gray-800 border border-blue-500/30 rounded-2xl p-8 shadow-2xl"
+          >
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-3">⬇️</div>
+              <h3 className="text-2xl font-bold text-white">Downloading Installer</h3>
+              <p className="text-gray-300 mt-2">{downloadMessage}</p>
+            </div>
+
+            <div className="w-full bg-gray-700 rounded-full h-4 overflow-hidden mb-3">
+              <motion.div
+                className="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-green-500"
+                animate={{ width: `${downloadProgress}%` }}
+                transition={{ ease: 'easeOut', duration: 0.35 }}
+                style={{ width: `${downloadProgress}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-gray-400">
+              <span>Downloading secure installer package</span>
+              <span>{downloadProgress}%</span>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {showDownloadComplete && (
+        <div className="fixed top-6 right-6 z-[60]">
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="bg-green-600 text-white px-5 py-4 rounded-xl shadow-2xl border border-green-400/30"
+          >
+            <div className="font-semibold">Installer download complete</div>
+            <div className="text-sm text-green-50 mt-1">Your installer EXE is ready to run.</div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Business Information Edit Dialog */}
+      {showBusinessInfoEditDialog && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
-          onClick={() => !isGenerating && setShowCustomizationDialog(false)}
+          onClick={() => !isGenerating && setShowBusinessInfoEditDialog(false)}
         >
           <motion.div
             initial={{ scale: 0.9 }}
@@ -814,42 +1287,99 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
               darkMode ? 'bg-gray-900' : 'bg-white'
             }`}
           >
-            <h2 className="text-3xl font-bold mb-2">Customize Your System</h2>
+            <h2 className="text-3xl font-bold mb-2">Edit Business Information</h2>
             <p className={`mb-6 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Provide your business details to generate a personalized installation package.
+              Submit changes for admin approval. Approved information is used by the system application after secure API-key validation.
             </p>
+
+            <div className={`mb-5 p-3 rounded-lg border ${darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+              Notice: These details are used inside the desktop application. Please provide accurate information.
+            </div>
 
             <div className="space-y-5">
               {/* Logo Upload */}
               <div>
                 <label className="block font-semibold mb-2">
                   Business Logo
-                  <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
                 </label>
-                <div className={`border-2 border-dashed rounded-lg p-6 text-center ${
-                  darkMode ? 'border-gray-700' : 'border-gray-300'
-                }`}>
-                  <input
-                    type="file"
-                    id="logo-upload"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    className="hidden"
-                    disabled={isGenerating}
-                  />
-                  <label htmlFor="logo-upload" className="cursor-pointer">
-                    {customizationData.logo ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <Check className="w-5 h-5 text-green-400" />
-                        <span className="text-green-400">{customizationData.logo.name}</span>
-                      </div>
-                    ) : (
-                      <div>
-                        <Upload className="w-12 h-12 mx-auto mb-2 text-purple-500" />
-                        <p className="text-sm">Click to upload logo (PNG, JPG - Max 5MB)</p>
-                      </div>
-                    )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={businessForm.use_system_logo}
+                      onChange={(e) =>
+                        setBusinessForm((prev) => ({
+                          ...prev,
+                          use_system_logo: e.target.checked,
+                          remove_logo: false,
+                          logo: e.target.checked ? null : prev.logo,
+                        }))
+                      }
+                      disabled={isGenerating}
+                    />
+                    Use system logo image
                   </label>
+
+                  <label className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm cursor-pointer">
+                    Browse Logo
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleBusinessLogoUpload}
+                      className="hidden"
+                      disabled={isGenerating}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setBusinessForm((prev) => ({
+                        ...prev,
+                        logo: null,
+                        use_system_logo: false,
+                        remove_logo: true,
+                      }))
+                    }
+                    disabled={isGenerating}
+                    className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm disabled:opacity-50"
+                  >
+                    Delete Logo
+                  </button>
+                </div>
+
+                <div className="mt-3">
+                  {businessForm.remove_logo ? (
+                    <div className={`w-20 h-20 rounded-lg border flex items-center justify-center text-xs ${
+                      darkMode ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-300 text-gray-500'
+                    }`}>
+                      No logo
+                    </div>
+                  ) : businessForm.logo ? (
+                    <img
+                      src={businessLogoPreview || ''}
+                      alt="Selected logo"
+                      className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                    />
+                  ) : businessForm.use_system_logo && resolveImageSrc(businessInfo?.system_logo) ? (
+                    <img
+                      src={resolveImageSrc(businessInfo?.system_logo) || ''}
+                      alt="System logo"
+                      className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                    />
+                  ) : resolveImageSrc(businessInfo?.logo_url || selectedSubscription?.logo_url) ? (
+                    <img
+                      src={resolveImageSrc(businessInfo?.logo_url || selectedSubscription?.logo_url) || ''}
+                      alt="Business logo"
+                      className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                    />
+                  ) : (
+                    <div className={`w-20 h-20 rounded-lg border flex items-center justify-center text-xs ${
+                      darkMode ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-gray-100 border-gray-300 text-gray-500'
+                    }`}>
+                      No logo
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -862,8 +1392,8 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                   <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="text"
-                    value={customizationData.business_name}
-                    onChange={(e) => setCustomizationData(prev => ({ ...prev, business_name: e.target.value }))}
+                    value={businessForm.company_name}
+                    onChange={(e) => setBusinessForm(prev => ({ ...prev, company_name: e.target.value }))}
                     placeholder="Enter your business/gym name"
                     className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
                       darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
@@ -882,8 +1412,8 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="tel"
-                    value={customizationData.phone}
-                    onChange={(e) => setCustomizationData(prev => ({ ...prev, phone: e.target.value }))}
+                    value={businessForm.contact_phone}
+                    onChange={(e) => setBusinessForm(prev => ({ ...prev, contact_phone: e.target.value }))}
                     placeholder="+993-XX-XXX-XXX"
                     className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
                       darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
@@ -896,15 +1426,14 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
               {/* Email */}
               <div>
                 <label className="block font-semibold mb-2">
-                  Email Address
-                  <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
+                  Email Address <span className="text-red-400">*</span>
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
                     type="email"
-                    value={customizationData.email}
-                    onChange={(e) => setCustomizationData(prev => ({ ...prev, email: e.target.value }))}
+                    value={businessForm.contact_email}
+                    onChange={(e) => setBusinessForm(prev => ({ ...prev, contact_email: e.target.value }))}
                     placeholder="contact@yourbusiness.com"
                     className={`w-full pl-12 pr-4 py-3 rounded-lg border ${
                       darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
@@ -921,10 +1450,38 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                   <span className="text-sm text-gray-400 font-normal ml-2">(Optional)</span>
                 </label>
                 <textarea
-                  value={customizationData.address}
-                  onChange={(e) => setCustomizationData(prev => ({ ...prev, address: e.target.value }))}
+                  value={businessForm.business_address}
+                  onChange={(e) => setBusinessForm(prev => ({ ...prev, business_address: e.target.value }))}
                   placeholder="Street address, City, Country"
                   rows={3}
+                  className={`w-full px-4 py-3 rounded-lg border ${
+                    darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                  }`}
+                  disabled={isGenerating}
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-2">Website</label>
+                <input
+                  type="text"
+                  value={businessForm.website}
+                  onChange={(e) => setBusinessForm(prev => ({ ...prev, website: e.target.value }))}
+                  placeholder="https://example.com"
+                  className={`w-full px-4 py-3 rounded-lg border ${
+                    darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
+                  }`}
+                  disabled={isGenerating}
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-2">Tax ID</label>
+                <input
+                  type="text"
+                  value={businessForm.tax_id}
+                  onChange={(e) => setBusinessForm(prev => ({ ...prev, tax_id: e.target.value }))}
+                  placeholder="Tax / business registration number"
                   className={`w-full px-4 py-3 rounded-lg border ${
                     darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-300'
                   }`}
@@ -936,7 +1493,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
             {/* Actions */}
             <div className="flex gap-4 mt-8">
               <button
-                onClick={() => setShowCustomizationDialog(false)}
+                onClick={() => setShowBusinessInfoEditDialog(false)}
                 disabled={isGenerating}
                 className={`flex-1 py-3 rounded-lg font-semibold ${
                   darkMode ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-200 hover:bg-gray-300'
@@ -945,26 +1502,26 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                 Cancel
               </button>
               <button
-                onClick={downloadSystemFile}
-                disabled={isGenerating || !customizationData.business_name || !customizationData.phone}
+                onClick={submitBusinessInfoChangeRequest}
+                disabled={isGenerating || !businessForm.company_name || !businessForm.contact_phone || !businessForm.contact_email}
                 className="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isGenerating ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Generating...
+                    Submitting...
                   </>
                 ) : (
                   <>
-                    <Download className="w-5 h-5" />
-                    Generate & Download
+                    <Edit className="w-5 h-5" />
+                    Submit For Approval
                   </>
                 )}
               </button>
             </div>
 
             <p className="text-xs text-gray-400 mt-4 text-center">
-              * Required fields must be filled to continue
+              Required fields are marked with *
             </p>
           </motion.div>
         </motion.div>

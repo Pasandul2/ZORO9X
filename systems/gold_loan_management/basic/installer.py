@@ -1,21 +1,5 @@
-/**
- * Installer Template Generator
- * Generates custom installation wizards for each system.
- */
-
-function generateInstaller({ systemName, category, features, tier }) {
-  const featureLines = features
-    .map((feature) => `- ${feature}`)
-    .join('\\n');
-    const configSigningSecret = (process.env.CONFIG_SIGNING_SECRET || process.env.OFFLINE_TOKEN_SECRET || process.env.JWT_SECRET || 'config-signing-secret')
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'");
-        const publicApiUrl = (process.env.ZORO9X_PUBLIC_API_URL || process.env.ZORO9X_API_URL || '')
-                .replace(/\\/g, '\\\\')
-                .replace(/'/g, "\\'");
-
-  return `"""
-ZORO9X ${systemName} - Installation Wizard
+"""
+ZORO9X Gold Loan System - Installation Wizard
 """
 
 import tkinter as tk
@@ -33,13 +17,14 @@ import base64
 import platform
 import uuid
 import hmac
+from theme import GOLD_THEME
 
-APP_EXE_NAME = '${category}_app.exe'
-APP_SCRIPT_NAME = '${category}_app.py'
-CONFIG_FILE_NAME = '${category}_config.json'
-API_URL = '${publicApiUrl}'
+APP_EXE_NAME = 'gold_loan_app.exe'
+APP_SCRIPT_NAME = 'gold_loan_app.py'
+CONFIG_FILE_NAME = 'gold_loan_config.json'
+API_URL = 'http://localhost:5001'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
-CONFIG_SIGNING_SECRET = '${configSigningSecret}'
+CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 
 
 def is_remote_api_url(url):
@@ -94,17 +79,20 @@ def sign_config(config_data, device_fp):
 class InstallationWizard:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title('ZORO9X ${systemName} - Installation Wizard')
-        self.root.geometry('980x700')
-        self.root.minsize(860, 620)
-        self.root.configure(bg='#e2e8f0')
+        self.theme = GOLD_THEME
+        self.theme.apply_window(
+            self.root,
+            min_size=(900, 640),
+            size=(1080, 760),
+            title='ZORO9X Gold Loan System - Installation Wizard',
+        )
 
-        self.accent = '#0f766e'
-        self.accent_dark = '#115e59'
-        self.surface = '#ffffff'
-        self.surface_soft = '#f8fafc'
-        self.text_primary = '#0f172a'
-        self.text_muted = '#475569'
+        self.accent = self.theme.palette.accent
+        self.accent_dark = self.theme.palette.accent_hover
+        self.surface = self.theme.palette.bg_surface
+        self.surface_soft = self.theme.palette.bg_surface_alt
+        self.text_primary = self.theme.palette.text_primary
+        self.text_muted = self.theme.palette.text_muted
 
         self.current_step = 0
         self.steps = [
@@ -117,7 +105,7 @@ class InstallationWizard:
         ]
 
         self.bundle_dir = self.get_bundle_dir()
-        self.install_path = str(Path.home() / 'ZORO9X' / '${systemName.replace(/\s+/g, '')}')
+        self.install_path = str(Path.home() / 'ZORO9X' / 'GoldLoanSystem')
         self.create_desktop_shortcut = True
 
         self.api_key = ''
@@ -126,7 +114,7 @@ class InstallationWizard:
         self.contact_phone = ''
         self.business_address = ''
         self.logo_url = ''
-        self.database_name = '${category}_database'
+        self.database_name = 'gold_loan_database'
         self.validation_payload = {}
         self.business_details_loaded = False
         self.loaded_api_key = ''
@@ -179,7 +167,7 @@ class InstallationWizard:
 
         tk.Label(
             header,
-            text='${systemName}',
+            text='Gold Loan System',
             font=('Segoe UI', 19, 'bold'),
             bg=self.accent,
             fg='white',
@@ -190,53 +178,43 @@ class InstallationWizard:
             text='Step 1 of 6',
             font=('Segoe UI', 10),
             bg=self.accent,
-            fg='#ccfbf1',
+            fg='#dbe7ff',
         )
         self.step_label.pack(pady=(4, 0))
 
-        self.content_frame = tk.Frame(self.root, bg='#e2e8f0')
+        self.content_frame = tk.Frame(self.root, bg=self.theme.palette.bg_app)
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=22, pady=18)
 
         self.card_frame = tk.Frame(
             self.content_frame,
             bg=self.surface,
             highlightthickness=1,
-            highlightbackground='#cbd5e1',
+            highlightbackground=self.theme.palette.border,
         )
         self.card_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.footer = tk.Frame(self.root, bg='#e2e8f0', height=72)
+        self.footer = tk.Frame(self.root, bg=self.theme.palette.bg_app, height=72)
         self.footer.pack(fill=tk.X, side=tk.BOTTOM)
         self.footer.pack_propagate(False)
 
-        button_frame = tk.Frame(self.footer, bg='#e2e8f0')
+        button_frame = tk.Frame(self.footer, bg=self.theme.palette.bg_app)
         button_frame.pack(expand=True, pady=10)
 
-        self.back_button = tk.Button(
+        self.back_button = self.theme.make_button(
             button_frame,
             text='Back',
-            font=('Segoe UI', 10),
-            bg='#e5e7eb',
-            fg='#374151',
-            activebackground='#d1d5db',
-            width=14,
-            relief='flat',
-            cursor='hand2',
             command=self.previous_step,
+            kind='ghost',
+            width=14,
         )
         self.back_button.pack(side=tk.LEFT, padx=8)
 
-        self.next_button = tk.Button(
+        self.next_button = self.theme.make_button(
             button_frame,
             text='Next',
-            font=('Segoe UI', 10, 'bold'),
-            bg=self.accent,
-            fg='white',
-            activebackground=self.accent_dark,
-            width=14,
-            relief='flat',
-            cursor='hand2',
             command=self.next_step,
+            kind='primary',
+            width=14,
         )
         self.next_button.pack(side=tk.LEFT, padx=8)
 
@@ -253,7 +231,7 @@ class InstallationWizard:
             highlightthickness=0,
             bd=0,
         )
-        scrollbar = tk.Scrollbar(self.card_frame, orient='vertical', command=canvas.yview)
+        scrollbar = self.theme.make_scrollbar(self.card_frame, canvas.yview)
         content = tk.Frame(canvas, bg=self.surface)
 
         content.bind(
@@ -365,7 +343,7 @@ class InstallationWizard:
         self.contact_email_var.set(subscription.get('contact_email', '') or '')
         self.contact_phone_var.set(subscription.get('contact_phone', '') or '')
         self.business_address_var.set(subscription.get('business_address', '') or '')
-        self.database_name_var.set(subscription.get('database_name', self.database_name_var.get().strip() or '${category}_database'))
+        self.database_name_var.set(subscription.get('database_name', self.database_name_var.get().strip() or 'gold_loan_database'))
         self.logo_url = (subscription.get('logo_url', '') or '').strip()
         self.load_logo_preview(self.logo_url)
 
@@ -410,7 +388,7 @@ class InstallationWizard:
 
         tk.Label(
             content,
-            text='Welcome to ${systemName}',
+            text='Welcome to Gold Loan System',
             font=('Segoe UI', 20, 'bold'),
             bg=self.surface,
             fg=self.text_primary,
@@ -418,7 +396,7 @@ class InstallationWizard:
 
         tk.Label(
             content,
-            text='${tier.toUpperCase()} Edition',
+            text='BASIC Edition',
             font=('Segoe UI', 11),
             bg=self.surface,
             fg=self.text_muted,
@@ -435,7 +413,7 @@ class InstallationWizard:
         feature_box = tk.Frame(content, bg=self.surface_soft)
         feature_box.pack(fill=tk.X, padx=40, pady=10)
 
-        for line in """${featureLines}""".splitlines():
+        for line in """- Dashboard""".splitlines():
             tk.Label(
                 feature_box,
                 text=line,
@@ -462,7 +440,7 @@ class InstallationWizard:
         text_frame = tk.Frame(self.card_frame, bg=self.surface)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=10)
 
-        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar = self.theme.make_scrollbar(text_frame, None)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         license_text = tk.Text(
@@ -470,7 +448,7 @@ class InstallationWizard:
             wrap=tk.WORD,
             font=('Segoe UI', 10),
             bg=self.surface_soft,
-            fg='#334155',
+            fg=self.theme.palette.text_primary,
             relief='flat',
             padx=15,
             pady=15,
@@ -482,7 +460,7 @@ class InstallationWizard:
         license_content = """End User License Agreement (EULA)
 
 1. Grant of License
-ZORO9X grants you a non-exclusive license to use ${systemName}.
+ZORO9X grants you a non-exclusive license to use Gold Loan System.
 
 2. Restrictions
 You may not modify, reverse engineer, or distribute this software.
@@ -525,17 +503,14 @@ By proceeding, you agree to these terms."""
         form.pack(fill=tk.X, padx=40)
 
         self.render_labeled_entry(form, 'API Key:', self.api_key_var, masked=True)
-        tk.Button(
+        self.theme.make_button(
             form,
             text='Load Company Details',
-            font=('Segoe UI', 10, 'bold'),
-            bg=self.accent,
-            fg='white',
-            activebackground=self.accent_dark,
-            relief='flat',
-            cursor='hand2',
             command=self.load_company_details,
-        ).pack(anchor='w', pady=(10, 12), ipadx=12, ipady=4)
+            kind='primary',
+            width=20,
+            pady=6,
+        ).pack(anchor='w', pady=(10, 12))
 
         self.render_labeled_readonly_entry(form, 'Company Name:', self.company_name_var)
         self.render_labeled_readonly_entry(form, 'Contact Email:', self.contact_email_var)
@@ -560,8 +535,10 @@ By proceeding, you agree to these terms."""
             fg=self.text_muted,
             width=42,
             height=7,
-            relief='solid',
-            bd=1,
+            relief='flat',
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.theme.palette.border,
         )
         self.logo_preview_label.pack(anchor='w', pady=(0, 4))
 
@@ -590,18 +567,8 @@ By proceeding, you agree to these terms."""
             anchor='w',
         ).pack(fill=tk.X, pady=(8, 3))
 
-        show_char = '*' if masked else ''
-        tk.Entry(
-            parent,
-            textvariable=variable,
-            font=('Segoe UI', 10),
-            bg=self.surface_soft,
-            fg=self.text_primary,
-            relief='solid',
-            bd=1,
-            show=show_char,
-            insertbackground=self.text_primary,
-        ).pack(fill=tk.X, ipady=8)
+        entry = self.theme.make_entry(parent, variable=variable, masked=masked)
+        entry.pack(fill=tk.X, ipady=6)
 
     def render_labeled_readonly_entry(self, parent, label, variable):
         tk.Label(
@@ -613,18 +580,8 @@ By proceeding, you agree to these terms."""
             anchor='w',
         ).pack(fill=tk.X, pady=(8, 3))
 
-        readonly_entry = tk.Entry(
-            parent,
-            textvariable=variable,
-            font=('Segoe UI', 10),
-            bg='#f1f5f9',
-            fg=self.text_primary,
-            relief='solid',
-            bd=1,
-            state='readonly',
-            readonlybackground='#f1f5f9',
-        )
-        readonly_entry.pack(fill=tk.X, ipady=8)
+        readonly_entry = self.theme.make_entry(parent, variable=variable, readonly=True)
+        readonly_entry.pack(fill=tk.X, ipady=6)
 
     def browse_installation_path(self):
         selected_dir = filedialog.askdirectory(initialdir=self.path_entry.get().strip() or str(Path.home()))
@@ -657,28 +614,18 @@ By proceeding, you agree to these terms."""
         path_input_frame = tk.Frame(path_frame, bg=self.surface)
         path_input_frame.pack(fill=tk.X)
 
-        self.path_entry = tk.Entry(
-            path_input_frame,
-            font=('Segoe UI', 10),
-            bg=self.surface_soft,
-            fg=self.text_primary,
-            relief='solid',
-            bd=1,
-        )
+        self.path_entry = self.theme.make_entry(path_input_frame)
         self.path_entry.insert(0, self.install_path)
-        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8, pady=5)
+        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6, pady=5)
 
-        tk.Button(
+        self.theme.make_button(
             path_input_frame,
             text='Browse',
-            font=('Segoe UI', 10, 'bold'),
-            bg='#334155',
-            fg='white',
-            activebackground='#1e293b',
-            relief='flat',
-            cursor='hand2',
             command=self.browse_installation_path,
-        ).pack(side=tk.LEFT, padx=(8, 0), ipadx=10, ipady=6)
+            kind='secondary',
+            width=10,
+            pady=6,
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
         self.shortcut_var = tk.BooleanVar(value=self.create_desktop_shortcut)
         tk.Checkbutton(
@@ -690,6 +637,8 @@ By proceeding, you agree to these terms."""
             fg=self.text_muted,
             activebackground=self.surface,
             selectcolor=self.surface,
+            relief='flat',
+            bd=0,
         ).pack(pady=20)
 
         self.back_button.config(state=tk.NORMAL)
@@ -721,7 +670,7 @@ By proceeding, you agree to these terms."""
 
         subscription = payload.get('subscription') or {}
         self.company_name = (subscription.get('company_name') or self.company_name).strip()
-        self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or '${category}_database').strip()
+        self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or 'gold_loan_database').strip()
         self.database_name_var.set(self.database_name)
 
         self.clear_content()
@@ -833,7 +782,7 @@ By proceeding, you agree to these terms."""
             Dispatch = importlib.import_module('win32com.client').Dispatch
 
             desktop = Path.home() / 'Desktop'
-            shortcut_path = desktop / '${systemName}.lnk'
+            shortcut_path = desktop / 'Gold Loan System.lnk'
 
             app_exe = os.path.join(self.install_path, APP_EXE_NAME)
             app_script = os.path.join(self.install_path, APP_SCRIPT_NAME)
@@ -863,12 +812,12 @@ By proceeding, you agree to these terms."""
             text='Installation Complete',
             font=('Segoe UI', 16, 'bold'),
             bg=self.surface,
-            fg='#059669',
+            fg=self.theme.palette.success,
         ).pack(pady=(30, 10))
 
         tk.Label(
             content,
-            text='${systemName} has been installed successfully.',
+            text='Gold Loan System has been installed successfully.',
             font=('Segoe UI', 10),
             bg=self.surface,
             fg=self.text_muted,
@@ -879,7 +828,7 @@ By proceeding, you agree to these terms."""
             text=f'Location: {self.install_path}',
             font=('Segoe UI', 9),
             bg=self.surface,
-            fg='#94a3b8',
+            fg=self.theme.palette.text_muted,
             wraplength=800,
             justify='center',
         ).pack(pady=5)
@@ -928,9 +877,3 @@ By proceeding, you agree to these terms."""
 if __name__ == '__main__':
     wizard = InstallationWizard()
     wizard.run()
-`;
-}
-
-module.exports = {
-  generateInstaller,
-};

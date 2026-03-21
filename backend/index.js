@@ -16,6 +16,7 @@ const { createUserTable, createPortfolioTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
 const { initializeClientTables } = require('./config/clientSchema');
 const { migrate } = require('./migrations/add_admin_columns');
+const { migrate: migrateUserIdToClients } = require('./migrations/add_user_id_to_clients');
 const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('./config/saasSchema');
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
@@ -51,7 +52,8 @@ app.use(session({
 // CORS Configuration - Allow requests from frontend
 app.use(cors({
   origin: FRONTEND_URL,
-  credentials: true
+  credentials: true,
+  exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length']
 }));
 
 // Parse JSON request bodies
@@ -172,6 +174,9 @@ async function startServer() {
 
     // Step 5: Initialize client, quotation, and invoice tables
     await initializeClientTables();
+    
+    // Step 5.5: Run client table migration
+    await migrateUserIdToClients();
 
     // Step 6: Initialize SaaS tables and seed initial data
     await initializeSaaSTables();

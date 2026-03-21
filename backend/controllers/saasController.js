@@ -6,8 +6,215 @@
 
 const { pool } = require('../config/database');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const archiver = require('archiver');
+const { spawnSync } = require('child_process');
 const securityController = require('./securityController');
 const dbSync = require('../utils/databaseSync');
+const { generateInstaller } = require('../templates/installerTemplate');
+
+let businessInfoSchemaReady = false;
+
+function copyRecursive(src, dest) {
+  const exists = fs.existsSync(src);
+  const stats = exists && fs.statSync(src);
+  const isDirectory = exists && stats.isDirectory();
+
+  if (!exists) {
+    return;
+  }
+
+  if (isDirectory) {
+    fs.mkdirSync(dest, { recursive: true });
+    fs.readdirSync(src).forEach((childItemName) => {
+      copyRecursive(path.join(src, childItemName), path.join(dest, childItemName));
+    });
+    return;
+  }
+
+  fs.copyFileSync(src, dest);
+}
+
+function updateInstallerSpecDatas(systemFolder) {
+  const installerSpecPath = path.join(systemFolder, 'installer.spec');
+  if (!fs.existsSync(installerSpecPath)) {
+    return;
+  }
+
+  const bundledFiles = ['README.md'];
+  ['png', 'jpg', 'jpeg', 'gif', 'ico'].forEach((ext) => {
+    const logoName = `logo.${ext}`;
+    if (fs.existsSync(path.join(systemFolder, logoName))) {
+      bundledFiles.push(logoName);
+    }
+  });
+
+  const datasLine = `    datas=[${bundledFiles
+    .filter((fileName) => fs.existsSync(path.join(systemFolder, fileName)))
+    .map((fileName) => `('${fileName}', '.')`)
+    .join(', ')}],`;
+
+  const specContent = fs.readFileSync(installerSpecPath, 'utf8');
+  const updatedContent = specContent.replace(/^[ \t]*datas=.*,$/m, datasLine);
+  fs.writeFileSync(installerSpecPath, updatedContent, 'utf8');
+}
+
+function readServerApiUrl(systemFolder) {
+  const apiUrlFile = path.join(systemFolder, 'server_api_url.txt');
+  if (fs.existsSync(apiUrlFile)) {
+    return fs.readFileSync(apiUrlFile, 'utf8').trim();
+  }
+  return process.env.ZORO9X_PUBLIC_API_URL || process.env.ZORO9X_API_URL || '';
+}
+
+function findInstallerExecutable(systemFolder) {
+  if (!fs.existsSync(systemFolder)) {
+    return null;
+  }
+
+  const roots = [systemFolder, path.join(systemFolder, 'dist')];
+  for (const root of roots) {
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      continue;
+    }
+
+    const installer = fs
+      .readdirSync(root)
+      .find((name) => name.toLowerCase().endsWith('_installer.exe'));
+
+    if (installer) {
+      return path.join(root, installer);
+    }
+  }
+
+  return null;
+}
+
+function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
+  const existingInstaller = findInstallerExecutable(systemFolder);
+  if (existingInstaller && !forceRebuild) {
+    return existingInstaller;
+  }
+
+  const buildScript = path.join(systemFolder, 'BUILD.bat');
+  if (!fs.existsSync(buildScript)) {
+    return null;
+  }
+
+  console.log(`Installer not found. Attempting build in: ${systemFolder}`);
+  updateInstallerSpecDatas(systemFolder);
+  const result = spawnSync('cmd.exe', ['/c', 'BUILD.bat'], {
+    cwd: systemFolder,
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024 * 20,
+  });
+
+  if (result.status !== 0) {
+    console.error('Installer build failed:', {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    });
+    return null;
+  }
+
+  return findInstallerExecutable(systemFolder);
+}
+
+function parseFeaturesSafely(featuresValue) {
+  if (Array.isArray(featuresValue)) {
+    return featuresValue;
+  }
+
+  if (typeof featuresValue === 'string') {
+    try {
+      const parsed = JSON.parse(featuresValue || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      // Gracefully handle legacy/non-JSON feature values.
+      return featuresValue
+        .split(',')
+        .map((feature) => feature.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+function normalizeFeaturesInput(featuresValue) {
+  if (Array.isArray(featuresValue)) {
+    return featuresValue.map((feature) => String(feature).trim()).filter(Boolean);
+  }
+
+  if (typeof featuresValue === 'string') {
+    try {
+      const parsed = JSON.parse(featuresValue);
+      if (Array.isArray(parsed)) {
+        return parsed.map((feature) => String(feature).trim()).filter(Boolean);
+      }
+    } catch (error) {
+      return featuresValue
+        .split(/[\n,]/)
+        .map((feature) => feature.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+}
+
+async function ensureBusinessInfoSchema() {
+  if (businessInfoSchemaReady) {
+    return;
+  }
+
+  await pool.execute(`
+    ALTER TABLE clients
+    ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500) NULL
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS business_info_change_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      client_id INT NOT NULL,
+      subscription_id INT NOT NULL,
+      requested_data LONGTEXT NOT NULL,
+      status ENUM('pending','approved','rejected') DEFAULT 'pending',
+      admin_note TEXT NULL,
+      reviewed_by INT NULL,
+      reviewed_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+      FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_business_req_client (client_id),
+      INDEX idx_business_req_subscription (subscription_id),
+      INDEX idx_business_req_status (status)
+    )
+  `);
+
+  businessInfoSchemaReady = true;
+}
+
+function parseJsonObject(rawValue, fallback = {}) {
+  if (!rawValue || typeof rawValue !== 'string') {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function boolFromValue(value) {
+  return value === true || value === 'true' || value === '1' || value === 1;
+}
 
 // Export security controller methods
 exports.activateDevice = securityController.activateDevice;
@@ -16,8 +223,11 @@ exports.getSecurityAlerts = securityController.getSecurityAlerts;
 exports.getPendingDevices = securityController.getPendingDevices;
 exports.approveDevice = securityController.approveDevice;
 exports.rejectDevice = securityController.rejectDevice;
+exports.revokeDevice = securityController.revokeDevice;
 exports.resolveSecurityAlert = securityController.resolveSecurityAlert;
 exports.getSubscriptionDevices = securityController.getSubscriptionDevices;
+exports.getClientSubscriptionDevices = securityController.getClientSubscriptionDevices;
+exports.getAuditLogs = securityController.getAuditLogs;
 
 /**
  * Get all available systems
@@ -32,7 +242,7 @@ exports.getAllSystems = async (req, res) => {
     // Parse JSON fields
     const parsedSystems = systems.map(system => ({
       ...system,
-      features: JSON.parse(system.features || '[]')
+      features: parseFeaturesSafely(system.features)
     }));
     
     res.json({
@@ -41,6 +251,33 @@ exports.getAllSystems = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching systems:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch systems'
+    });
+  }
+};
+
+/**
+ * Get all systems for admin (includes inactive)
+ */
+exports.getAllSystemsAdmin = async (req, res) => {
+  try {
+    const [systems] = await pool.execute(
+      'SELECT * FROM systems ORDER BY category, name'
+    );
+
+    const parsedSystems = systems.map(system => ({
+      ...system,
+      features: parseFeaturesSafely(system.features)
+    }));
+
+    res.json({
+      success: true,
+      systems: parsedSystems
+    });
+  } catch (error) {
+    console.error('Error fetching admin systems:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch systems'
@@ -99,11 +336,12 @@ exports.getSystemById = async (req, res) => {
  */
 exports.createSystem = async (req, res) => {
   try {
-    const { name, description, category, python_file_path, icon_url, features } = req.body;
+    const { name, description, category, python_file_path, icon_url, features, version } = req.body;
+    const normalizedFeatures = normalizeFeaturesInput(features);
     
     const [result] = await pool.execute(
-      'INSERT INTO systems (name, description, category, python_file_path, icon_url, features) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, description, category, python_file_path, icon_url, JSON.stringify(features)]
+      'INSERT INTO systems (name, description, category, python_file_path, icon_url, features, version) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, description, category, python_file_path, icon_url, JSON.stringify(normalizedFeatures), version || '1.0.0']
     );
     
     res.json({
@@ -126,11 +364,46 @@ exports.createSystem = async (req, res) => {
 exports.updateSystem = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, category, python_file_path, icon_url, features, status } = req.body;
+    const { name, description, category, icon_url, features, status, version, remove_icon } = req.body;
+
+    const [existingRows] = await pool.execute(
+      'SELECT icon_url FROM systems WHERE id = ?',
+      [id]
+    );
+
+    if (existingRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'System not found'
+      });
+    }
+
+    const normalizedFeatures = normalizeFeaturesInput(features);
+    const normalizedStatus = String(status || 'active').toLowerCase() === 'inactive' ? 'inactive' : 'active';
+    const normalizedVersion = typeof version === 'string' && version.trim() ? version.trim() : '1.0.0';
+    const normalizedName = typeof name === 'string' ? name.trim() : '';
+    const normalizedDescription = typeof description === 'string' ? description.trim() : '';
+    const normalizedCategory = typeof category === 'string' ? category.trim() : '';
+
+    if (!normalizedName || !normalizedDescription || !normalizedCategory) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, description, and category are required'
+      });
+    }
+
+    let finalIconUrl = existingRows[0].icon_url || null;
+    if (req.file) {
+      finalIconUrl = `/uploads/logos/${req.file.filename}`;
+    } else if (remove_icon === 'true' || remove_icon === true) {
+      finalIconUrl = null;
+    } else if (typeof icon_url === 'string' && icon_url.trim()) {
+      finalIconUrl = icon_url.trim();
+    }
     
     await pool.execute(
-      'UPDATE systems SET name = ?, description = ?, category = ?, python_file_path = ?, icon_url = ?, features = ?, status = ? WHERE id = ?',
-      [name, description, category, python_file_path, icon_url, JSON.stringify(features), status, id]
+      'UPDATE systems SET name = ?, description = ?, category = ?, icon_url = ?, features = ?, status = ?, version = ? WHERE id = ?',
+      [normalizedName, normalizedDescription, normalizedCategory, finalIconUrl, JSON.stringify(normalizedFeatures), normalizedStatus, normalizedVersion, id]
     );
     
     res.json({
@@ -141,7 +414,8 @@ exports.updateSystem = async (req, res) => {
     console.error('Error updating system:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update system'
+      message: 'Failed to update system',
+      error: error.message
     });
   }
 };
@@ -231,10 +505,41 @@ exports.purchaseSubscription = async (req, res) => {
   const connection = await pool.getConnection();
   
   try {
+    await ensureBusinessInfoSchema();
     await connection.beginTransaction();
     
     const userId = req.user.id;
-    const { system_id, plan_id, company_name, contact_email, contact_phone, billing_cycle } = req.body;
+    const {
+      system_id,
+      plan_id,
+      company_name,
+      contact_email,
+      contact_phone,
+      business_address,
+      website,
+      tax_id,
+      billing_cycle,
+      use_system_logo,
+      remove_logo,
+    } = req.body;
+
+    const uploadedLogoPath = req.file ? `/uploads/logos/${req.file.filename}` : null;
+
+    const [systemRows] = await connection.execute(
+      'SELECT id, icon_url FROM systems WHERE id = ?',
+      [system_id]
+    );
+
+    if (systemRows.length === 0) {
+      throw new Error('System not found');
+    }
+
+    let resolvedLogoUrl = uploadedLogoPath;
+    if (boolFromValue(use_system_logo)) {
+      resolvedLogoUrl = systemRows[0].icon_url || null;
+    } else if (boolFromValue(remove_logo)) {
+      resolvedLogoUrl = null;
+    }
     
     // Check if client exists for this user
     let [clients] = await connection.execute(
@@ -247,12 +552,45 @@ exports.purchaseSubscription = async (req, res) => {
     if (clients.length === 0) {
       // Create new client
       const [clientResult] = await connection.execute(
-        'INSERT INTO clients (user_id, company_name, contact_email, contact_phone) VALUES (?, ?, ?, ?)',
-        [userId, company_name, contact_email, contact_phone]
+        `INSERT INTO clients 
+         (user_id, company_name, client_name, email, contact_email, phone, address, website, tax_id, logo_url, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          company_name,
+          company_name,
+          contact_email,
+          contact_email,
+          contact_phone,
+          business_address || null,
+          website || null,
+          tax_id || null,
+          resolvedLogoUrl,
+          'active',
+        ]
       );
       clientId = clientResult.insertId;
     } else {
       clientId = clients[0].id;
+
+      await connection.execute(
+        `UPDATE clients
+         SET company_name = ?, client_name = ?, email = ?, contact_email = ?, phone = ?,
+             address = ?, website = ?, tax_id = ?, logo_url = COALESCE(?, logo_url)
+         WHERE id = ?`,
+        [
+          company_name,
+          company_name,
+          contact_email,
+          contact_email,
+          contact_phone,
+          business_address || null,
+          website || null,
+          tax_id || null,
+          resolvedLogoUrl,
+          clientId,
+        ]
+      );
     }
     
     // Get plan details
@@ -276,7 +614,9 @@ exports.purchaseSubscription = async (req, res) => {
     const startDate = new Date();
     const endDate = new Date();
     
-    switch (billing_cycle) {
+    const effectiveBillingCycle = billing_cycle || plan.billing_cycle || 'monthly';
+
+    switch (effectiveBillingCycle) {
       case 'monthly':
         endDate.setMonth(endDate.getMonth() + 1);
         break;
@@ -363,7 +703,13 @@ exports.getMySubscriptions = async (req, res) => {
         sp.name as plan_name,
         sp.price,
         sp.billing_cycle,
-        c.company_name
+        c.company_name,
+        c.contact_email,
+        c.phone as contact_phone,
+        c.address as business_address,
+        c.website,
+        c.tax_id,
+        c.logo_url
        FROM client_subscriptions cs
        JOIN clients c ON cs.client_id = c.id
        JOIN systems s ON cs.system_id = s.id
@@ -387,6 +733,321 @@ exports.getMySubscriptions = async (req, res) => {
 };
 
 /**
+ * Get business info and latest change request status for a subscription (Client)
+ */
+exports.getBusinessInfoForSubscription = async (req, res) => {
+  try {
+    await ensureBusinessInfoSchema();
+
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+
+    const [rows] = await pool.execute(
+      `SELECT 
+        cs.id as subscription_id,
+        cs.system_id,
+        c.id as client_id,
+        c.company_name,
+        c.contact_email,
+        c.phone as contact_phone,
+        c.address as business_address,
+        c.website,
+        c.tax_id,
+        c.logo_url,
+        s.icon_url as system_logo
+       FROM client_subscriptions cs
+       JOIN clients c ON cs.client_id = c.id
+       JOIN systems s ON cs.system_id = s.id
+       WHERE cs.id = ? AND c.user_id = ?`,
+      [subscriptionId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const [latestRequestRows] = await pool.execute(
+      `SELECT id, status, admin_note, created_at, reviewed_at
+       FROM business_info_change_requests
+       WHERE subscription_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [subscriptionId]
+    );
+
+    res.json({
+      success: true,
+      businessInfo: rows[0],
+      latestRequest: latestRequestRows[0] || null,
+    });
+  } catch (error) {
+    console.error('Error fetching business info:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch business info' });
+  }
+};
+
+/**
+ * Submit business information change request (Client)
+ */
+exports.requestBusinessInfoUpdate = async (req, res) => {
+  try {
+    await ensureBusinessInfoSchema();
+
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+
+    const [rows] = await pool.execute(
+      `SELECT 
+        cs.id as subscription_id,
+        cs.system_id,
+        c.id as client_id,
+        c.company_name,
+        c.contact_email,
+        c.phone as contact_phone,
+        c.address as business_address,
+        c.website,
+        c.tax_id,
+        c.logo_url
+       FROM client_subscriptions cs
+       JOIN clients c ON cs.client_id = c.id
+       WHERE cs.id = ? AND c.user_id = ?`,
+      [subscriptionId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const [pendingRows] = await pool.execute(
+      `SELECT id FROM business_info_change_requests
+       WHERE subscription_id = ? AND status = 'pending'
+       LIMIT 1`,
+      [subscriptionId]
+    );
+
+    if (pendingRows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'You already have a pending business info change request',
+      });
+    }
+
+    const existing = rows[0];
+    const {
+      company_name,
+      contact_email,
+      contact_phone,
+      business_address,
+      website,
+      tax_id,
+      use_system_logo,
+      remove_logo,
+    } = req.body;
+
+    const [systemRows] = await pool.execute(
+      'SELECT icon_url FROM systems WHERE id = ?',
+      [existing.system_id]
+    );
+
+    let logoUrl = existing.logo_url || null;
+    if (req.file) {
+      logoUrl = `/uploads/logos/${req.file.filename}`;
+    } else if (boolFromValue(use_system_logo)) {
+      logoUrl = systemRows[0]?.icon_url || null;
+    } else if (boolFromValue(remove_logo)) {
+      logoUrl = null;
+    }
+
+    const requestedData = {
+      company_name: (company_name || '').trim(),
+      contact_email: (contact_email || '').trim(),
+      contact_phone: (contact_phone || '').trim(),
+      business_address: (business_address || '').trim(),
+      website: (website || '').trim(),
+      tax_id: (tax_id || '').trim(),
+      logo_url: logoUrl,
+    };
+
+    if (!requestedData.company_name || !requestedData.contact_email || !requestedData.contact_phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Company name, contact email and contact phone are required',
+      });
+    }
+
+    await pool.execute(
+      `INSERT INTO business_info_change_requests
+       (client_id, subscription_id, requested_data, status)
+       VALUES (?, ?, ?, 'pending')`,
+      [existing.client_id, subscriptionId, JSON.stringify(requestedData)]
+    );
+
+    await pool.execute(
+      `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+       VALUES (?, 'business_info_change_requested', ?, ?, ?)`,
+      [
+        subscriptionId,
+        String(userId),
+        JSON.stringify({ message: 'Client requested business information update approval.' }),
+        req.ip,
+      ]
+    );
+
+    res.json({ success: true, message: 'Business information update request submitted for admin approval' });
+  } catch (error) {
+    console.error('Error requesting business info update:', error);
+    res.status(500).json({ success: false, message: 'Failed to submit business info update request' });
+  }
+};
+
+/**
+ * Get business information change requests (Admin)
+ */
+exports.getBusinessInfoRequests = async (req, res) => {
+  try {
+    await ensureBusinessInfoSchema();
+
+    const status = (req.query.status || 'pending').toString();
+    const allowedStatuses = ['pending', 'approved', 'rejected', 'all'];
+    const filterStatus = allowedStatuses.includes(status) ? status : 'pending';
+
+    const query = `SELECT 
+      br.*,
+      c.company_name as current_company_name,
+      c.contact_email as current_contact_email,
+      c.phone as current_contact_phone,
+      c.address as current_business_address,
+      c.website as current_website,
+      c.tax_id as current_tax_id,
+      c.logo_url as current_logo_url,
+      s.name as system_name,
+      u.email as requested_by_email
+     FROM business_info_change_requests br
+     JOIN clients c ON br.client_id = c.id
+     JOIN client_subscriptions cs ON br.subscription_id = cs.id
+     JOIN systems s ON cs.system_id = s.id
+     LEFT JOIN users u ON c.user_id = u.id
+     ${filterStatus === 'all' ? '' : 'WHERE br.status = ?'}
+     ORDER BY CASE WHEN br.status = 'pending' THEN 0 ELSE 1 END, br.created_at DESC`;
+
+    const [rows] = filterStatus === 'all'
+      ? await pool.execute(query)
+      : await pool.execute(query, [filterStatus]);
+
+    const parsedRows = rows.map((row) => ({
+      ...row,
+      requested_data: parseJsonObject(row.requested_data, {}),
+    }));
+
+    const [countRows] = await pool.execute(
+      `SELECT status, COUNT(*) as count
+       FROM business_info_change_requests
+       GROUP BY status`
+    );
+
+    const counts = countRows.reduce((acc, row) => {
+      acc[row.status] = Number(row.count || 0);
+      return acc;
+    }, { pending: 0, approved: 0, rejected: 0 });
+
+    res.json({ success: true, requests: parsedRows, counts });
+  } catch (error) {
+    console.error('Error fetching business info requests:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch business info requests' });
+  }
+};
+
+/**
+ * Approve or reject business information change request (Admin)
+ */
+exports.reviewBusinessInfoRequest = async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await ensureBusinessInfoSchema();
+    await connection.beginTransaction();
+
+    const { requestId } = req.params;
+    const { action, admin_note } = req.body;
+    const adminUserId = req.user.id;
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
+    }
+
+    const [requestRows] = await connection.execute(
+      `SELECT * FROM business_info_change_requests WHERE id = ? FOR UPDATE`,
+      [requestId]
+    );
+
+    if (requestRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Request not found' });
+    }
+
+    const request = requestRows[0];
+    if (request.status !== 'pending') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'This request has already been reviewed' });
+    }
+
+    const nextStatus = action === 'approve' ? 'approved' : 'rejected';
+
+    await connection.execute(
+      `UPDATE business_info_change_requests
+       SET status = ?, admin_note = ?, reviewed_by = ?, reviewed_at = NOW()
+       WHERE id = ?`,
+      [nextStatus, admin_note || null, adminUserId, requestId]
+    );
+
+    const requestedData = parseJsonObject(request.requested_data, {});
+
+    if (action === 'approve') {
+      await connection.execute(
+        `UPDATE clients
+         SET company_name = ?, client_name = ?, email = ?, contact_email = ?, phone = ?,
+             address = ?, website = ?, tax_id = ?, logo_url = ?
+         WHERE id = ?`,
+        [
+          requestedData.company_name || '',
+          requestedData.company_name || '',
+          requestedData.contact_email || '',
+          requestedData.contact_email || '',
+          requestedData.contact_phone || '',
+          requestedData.business_address || null,
+          requestedData.website || null,
+          requestedData.tax_id || null,
+          requestedData.logo_url || null,
+          request.client_id,
+        ]
+      );
+    }
+
+    await connection.execute(
+      `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        request.subscription_id,
+        action === 'approve' ? 'business_info_change_approved' : 'business_info_change_rejected',
+        String(adminUserId),
+        JSON.stringify({ message: admin_note || (action === 'approve' ? 'Approved by admin' : 'Rejected by admin') }),
+        req.ip,
+      ]
+    );
+
+    await connection.commit();
+
+    res.json({ success: true, message: `Business info change request ${nextStatus}` });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error reviewing business info request:', error);
+    res.status(500).json({ success: false, message: 'Failed to review business info request' });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
  * Get all clients and subscriptions (Admin only)
  */
 exports.getAllClientsAndSubscriptions = async (req, res) => {
@@ -399,7 +1060,7 @@ exports.getAllClientsAndSubscriptions = async (req, res) => {
         COUNT(cs.id) as total_subscriptions,
         SUM(CASE WHEN cs.status = 'active' THEN 1 ELSE 0 END) as active_subscriptions
        FROM clients c
-       JOIN users u ON c.user_id = u.id
+       LEFT JOIN users u ON c.user_id = u.id
        LEFT JOIN client_subscriptions cs ON c.id = cs.client_id
        GROUP BY c.id
        ORDER BY c.created_at DESC`
@@ -557,23 +1218,36 @@ exports.getSecurityInfo = async (req, res) => {
     
     const subscription = subscriptions[0];
     
-    // Get last seen from device activations
-    const [devices] = await pool.execute(
-      `SELECT MAX(last_seen) as last_seen
+    // Get active device metrics from device activations
+    const [deviceStats] = await pool.execute(
+      `SELECT COUNT(*) as active_count, MAX(last_seen) as last_seen
        FROM device_activations
        WHERE subscription_id = ? AND status = 'active'`,
       [subscriptionId]
     );
     
+    const [recentPayments] = await pool.execute(
+      `SELECT status, payment_date
+       FROM payments
+       WHERE subscription_id = ?
+       ORDER BY payment_date DESC, id DESC
+       LIMIT 1`,
+      [subscriptionId]
+    );
+
+    const paymentStatus = recentPayments.length > 0 ? recentPayments[0].status : 'completed';
+
     res.json({
       success: true,
       security: {
-        device_count: subscription.device_count || 0,
-        max_devices: subscription.max_devices || 3,
+        device_count: Number(deviceStats[0]?.active_count || 0),
+        max_devices: subscription.max_devices || subscription.max_activations || 3,
         activation_count: subscription.activation_count || 0,
         max_activations: subscription.max_activations || 3,
         is_activated: subscription.is_activated || false,
-        last_seen: devices[0]?.last_seen || null
+        last_seen: deviceStats[0]?.last_seen || null,
+        subscription_status: subscription.status,
+        payment_status: paymentStatus,
       }
     });
   } catch (error) {
@@ -744,12 +1418,17 @@ exports.deletePlan = async (req, res) => {
  */
 exports.downloadSystem = async (req, res) => {
   try {
+    await ensureBusinessInfoSchema();
+
     const { subscriptionId } = req.params;
     const userId = req.user.id;
     
     // Verify subscription belongs to user and is active
     const [subscriptions] = await pool.execute(`
-      SELECT cs.*, s.name as system_name, s.python_file_path, sp.name as plan_name
+            SELECT cs.*, s.name as system_name, s.python_file_path, s.icon_url as system_logo,
+              s.category, s.features as system_features, sp.name as plan_name,
+              c.company_name, c.contact_email, c.phone as contact_phone, c.address as business_address,
+              c.website, c.tax_id, c.logo_url
       FROM client_subscriptions cs
       JOIN clients c ON cs.client_id = c.id
       JOIN systems s ON cs.system_id = s.id
@@ -768,11 +1447,6 @@ exports.downloadSystem = async (req, res) => {
     
     // Determine tier from plan name
     const tier = subscription.plan_name.toLowerCase().includes('premium') ? 'premium' : 'basic';
-    
-    // Construct file path
-    const path = require('path');
-    const fs = require('fs');
-    const archiver = require('archiver');
     
     // Clean up python_file_path - remove 'systems/' prefix if present, ensure trailing slash
     let cleanPath = subscription.python_file_path;
@@ -794,50 +1468,92 @@ exports.downloadSystem = async (req, res) => {
         message: 'System files not found'
       });
     }
-    
-    // Set response headers for download
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${subscription.system_name}_${tier}.zip"`);
-    
-    // Create zip archive
-    const archive = archiver('zip', {
-      zlib: { level: 9 }
+
+    const safeSystemName = (subscription.system_name || 'system').replace(/\s+/g, '_');
+    const installerFilename = `${safeSystemName}_${tier}_installer.exe`;
+    const downloadName = installerFilename;
+
+    const tempRoot = path.join(__dirname, '../uploads/temp');
+    fs.mkdirSync(tempRoot, { recursive: true });
+    const packageDir = path.join(tempRoot, `download_${subscription.id}_${Date.now()}`);
+    fs.mkdirSync(packageDir, { recursive: true });
+
+    copyRecursive(systemFolder, packageDir);
+
+    const sensitiveArtifacts = ['business_config.json'];
+    for (const artifact of sensitiveArtifacts) {
+      const artifactPath = path.join(packageDir, artifact);
+      if (fs.existsSync(artifactPath)) {
+        fs.rmSync(artifactPath, { force: true });
+      }
+    }
+
+    const categoryFromPath = cleanPath.split('/').filter(Boolean)[0] || 'system';
+    const sanitizedCategory = String(subscription.category || categoryFromPath)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_');
+
+    const installerSource = generateInstaller({
+      systemName: subscription.system_name || 'Business System',
+      category: sanitizedCategory,
+      features: parseFeaturesSafely(subscription.system_features),
+      tier,
+      apiUrl: readServerApiUrl(packageDir),
     });
-    
-    archive.on('error', (err) => {
-      console.error('Archive error:', err);
-      res.status(500).json({
+
+    fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
+
+    let installerPath = buildInstallerIfMissing(packageDir, true);
+    if (!installerPath) {
+      return res.status(404).json({
         success: false,
-        message: 'Failed to create download package'
+        message: 'Installer executable could not be built for this system.'
       });
+    }
+
+    return res.download(installerPath, downloadName, async (downloadError) => {
+      try {
+        fs.rmSync(packageDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.error('Failed to cleanup installer package temp directory:', cleanupError);
+      }
+
+      if (downloadError) {
+        console.error('Error sending installer executable:', downloadError);
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, message: 'Failed to download installer executable' });
+        }
+        return;
+      }
+
+      try {
+        await pool.execute(
+          `INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
+           VALUES (?, ?, ?, ?, ?)`,
+          [subscription.id, subscription.api_key, '/download', 'GET', req.ip]
+        );
+
+        await pool.execute(
+          `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+           VALUES (?, 'download', ?, ?, ?)`,
+          [
+            subscription.id,
+            String(req.user?.id || 'client'),
+            JSON.stringify({
+              filename: downloadName,
+              system_name: subscription.system_name,
+              plan: subscription.plan_name,
+              includes_business_info: false,
+              delivery: 'exe',
+              config_mode: 'api_key_online_fetch',
+            }),
+            req.ip,
+          ]
+        );
+      } catch (logError) {
+        console.error('Failed to log installer download:', logError);
+      }
     });
-    
-    // Pipe archive to response
-    archive.pipe(res);
-    
-    // Add files to archive
-    archive.directory(systemFolder, false);
-    
-    // Add configuration file with API key
-    const config = {
-      api_key: subscription.api_key,
-      company_name: subscription.company_name,
-      subscription_id: subscription.id,
-      plan: subscription.plan_name,
-      start_date: subscription.start_date,
-      end_date: subscription.end_date
-    };
-    
-    archive.append(JSON.stringify(config, null, 2), { name: 'subscription_config.json' });
-    
-    // Finalize the archive
-    await archive.finalize();
-    
-    // Log download
-    await pool.execute(`
-      INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
-      VALUES (?, ?, ?, ?, ?)
-    `, [subscription.id, subscription.api_key, '/download', 'GET', req.ip]);
     
   } catch (error) {
     console.error('Error downloading system:', error);
@@ -915,9 +1631,6 @@ exports.generateCustomSystem = async (req, res) => {
     const tier = subscription.plan_name.toLowerCase().includes('premium') ? 'premium' : 'basic';
     
     // Construct file paths
-    const path = require('path');
-    const fs = require('fs');
-    const archiver = require('archiver');
     
     // Path to system folder
     const systemFolder = path.join(__dirname, '../../systems', subscription.python_file_path, tier);
@@ -954,6 +1667,12 @@ exports.generateCustomSystem = async (req, res) => {
       };
       
       copyRecursive(systemFolder, tempDir);
+      
+      // Ensure requirements.txt exists in tempDir (safety fallback)
+      const reqPath = path.join(tempDir, 'requirements.txt');
+      if (!fs.existsSync(reqPath)) {
+        fs.writeFileSync(reqPath, 'requests\nPillow\n');
+      }
       
       // Copy logo if uploaded
       if (logoFile) {
@@ -998,32 +1717,41 @@ exports.generateCustomSystem = async (req, res) => {
       const batchContent = `@echo off
 title ${business_name} - System Installer
 color 0A
+cd /d "%~dp0"
 echo.
 echo ================================================
 echo    ${business_name}
 echo    System Installation Wizard
 echo ================================================
 echo.
-echo Checking Python installation...
-echo.
-
-REM Check if Python is installed
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ERROR: Python is not installed!
-    echo.
-    echo Please install Python 3.8 or higher from:
-    echo https://www.python.org/downloads/
-    echo.
-    echo Make sure to check "Add Python to PATH" during installation.
-    echo.
-    pause
-    exit /b 1
+if exist "%~dp0dist\*_installer.exe" (
+  echo Found installer executable. Starting setup...
+  echo.
+  for %%f in ("%~dp0dist\*_installer.exe") do start "" "%%f"
+  exit /b 0
 )
 
-echo Python found! Starting installation wizard...
+if exist "%~dp0*_installer.exe" (
+  echo Found installer executable. Starting setup...
+  echo.
+  for %%f in ("%~dp0*_installer.exe") do start "" "%%f"
+  exit /b 0
+)
+
+echo Installer executable not found. Falling back to Python installer...
 echo.
-python installer.py
+
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+  echo ERROR: Python is not installed and installer EXE is not available.
+  echo.
+  echo Please request the installer EXE package from support.
+  echo.
+  pause
+  exit /b 1
+)
+
+python "%~dp0installer.py"
 
 if %errorlevel% neq 0 (
     echo.
@@ -1041,7 +1769,7 @@ if %errorlevel% neq 0 (
 ## Installation Instructions
 
 ### Quick Start (Windows)
-1. **Double-click** \`INSTALL.bat\` to start the installation wizard
+1. **Double-click** \`INSTALL.bat\` (or run \`*_installer.exe\` directly)
 2. Follow the on-screen instructions
 
 ### Manual Installation (All Platforms)
@@ -1115,39 +1843,59 @@ BUSINESS_CONFIG = load_business_config()
         fs.writeFileSync(gymAppPath, gymAppContent);
       }
       
-      // Set response headers for download
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="${subscription.system_name}_${tier}_installer.zip"`);
-      
-      // Create zip archive
-      const archive = archiver('zip', {
-        zlib: { level: 9 }
+      let installerPath = findInstallerExecutable(tempDir);
+      if (!installerPath) {
+        installerPath = buildInstallerIfMissing(tempDir);
+      }
+      if (!installerPath) {
+        throw new Error('Installer executable not found. Please build installer before download.');
+      }
+
+      const downloadName = `${subscription.system_name}_${tier}_installer.exe`.replace(/\s+/g, '_');
+
+      return res.download(installerPath, downloadName, async (downloadError) => {
+        try {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          console.error('Failed to clean temp directory:', cleanupError);
+        }
+
+        if (downloadError) {
+          console.error('Error sending custom installer:', downloadError);
+          if (!res.headersSent) {
+            res.status(500).json({
+              success: false,
+              message: 'Failed to download custom installer'
+            });
+          }
+          return;
+        }
+
+        try {
+          await pool.execute(`
+            INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
+            VALUES (?, ?, ?, ?, ?)
+          `, [subscription.id, subscription.api_key, '/generate-custom-system', 'POST', req.ip]);
+          await pool.execute(
+            `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+             VALUES (?, 'download', ?, ?, ?)`,
+            [
+              subscription.id,
+              String(req.user?.id || 'client'),
+              JSON.stringify({
+                filename: downloadName,
+                system_name: subscription.system_name,
+                plan: subscription.plan_name,
+                customized: true,
+                business_name,
+              }),
+              req.ip,
+            ]
+          );
+        } catch (logError) {
+          console.error('Failed to log custom installer download:', logError);
+        }
       });
-      
-      archive.on('error', (err) => {
-        console.error('Archive error:', err);
-        throw err;
-      });
-      
-      // Pipe archive to response
-      archive.pipe(res);
-      
-      // Add all files from temp directory
-      archive.directory(tempDir, false);
-      
-      // Finalize the archive
-      await archive.finalize();
-      
-      // Clean up temp directory after a delay
-      setTimeout(() => {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }, 5000);
-      
-      // Log download
-      await pool.execute(`
-        INSERT INTO api_usage_logs (subscription_id, api_key, endpoint, method, ip_address)
-        VALUES (?, ?, ?, ?, ?)
-      `, [subscription.id, subscription.api_key, '/generate-custom-system', 'POST', req.ip]);
       
     } catch (error) {
       // Clean up temp directory on error

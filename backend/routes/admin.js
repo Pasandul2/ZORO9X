@@ -5,6 +5,9 @@
 
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { 
   adminLogin, 
   getAdminProfile, 
@@ -22,6 +25,43 @@ const {
   regenerateSystem
 } = require('../controllers/systemGenerator');
 const { verifyToken } = require('../middleware/auth');
+
+// ============================================
+// MULTER CONFIGURATION FOR ICON UPLOADS
+// ============================================
+
+// Create uploads directory if it doesn't exist
+const iconsDir = path.join(__dirname, '../uploads/icons');
+if (!fs.existsSync(iconsDir)) {
+  fs.mkdirSync(iconsDir, { recursive: true });
+}
+
+// Configure multer for icon uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, iconsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'icon-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|svg|ico|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype) || file.mimetype === 'image/svg+xml' || file.mimetype === 'image/x-icon';
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Only image files (jpeg, jpg, png, gif, svg, ico, webp) are allowed'));
+    }
+  }
+});
 
 /**
  * @route   POST /api/admin/login
@@ -87,8 +127,24 @@ router.post('/admins/:id/resend-invitation', verifyToken, resendAdminInvitation)
  * @route   POST /api/admin/generate-system
  * @desc    Auto-generate new system with Basic & Premium versions
  * @access  Private (Admin only)
+ * @field   icon - Optional file upload for system icon
  */
-router.post('/generate-system', verifyToken, generateSystem);
+router.post('/generate-system', 
+  verifyToken, 
+  (req, res, next) => {
+    console.log('🔍 Before multer - Content-Type:', req.get('content-type'));
+    console.log('🔍 Before multer - Body:', req.body);
+    next();
+  },
+  upload.single('icon'),
+  (req, res, next) => {
+    console.log('🔍 After multer - Has file:', !!req.file);
+    console.log('🔍 After multer - Body:', req.body);
+    console.log('🔍 After multer - Body keys:', Object.keys(req.body));
+    next();
+  },
+  generateSystem
+);
 
 /**
  * @route   GET /api/admin/generated-systems

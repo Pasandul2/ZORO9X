@@ -1,21 +1,5 @@
-/**
- * Installer Template Generator
- * Generates custom installation wizards for each system.
- */
-
-function generateInstaller({ systemName, category, features, tier }) {
-  const featureLines = features
-    .map((feature) => `- ${feature}`)
-    .join('\\n');
-    const configSigningSecret = (process.env.CONFIG_SIGNING_SECRET || process.env.OFFLINE_TOKEN_SECRET || process.env.JWT_SECRET || 'config-signing-secret')
-        .replace(/\\/g, '\\\\')
-        .replace(/'/g, "\\'");
-        const publicApiUrl = (process.env.ZORO9X_PUBLIC_API_URL || process.env.ZORO9X_API_URL || '')
-                .replace(/\\/g, '\\\\')
-                .replace(/'/g, "\\'");
-
-  return `"""
-ZORO9X ${systemName} - Installation Wizard
+"""
+ZORO9X Gold Loan System - Installation Wizard
 """
 
 import tkinter as tk
@@ -34,12 +18,12 @@ import platform
 import uuid
 import hmac
 
-APP_EXE_NAME = '${category}_app.exe'
-APP_SCRIPT_NAME = '${category}_app.py'
-CONFIG_FILE_NAME = '${category}_config.json'
-API_URL = '${publicApiUrl}'
+APP_EXE_NAME = 'gold_loan_app.exe'
+APP_SCRIPT_NAME = 'gold_loan_app.py'
+CONFIG_FILE_NAME = 'gold_loan_config.json'
+API_URL = 'http://localhost:5001'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
-CONFIG_SIGNING_SECRET = '${configSigningSecret}'
+CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 
 
 def is_remote_api_url(url):
@@ -94,7 +78,7 @@ def sign_config(config_data, device_fp):
 class InstallationWizard:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title('ZORO9X ${systemName} - Installation Wizard')
+        self.root.title('ZORO9X Gold Loan System - Installation Wizard')
         self.root.geometry('980x700')
         self.root.minsize(860, 620)
         self.root.configure(bg='#e2e8f0')
@@ -117,7 +101,7 @@ class InstallationWizard:
         ]
 
         self.bundle_dir = self.get_bundle_dir()
-        self.install_path = str(Path.home() / 'ZORO9X' / '${systemName.replace(/\s+/g, '')}')
+        self.install_path = str(Path.home() / 'ZORO9X' / 'GoldLoanSystem')
         self.create_desktop_shortcut = True
 
         self.api_key = ''
@@ -126,7 +110,7 @@ class InstallationWizard:
         self.contact_phone = ''
         self.business_address = ''
         self.logo_url = ''
-        self.database_name = '${category}_database'
+        self.database_name = 'gold_loan_database'
         self.validation_payload = {}
         self.business_details_loaded = False
         self.loaded_api_key = ''
@@ -179,7 +163,7 @@ class InstallationWizard:
 
         tk.Label(
             header,
-            text='${systemName}',
+            text='Gold Loan System',
             font=('Segoe UI', 19, 'bold'),
             bg=self.accent,
             fg='white',
@@ -365,7 +349,7 @@ class InstallationWizard:
         self.contact_email_var.set(subscription.get('contact_email', '') or '')
         self.contact_phone_var.set(subscription.get('contact_phone', '') or '')
         self.business_address_var.set(subscription.get('business_address', '') or '')
-        self.database_name_var.set(subscription.get('database_name', self.database_name_var.get().strip() or '${category}_database'))
+        self.database_name_var.set(subscription.get('database_name', self.database_name_var.get().strip() or 'gold_loan_database'))
         self.logo_url = (subscription.get('logo_url', '') or '').strip()
         self.load_logo_preview(self.logo_url)
 
@@ -410,7 +394,7 @@ class InstallationWizard:
 
         tk.Label(
             content,
-            text='Welcome to ${systemName}',
+            text='Welcome to Gold Loan System',
             font=('Segoe UI', 20, 'bold'),
             bg=self.surface,
             fg=self.text_primary,
@@ -418,7 +402,7 @@ class InstallationWizard:
 
         tk.Label(
             content,
-            text='${tier.toUpperCase()} Edition',
+            text='PREMIUM Edition',
             font=('Segoe UI', 11),
             bg=self.surface,
             fg=self.text_muted,
@@ -435,7 +419,7 @@ class InstallationWizard:
         feature_box = tk.Frame(content, bg=self.surface_soft)
         feature_box.pack(fill=tk.X, padx=40, pady=10)
 
-        for line in """${featureLines}""".splitlines():
+        for line in """- Dashboard\n- Advanced Analytics\n- Custom Reports""".splitlines():
             tk.Label(
                 feature_box,
                 text=line,
@@ -482,7 +466,7 @@ class InstallationWizard:
         license_content = """End User License Agreement (EULA)
 
 1. Grant of License
-ZORO9X grants you a non-exclusive license to use ${systemName}.
+ZORO9X grants you a non-exclusive license to use Gold Loan System.
 
 2. Restrictions
 You may not modify, reverse engineer, or distribute this software.
@@ -721,7 +705,7 @@ By proceeding, you agree to these terms."""
 
         subscription = payload.get('subscription') or {}
         self.company_name = (subscription.get('company_name') or self.company_name).strip()
-        self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or '${category}_database').strip()
+        self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or 'gold_loan_database').strip()
         self.database_name_var.set(self.database_name)
 
         self.clear_content()
@@ -833,7 +817,7 @@ By proceeding, you agree to these terms."""
             Dispatch = importlib.import_module('win32com.client').Dispatch
 
             desktop = Path.home() / 'Desktop'
-            shortcut_path = desktop / '${systemName}.lnk'
+            shortcut_path = desktop / 'Gold Loan System.lnk'
 
             app_exe = os.path.join(self.install_path, APP_EXE_NAME)
             app_script = os.path.join(self.install_path, APP_SCRIPT_NAME)
@@ -868,7 +852,7 @@ By proceeding, you agree to these terms."""
 
         tk.Label(
             content,
-            text='${systemName} has been installed successfully.',
+            text='Gold Loan System has been installed successfully.',
             font=('Segoe UI', 10),
             bg=self.surface,
             fg=self.text_muted,
@@ -928,9 +912,3 @@ By proceeding, you agree to these terms."""
 if __name__ == '__main__':
     wizard = InstallationWizard()
     wizard.run()
-`;
-}
-
-module.exports = {
-  generateInstaller,
-};

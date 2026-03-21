@@ -11,6 +11,11 @@ frontend/dist/
 backend/dist/
 
 # Environment variables
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
 
 
 # Logs

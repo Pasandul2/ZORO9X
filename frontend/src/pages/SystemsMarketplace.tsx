@@ -16,9 +16,42 @@ interface System {
   description: string;
   category: string;
   icon_url: string;
+  version?: string;
   features: string[];
   plans?: Plan[];
 }
+
+const parseFeaturesSafely = (features: unknown): string[] => {
+  if (Array.isArray(features)) {
+    return features.filter((item): item is string => typeof item === 'string');
+  }
+
+  if (typeof features === 'string') {
+    try {
+      const parsed = JSON.parse(features || '[]');
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string');
+      }
+    } catch {
+      return features
+        .split(/[\n,]/)
+        .map((feature) => feature.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const resolveSystemIcon = (iconUrl?: string): string | null => {
+  if (!iconUrl) {
+    return null;
+  }
+
+  return iconUrl.startsWith('http')
+    ? iconUrl
+    : `${import.meta.env.VITE_API_URL}${iconUrl}`;
+};
 
 interface Plan {
   id: number;
@@ -48,13 +81,9 @@ const SystemsMarketplace: React.FC<SystemsMarketplaceProps> = ({ darkMode }) => 
       if (response.ok) {
         const data = await response.json();
         // Ensure features is always an array
-        const systemsWithParsedFeatures = data.systems.map((system: any) => ({
+        const systemsWithParsedFeatures = (Array.isArray(data.systems) ? data.systems : []).map((system: any) => ({
           ...system,
-          features: Array.isArray(system.features) 
-            ? system.features 
-            : typeof system.features === 'string' 
-            ? JSON.parse(system.features || '[]')
-            : []
+          features: parseFeaturesSafely(system.features)
         }));
         setSystems(systemsWithParsedFeatures);
       }
@@ -154,6 +183,7 @@ const SystemsMarketplace: React.FC<SystemsMarketplaceProps> = ({ darkMode }) => 
 // System Card Component
 const SystemCard: React.FC<any> = ({ system, darkMode, index }) => {
   const navigate = useNavigate();
+  const iconSrc = resolveSystemIcon(system.icon_url);
 
   return (
     <motion.div
@@ -170,13 +200,31 @@ const SystemCard: React.FC<any> = ({ system, darkMode, index }) => {
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
           <h3 className="text-2xl font-bold mb-2">{system.name}</h3>
-          <span className="inline-block px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-sm">
-            {system.category}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="inline-block px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-sm">
+              {system.category}
+            </span>
+            {system.version && (
+              <span className="inline-block px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-sm">
+                v{system.version}
+              </span>
+            )}
+          </div>
         </div>
-        <div className={`p-3 rounded-lg ${darkMode ? 'bg-purple-500/10' : 'bg-purple-100'}`}>
-          <Package className="w-8 h-8 text-purple-500" />
-        </div>
+        {iconSrc ? (
+          <img
+            src={iconSrc}
+            alt={system.name}
+            className="w-14 h-14 rounded-xl object-cover border border-purple-500/30"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        ) : (
+          <div className={`p-3 rounded-lg ${darkMode ? 'bg-purple-500/10' : 'bg-purple-100'}`}>
+            <Package className="w-8 h-8 text-purple-500" />
+          </div>
+        )}
       </div>
 
       {/* Description */}

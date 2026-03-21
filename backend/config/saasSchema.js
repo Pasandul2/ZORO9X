@@ -289,6 +289,7 @@ async function initializeSaaSTables() {
     await createDeviceActivationsTable();
     await createSecurityAlertsTable();
     await createLicenseTokensTable();
+    await createAuditLogsTable();
     
     console.log('\n🎉 All SaaS tables initialized successfully!\n');
   } catch (error) {
@@ -545,6 +546,50 @@ async function createLicenseTokensTable() {
   }
 }
 
+/**
+ * Create audit_logs table - Track all security-relevant events
+ */
+async function createAuditLogsTable() {
+  try {
+    const connection = await pool.getConnection();
+
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        subscription_id INT NULL,
+        device_fingerprint VARCHAR(255) NULL,
+        event_type ENUM(
+          'download',
+          'activation_approved',
+          'activation_pending',
+          'activation_rejected',
+          'revocation',
+          'token_refresh',
+          'validation_blocked',
+          'policy_violation',
+          'approval',
+          'rejection'
+        ) NOT NULL,
+        actor VARCHAR(64) DEFAULT 'system',
+        details JSON NULL,
+        ip_address VARCHAR(45) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_subscription_id (subscription_id),
+        INDEX idx_event_type (event_type),
+        INDEX idx_created_at (created_at),
+        INDEX idx_device_fingerprint (device_fingerprint)
+      )
+    `;
+
+    await connection.execute(createTableQuery);
+    console.log('✅ Audit logs table created/verified successfully!');
+    connection.release();
+  } catch (error) {
+    console.error('❌ Error creating audit_logs table:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeSaaSTables,
   seedInitialSystems,
@@ -558,5 +603,6 @@ module.exports = {
   createSystemNotificationsTable,
   createDeviceActivationsTable,
   createSecurityAlertsTable,
-  createLicenseTokensTable
+  createLicenseTokensTable,
+  createAuditLogsTable
 };

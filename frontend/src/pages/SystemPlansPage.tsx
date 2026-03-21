@@ -16,8 +16,41 @@ interface System {
   description: string;
   category: string;
   icon_url: string;
+  version?: string;
   features: string[];
 }
+
+const parseFeaturesSafely = (features: unknown): string[] => {
+  if (Array.isArray(features)) {
+    return features.filter((item): item is string => typeof item === 'string');
+  }
+
+  if (typeof features === 'string') {
+    try {
+      const parsed = JSON.parse(features || '[]');
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string');
+      }
+    } catch {
+      return features
+        .split(/[\n,]/)
+        .map((feature) => feature.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
+const resolveSystemIcon = (iconUrl?: string): string | null => {
+  if (!iconUrl) {
+    return null;
+  }
+
+  return iconUrl.startsWith('http')
+    ? iconUrl
+    : `${import.meta.env.VITE_API_URL}${iconUrl}`;
+};
 
 interface Plan {
   id: number;
@@ -52,11 +85,7 @@ const SystemPlansPage: React.FC<SystemPlansPageProps> = ({ darkMode }) => {
         const systemData = await systemResponse.json();
         const systemWithParsedFeatures = {
           ...systemData.system,
-          features: Array.isArray(systemData.system.features) 
-            ? systemData.system.features 
-            : typeof systemData.system.features === 'string' 
-            ? JSON.parse(systemData.system.features || '[]')
-            : []
+          features: parseFeaturesSafely(systemData.system.features)
         };
         setSystem(systemWithParsedFeatures);
       }
@@ -113,6 +142,8 @@ const SystemPlansPage: React.FC<SystemPlansPageProps> = ({ darkMode }) => {
     );
   }
 
+  const iconSrc = resolveSystemIcon(system.icon_url);
+
   return (
     <div className={`min-h-screen pt-32 pb-20 px-4 ${
       darkMode 
@@ -142,17 +173,35 @@ const SystemPlansPage: React.FC<SystemPlansPageProps> = ({ darkMode }) => {
           }`}
         >
           <div className="flex items-start gap-6">
-            <div className={`p-4 rounded-xl ${darkMode ? 'bg-purple-500/10' : 'bg-purple-100'}`}>
-              <Package className="w-16 h-16 text-purple-500" />
-            </div>
+            {iconSrc ? (
+              <img
+                src={iconSrc}
+                alt={system.name}
+                className="w-24 h-24 rounded-xl object-cover border border-purple-500/30"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className={`p-4 rounded-xl ${darkMode ? 'bg-purple-500/10' : 'bg-purple-100'}`}>
+                <Package className="w-16 h-16 text-purple-500" />
+              </div>
+            )}
             <div className="flex-1">
               <h1 className="text-4xl font-bold mb-2">{system.name}</h1>
               <p className={`text-lg mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                 {system.description}
               </p>
-              <span className="inline-block px-4 py-2 bg-purple-500/20 text-purple-400 rounded-full text-sm">
-                {system.category}
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-block px-4 py-2 bg-purple-500/20 text-purple-400 rounded-full text-sm">
+                  {system.category}
+                </span>
+                {system.version && (
+                  <span className="inline-block px-4 py-2 bg-blue-500/20 text-blue-400 rounded-full text-sm">
+                    Version {system.version}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -308,32 +357,94 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
     contact_phone: '',
     business_address: '',
     logo: null as File | null,
+    use_system_logo: true,
+    remove_logo: false,
     website: '',
     tax_id: ''
   });
+  const [selectedLogoPreview, setSelectedLogoPreview] = useState<string | null>(null);
+
+  const systemLogoSrc = system?.icon_url
+    ? system.icon_url.startsWith('http')
+      ? system.icon_url
+      : `${import.meta.env.VITE_API_URL}${system.icon_url}`
+    : null;
+
+  useEffect(() => {
+    if (!formData.logo) {
+      setSelectedLogoPreview(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(formData.logo);
+    setSelectedLogoPreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [formData.logo]);
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload a valid image file');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Logo file size must be less than 5MB');
+      e.target.value = '';
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      logo: file,
+      use_system_logo: false,
+      remove_logo: false,
+    }));
+  };
 
   const handleSubmit = async () => {
     setLoading(true);
     
     try {
+      const payload = new FormData();
+      payload.append('system_id', String(system.id));
+      payload.append('plan_id', String(plan.id));
+      payload.append('company_name', formData.company_name);
+      payload.append('contact_email', formData.contact_email);
+      payload.append('contact_phone', formData.contact_phone);
+      payload.append('business_address', formData.business_address);
+      payload.append('website', formData.website);
+      payload.append('tax_id', formData.tax_id);
+      payload.append('billing_cycle', plan.billing_cycle);
+      payload.append('use_system_logo', formData.use_system_logo ? 'true' : 'false');
+      payload.append('remove_logo', formData.remove_logo ? 'true' : 'false');
+
+      if (formData.logo) {
+        payload.append('logo', formData.logo);
+      }
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/subscribe`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({
-          system_id: system.id,
-          plan_id: plan.id,
-          ...formData
-        })
+        body: payload
       });
 
       if (response.ok) {
         alert('Subscription purchased successfully!');
         onSuccess();
       } else {
-        alert('Failed to purchase subscription');
+        const errorData = await response.json().catch(() => null);
+        alert(errorData?.message || 'Failed to purchase subscription');
       }
     } catch (error) {
       console.error('Error purchasing subscription:', error);
@@ -395,6 +506,11 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
         return (
           <div className="space-y-4">
             <h3 className="text-xl font-bold mb-4">Step 2: Business Details</h3>
+
+            <div className={`p-3 rounded-lg border ${darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+              These business details are used directly in your desktop system application. Future edits require admin approval.
+            </div>
+
             <input
               type="text"
               placeholder="Website (optional)"
@@ -413,6 +529,73 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
                 darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
               }`}
             />
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Business Logo</label>
+
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.use_system_logo}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        use_system_logo: e.target.checked,
+                        remove_logo: false,
+                        logo: e.target.checked ? null : prev.logo,
+                      }))
+                    }
+                  />
+                  Use system logo image
+                </label>
+
+                <label className="px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm cursor-pointer">
+                  Browse Logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoUpload}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      logo: null,
+                      remove_logo: true,
+                      use_system_logo: false,
+                    }))
+                  }
+                  className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+                >
+                  Delete Logo
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {formData.remove_logo ? (
+                  <div className={`w-16 h-16 rounded-lg flex items-center justify-center text-xs ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>
+                    No Logo
+                  </div>
+                ) : selectedLogoPreview ? (
+                  <img src={selectedLogoPreview} alt="Selected logo" className="w-16 h-16 rounded-lg object-cover border border-purple-500/30" />
+                ) : formData.use_system_logo && systemLogoSrc ? (
+                  <img src={systemLogoSrc} alt="System logo" className="w-16 h-16 rounded-lg object-cover border border-purple-500/30" />
+                ) : (
+                  <div className={`w-16 h-16 rounded-lg flex items-center justify-center text-xs ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>
+                    No Logo
+                  </div>
+                )}
+
+                <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Recommended: PNG/JPG, max 5MB.
+                </p>
+              </div>
+            </div>
           </div>
         );
       
@@ -432,6 +615,10 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
               <p><strong>Email:</strong> {formData.contact_email}</p>
               <p><strong>Phone:</strong> {formData.contact_phone}</p>
             </div>
+
+            <div className={`p-3 rounded-lg border ${darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+              Notice: After purchase, changes to business information require admin approval.
+            </div>
           </div>
         );
       
@@ -450,6 +637,9 @@ const PurchaseDialog: React.FC<any> = ({ darkMode, system, plan, onClose, onSucc
         }`}
       >
         <h2 className="text-2xl font-bold mb-6">Complete Your Purchase</h2>
+        <p className={`text-sm mb-4 ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+          Important: Business details are used in the installer and desktop application. Edits later require admin approval.
+        </p>
 
         {/* Progress Steps */}
         <div className="flex items-center justify-between mb-8">

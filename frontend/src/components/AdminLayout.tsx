@@ -170,7 +170,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, darkMode, setDarkMo
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-950 via-blue-950 to-black">
+        <main id="admin-content-scroll" className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-950 via-blue-950 to-black">
           <div className="p-6">
             {children}
           </div>

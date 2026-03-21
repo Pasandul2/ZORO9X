@@ -7,6 +7,7 @@ const { pool } = require('../config/database');
 const fs = require('fs');
 const path = require('path');
 const { generatePythonApp } = require('../templates/pythonTemplate');
+const { generateInstaller } = require('../templates/installerTemplate');
 
 /**
  * Generate complete system with Basic and Premium versions
@@ -17,27 +18,79 @@ exports.generateSystem = async (req, res) => {
   try {
     await connection.beginTransaction();
     
-    const { 
-      name, 
-      description, 
-      category, 
-      icon_url, 
-      features_basic,
-      features_premium,
-      tables 
-    } = req.body;
+    // Log incoming request for debugging
+    console.log('📥 Received generate-system request');
+    console.log('   Has file:', !!req.file);
+    console.log('   Body keys:', Object.keys(req.body));
+    console.log('   Body:', req.body);
     
-    // Validate input
-    if (!name || !category || !features_basic || !tables) {
+    // Parse JSON fields if they come as strings (from FormData)
+    let features_basic = req.body.features_basic;
+    let features_premium = req.body.features_premium;
+    let tables = req.body.tables;
+    
+    if (typeof features_basic === 'string') {
+      try {
+        features_basic = JSON.parse(features_basic);
+      } catch (e) {
+        console.error('   Error parsing features_basic:', e.message);
+      }
+    }
+    if (typeof features_premium === 'string') {
+      try {
+        features_premium = JSON.parse(features_premium);
+      } catch (e) {
+        console.error('   Error parsing features_premium:', e.message);
+      }
+    }
+    if (typeof tables === 'string') {
+      try {
+        tables = JSON.parse(tables);
+      } catch (e) {
+        console.error('   Error parsing tables:', e.message);
+      }
+    }
+    
+    const {
+      name,
+      description,
+      category,
+      icon_url,
+    } = req.body;
+    const serverApiUrl = (process.env.ZORO9X_PUBLIC_API_URL || process.env.ZORO9X_API_URL || process.env.API_URL || '').trim();
+    
+    // Debug logging - show what we have
+    console.log('   After parsing:');
+    console.log('     name:', name);
+    console.log('     category:', category);
+    console.log('     features_basic:', features_basic);
+    console.log('     tables:', tables);
+    console.log('     description:', description);
+    
+    // Handle icon upload or URL
+    let finalIconUrl = icon_url || '/images/default-icon.png';
+    if (req.file) {
+      // If a file was uploaded, use the upload path
+      finalIconUrl = `/uploads/icons/${req.file.filename}`;
+      console.log(`✅ Icon uploaded: ${finalIconUrl}`);
+    }
+    // Validate input - check each field individually
+    const missingFields = [];
+    if (!name) missingFields.push('name');
+    if (!category) missingFields.push('category');
+    if (!features_basic) missingFields.push('features_basic');
+    if (!tables) missingFields.push('tables');
+    
+    if (missingFields.length > 0) {
+      console.error('❌ Missing fields:', missingFields);
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: name, category, features_basic, and tables are required'
+        message: `Missing required fields: ${missingFields.join(', ')}`
       });
     }
     
     console.log(`🚀 Generating system: ${name}`);
     console.log(`📁 Category: ${category}`);
-    console.log(`📊 Tables:`, JSON.stringify(tables, null, 2));
     
     // Check if category already exists
     const [existingSystems] = await connection.execute(
@@ -92,7 +145,8 @@ exports.generateSystem = async (req, res) => {
       category,
       tables,
       features: features_basic,
-      tier: 'basic'
+      tier: 'basic',
+      apiUrl: serverApiUrl,
     });
     
     fs.writeFileSync(
@@ -108,7 +162,8 @@ exports.generateSystem = async (req, res) => {
       category,
       tables,
       features: features_premium || [...features_basic, 'Advanced Analytics', 'Custom Reports'],
-      tier: 'premium'
+      tier: 'premium',
+      apiUrl: serverApiUrl,
     });
     
     fs.writeFileSync(
@@ -118,14 +173,14 @@ exports.generateSystem = async (req, res) => {
     console.log(`✅ Created: ${category}_app.py (Premium)`);
     
     // 4. Generate custom installer for both versions
-    const { generateInstaller } = require('../templates/installerTemplate');
     
     // Basic installer
     const basicInstallerCode = generateInstaller({
       systemName: name,
       category,
       features: features_basic,
-      tier: 'basic'
+      tier: 'basic',
+      apiUrl: serverApiUrl,
     });
     fs.writeFileSync(path.join(basicPath, 'installer.py'), basicInstallerCode);
     
@@ -134,16 +189,20 @@ exports.generateSystem = async (req, res) => {
       systemName: name,
       category,
       features: features_premium || [...features_basic, 'Advanced Analytics'],
-      tier: 'premium'
+      tier: 'premium',
+      apiUrl: serverApiUrl,
     });
     fs.writeFileSync(path.join(premiumPath, 'installer.py'), premiumInstallerCode);
     console.log('✅ Created custom installer.py for both versions');
+
+    fs.writeFileSync(path.join(basicPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
+    fs.writeFileSync(path.join(premiumPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
+    console.log('✅ Saved server_api_url.txt for both versions');
     
-    // 5. Create requirements.txt (only installable packages)
-    const requirements = `requests
-Pillow
-pyinstaller
-`;
+    // 5. Create requirements.txt (build-time dependencies)
+    const requirements = `pyinstaller
+  pywin32
+  `;
     
     fs.writeFileSync(path.join(basicPath, 'requirements.txt'), requirements);
     fs.writeFileSync(path.join(premiumPath, 'requirements.txt'), requirements);
@@ -164,10 +223,9 @@ ${(features_premium || features_basic).map(f => `- ${f}`).join('\n')}
 
 ## Installation
 
-1. Run \`INSTALL.bat\`
-2. Follow the installation wizard
-3. Enter your API key
-4. Start using the application
+1. Build the installer: run \`BUILD.bat\`
+2. Share only \`dist/${category}_installer.exe\` with end users
+3. User runs the installer and enters install path, API key, and setup info
 
 ## Support
 
@@ -178,17 +236,17 @@ For support, contact: support@zoro9x.com
     fs.writeFileSync(path.join(premiumPath, 'README.md'), readme);
     console.log('✅ Created README.md');
     
-    // 7. Create PyInstaller spec file for compilation
-    const specFile = `# -*- mode: python ; coding: utf-8 -*-
+    // 7. Create PyInstaller spec files for app + installer executables
+    const appSpecFile = `# -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
 
 a = Analysis(
-    ['main.py'],
+    ['${category}_app.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['tkinter', 'sqlite3', 'requests', 'PIL'],
+    hiddenimports=['tkinter', 'sqlite3', 'requests', 'hashlib', 'platform', 'uuid'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -208,7 +266,57 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='${category}_management',
+    name='${category}_app',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None,
+)
+`;
+
+    const installerSpecFile = `# -*- mode: python ; coding: utf-8 -*-
+
+import os
+
+block_cipher = None
+
+dist_app_exe = os.path.join(os.getcwd(), 'dist', '${category}_app.exe')
+
+a = Analysis(
+    ['installer.py'],
+    pathex=[],
+    binaries=[(dist_app_exe, '.')] if os.path.exists(dist_app_exe) else [],
+    datas=[('README.md', '.')] if os.path.exists('README.md') else [],
+    hiddenimports=['tkinter', 'sqlite3', 'subprocess', 'json', 'shutil'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='${category}_installer',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -225,24 +333,47 @@ exe = EXE(
 )
 `;
     
-    fs.writeFileSync(path.join(basicPath, 'build.spec'), specFile);
-    fs.writeFileSync(path.join(premiumPath, 'build.spec'), specFile);
-    console.log('✅ Created PyInstaller spec files');
+    fs.writeFileSync(path.join(basicPath, 'app.spec'), appSpecFile);
+    fs.writeFileSync(path.join(basicPath, 'installer.spec'), installerSpecFile);
+    fs.writeFileSync(path.join(premiumPath, 'app.spec'), appSpecFile);
+    fs.writeFileSync(path.join(premiumPath, 'installer.spec'), installerSpecFile);
+    console.log('✅ Created app.spec and installer.spec files');
     
     // 8. Create build script for compilation
     const buildScript = `@echo off
+cd /d "%~dp0"
 echo Building ${name}...
 echo.
 
-REM Install dependencies
-pip install -r requirements.txt
+REM Install Python dependencies
+pip install -r "%~dp0requirements.txt"
 
-REM Compile with PyInstaller (with encryption)
-pyinstaller --key="ZORO9X_SECURE_KEY_${Date.now()}" build.spec
+REM Install PyInstaller if not present
+pip install pyinstaller
+
+REM Build application executable first
+python -m PyInstaller --noconfirm --clean "%~dp0app.spec"
+
+if %errorlevel% neq 0 (
+  echo.
+  echo App build failed.
+  exit /b 1
+)
+
+REM Build installer executable that bundles app executable
+python -m PyInstaller --noconfirm --clean "%~dp0installer.spec"
+
+if %errorlevel% neq 0 (
+  echo.
+  echo Installer build failed.
+  exit /b 1
+)
 
 echo.
-echo Build complete! Executable is in the dist folder.
-pause
+echo Build complete!
+echo App: dist\\${category}_app.exe
+echo Share this with users: dist\\${category}_installer.exe
+exit /b 0
 `;
     
     fs.writeFileSync(path.join(basicPath, 'BUILD.bat'), buildScript);
@@ -258,7 +389,7 @@ pause
         description,
         category,
         `${category}_management/`,
-        icon_url || '/images/default-icon.png',
+        finalIconUrl,
         JSON.stringify(features_basic),
         'active'
       ]
@@ -319,6 +450,7 @@ pause
         name,
         category,
         python_file_path: `${category}_management/`,
+        server_api_url: serverApiUrl,
         basic_path: `systems/${category}_management/basic/`,
         premium_path: `systems/${category}_management/premium/`,
         files_created: [
@@ -500,6 +632,10 @@ exports.regenerateSystem = async (req, res) => {
     // Regenerate files
     const basicPath = path.join(__dirname, '../../', system.python_file_path, 'basic');
     const premiumPath = path.join(__dirname, '../../', system.python_file_path, 'premium');
+    const apiUrlFile = path.join(basicPath, 'server_api_url.txt');
+    const serverApiUrl = fs.existsSync(apiUrlFile)
+      ? fs.readFileSync(apiUrlFile, 'utf8').trim()
+      : (process.env.ZORO9X_PUBLIC_API_URL || process.env.ZORO9X_API_URL || '');
     
     // Create mock tables (you can enhance this to store table definitions)
     const mockTables = [
@@ -519,7 +655,8 @@ exports.regenerateSystem = async (req, res) => {
       category,
       tables: mockTables,
       features: JSON.parse(basicPlan.features),
-      tier: 'basic'
+      tier: 'basic',
+      apiUrl: serverApiUrl,
     });
     
     fs.writeFileSync(
@@ -533,13 +670,34 @@ exports.regenerateSystem = async (req, res) => {
       category,
       tables: mockTables,
       features: JSON.parse(premiumPlan.features),
-      tier: 'premium'
+      tier: 'premium',
+      apiUrl: serverApiUrl,
     });
     
     fs.writeFileSync(
       path.join(premiumPath, `${category}_app.py`),
       premiumAppCode
     );
+
+    const basicInstallerCode = generateInstaller({
+      systemName: system.name,
+      category,
+      features: JSON.parse(basicPlan.features),
+      tier: 'basic',
+      apiUrl: serverApiUrl,
+    });
+    const premiumInstallerCode = generateInstaller({
+      systemName: system.name,
+      category,
+      features: JSON.parse(premiumPlan.features),
+      tier: 'premium',
+      apiUrl: serverApiUrl,
+    });
+
+    fs.writeFileSync(path.join(basicPath, 'installer.py'), basicInstallerCode);
+    fs.writeFileSync(path.join(premiumPath, 'installer.py'), premiumInstallerCode);
+    fs.writeFileSync(path.join(basicPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
+    fs.writeFileSync(path.join(premiumPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
     
     res.json({
       success: true,

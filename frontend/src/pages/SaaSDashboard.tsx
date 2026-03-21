@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Server, Users, DollarSign, TrendingUp, Package, 
   Plus, Edit, Trash2, X, Shield, AlertTriangle, CheckCircle, 
-  XCircle, Clock, Monitor, AlertCircle 
+  XCircle, Clock, Monitor, AlertCircle, Activity, FileText
 } from 'lucide-react';
 
 interface SaasDashboardProps {
@@ -31,22 +31,67 @@ interface System {
   version?: string;
 }
 
+interface BusinessInfoRequest {
+  id: number;
+  subscription_id: number;
+  system_name: string;
+  requested_by_email: string;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note?: string;
+  created_at: string;
+  requested_data: {
+    company_name?: string;
+    contact_email?: string;
+    contact_phone?: string;
+    business_address?: string;
+    website?: string;
+    tax_id?: string;
+    logo_url?: string | null;
+  };
+}
+
+const parseFeaturesSafely = (features: unknown): string[] => {
+  if (Array.isArray(features)) {
+    return features.filter((item): item is string => typeof item === 'string');
+  }
+
+  if (typeof features === 'string') {
+    try {
+      const parsed = JSON.parse(features || '[]');
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string');
+      }
+    } catch {
+      return features
+        .split(',')
+        .map((feature) => feature.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
+};
+
 const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [systems, setSystems] = useState<System[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients' | 'security'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients' | 'security' | 'audit'>('overview');
   const [showAddSystem, setShowAddSystem] = useState(false);
   const [showEditSystem, setShowEditSystem] = useState(false);
   const [showManagePlans, setShowManagePlans] = useState(false);
   const [selectedSystem, setSelectedSystem] = useState<System | null>(null);
+  const [businessInfoRequests, setBusinessInfoRequests] = useState<BusinessInfoRequest[]>([]);
+  const [businessInfoRequestCounts, setBusinessInfoRequestCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
   
   // Security states
   const [alerts, setAlerts] = useState<any[]>([]);
   const [pendingDevices, setPendingDevices] = useState<any[]>([]);
   const [securityTab, setSecurityTab] = useState<'devices' | 'alerts'>('devices');
   const [filterStatus, setFilterStatus] = useState<string>('pending');
+    const [auditLogs, setAuditLogs] = useState<any[]>([]);
+    const [auditEventFilter, setAuditEventFilter] = useState<string>('');
   
   const navigate = useNavigate();
 
@@ -55,10 +100,64 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   }, []);
 
   useEffect(() => {
+    const pendingActionRaw = sessionStorage.getItem('zoro9xAdminSystemAction');
+    if (!pendingActionRaw || systems.length === 0) {
+      return;
+    }
+
+    try {
+      const pendingAction = JSON.parse(pendingActionRaw) as {
+        systemId: number;
+        action: 'view' | 'edit' | 'plans';
+      };
+
+      const targetSystem = systems.find((system) => Number(system.id) === Number(pendingAction.systemId));
+      if (!targetSystem) {
+        sessionStorage.removeItem('zoro9xAdminSystemAction');
+        return;
+      }
+
+      setActiveTab('systems');
+      setSelectedSystem(targetSystem);
+
+      if (pendingAction.action === 'edit') {
+        setShowEditSystem(true);
+      } else if (pendingAction.action === 'plans') {
+        setShowManagePlans(true);
+      }
+
+      sessionStorage.removeItem('zoro9xAdminSystemAction');
+    } catch (error) {
+      console.error('Failed to restore pending system action:', error);
+      sessionStorage.removeItem('zoro9xAdminSystemAction');
+    }
+  }, [systems]);
+
+  useEffect(() => {
     if (activeTab === 'security') {
       fetchSecurityData();
     }
   }, [activeTab, filterStatus]);
+
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    }
+  }, [activeTab, auditEventFilter]);
+
+  const fetchAuditLogs = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const params = auditEventFilter ? `?event_type=${auditEventFilter}` : '';
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/audit-logs${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setAuditLogs(data.logs || []);
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+    }
+  };
 
   const fetchDashboardData = async () => {
     const token = localStorage.getItem('adminToken');
@@ -79,18 +178,16 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
         setStats(statsData.stats);
       }
 
-      // Fetch systems
-      const systemsResponse = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/systems`);
+      // Fetch all systems for admin (active + inactive)
+      const systemsResponse = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       if (systemsResponse.ok) {
         const systemsData = await systemsResponse.json();
         // Ensure features is always an array
-        const systemsWithParsedFeatures = systemsData.systems.map((system: any) => ({
+        const systemsWithParsedFeatures = (Array.isArray(systemsData.systems) ? systemsData.systems : []).map((system: any) => ({
           ...system,
-          features: Array.isArray(system.features) 
-            ? system.features 
-            : typeof system.features === 'string' 
-            ? JSON.parse(system.features || '[]')
-            : []
+          features: parseFeaturesSafely(system.features)
         }));
         setSystems(systemsWithParsedFeatures);
       }
@@ -104,6 +201,8 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
         const clientsData = await clientsResponse.json();
         setClients(clientsData.clients);
       }
+
+      await fetchBusinessInfoRequests();
 
       setLoading(false);
     } catch (error) {
@@ -122,8 +221,8 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       });
       const alertsData = await alertsRes.json();
       
-      // Fetch pending devices
-      const devicesRes = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices`, {
+      // Fetch devices (all statuses for full control panel)
+      const devicesRes = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices?status=all`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const devicesData = await devicesRes.json();
@@ -132,6 +231,55 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       setPendingDevices(devicesData.devices || []);
     } catch (error) {
       console.error('Error fetching security data:', error);
+    }
+  };
+
+  const fetchBusinessInfoRequests = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/business-info-requests?status=all`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setBusinessInfoRequests(data.requests || []);
+      setBusinessInfoRequestCounts(data.counts || { pending: 0, approved: 0, rejected: 0 });
+    } catch (error) {
+      console.error('Error fetching business info requests:', error);
+    }
+  };
+
+  const reviewBusinessInfoRequest = async (requestId: number, action: 'approve' | 'reject') => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const adminNote = prompt(action === 'approve' ? 'Optional approval note:' : 'Reason for rejection (optional):') || '';
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/business-info-requests/${requestId}/review`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action, admin_note: adminNote })
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        alert(data?.message || `Failed to ${action} request`);
+        return;
+      }
+
+      alert(data?.message || `Request ${action}d successfully`);
+      await fetchBusinessInfoRequests();
+      await fetchDashboardData();
+    } catch (error) {
+      console.error(`Error trying to ${action} business info request:`, error);
+      alert(`Failed to ${action} request`);
     }
   };
 
@@ -175,6 +323,28 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
     } catch (error) {
       console.error('Error rejecting device:', error);
       alert('Failed to reject device');
+    }
+  };
+
+  const revokeDevice = async (deviceId: number, reason: string) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/security/devices/${deviceId}/revoke`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reason })
+      });
+
+      if (res.ok) {
+        alert('Device revoked successfully!');
+        fetchSecurityData();
+      }
+    } catch (error) {
+      console.error('Error revoking device:', error);
+      alert('Failed to revoke device');
     }
   };
 
@@ -273,7 +443,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-8">
-          {['overview', 'systems', 'clients', 'security'].map((tab) => (
+          {['overview', 'systems', 'clients', 'security', 'audit'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -286,10 +456,16 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
               }`}
             >
               {tab === 'security' && <Shield className="w-4 h-4" />}
+              {tab === 'audit' && <Activity className="w-4 h-4" />}
               {tab}
               {tab === 'security' && pendingDevices.length > 0 && (
                 <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
                   {pendingDevices.length}
+                </span>
+              )}
+              {tab === 'clients' && businessInfoRequestCounts.pending > 0 && (
+                <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full">
+                  {businessInfoRequestCounts.pending}
                 </span>
               )}
             </button>
@@ -466,6 +642,63 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                 ? 'bg-gray-800/50 border-purple-500/20' 
                 : 'bg-white/80 border-purple-200'
             }`}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Business Information Change Requests</h2>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-2 py-1 rounded-full bg-orange-500/20 text-orange-400">Pending: {businessInfoRequestCounts.pending}</span>
+                  <span className="px-2 py-1 rounded-full bg-green-500/20 text-green-400">Approved: {businessInfoRequestCounts.approved}</span>
+                  <span className="px-2 py-1 rounded-full bg-red-500/20 text-red-400">Rejected: {businessInfoRequestCounts.rejected}</span>
+                </div>
+              </div>
+
+              <p className={`text-sm mb-4 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                These details are injected into installer and system application. Approve only accurate business information.
+              </p>
+
+              <div className="space-y-3 mb-8">
+                {businessInfoRequests.filter((request) => request.status === 'pending').length === 0 && (
+                  <div className={`p-4 rounded-lg ${darkMode ? 'bg-gray-700/40 text-gray-400' : 'bg-gray-100 text-gray-600'}`}>
+                    No pending business information change requests.
+                  </div>
+                )}
+
+                {businessInfoRequests
+                  .filter((request) => request.status === 'pending')
+                  .map((request) => (
+                    <div
+                      key={request.id}
+                      className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-1 text-sm">
+                          <p className="font-semibold">{request.requested_data?.company_name || 'N/A'} ({request.system_name})</p>
+                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{request.requested_data?.contact_email || '-'}</p>
+                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{request.requested_data?.contact_phone || '-'}</p>
+                          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Requested by {request.requested_by_email || 'Unknown'} on {new Date(request.created_at).toLocaleString()}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => reviewBusinessInfoRequest(request.id, 'approve')}
+                            className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => reviewBusinessInfoRequest(request.id, 'reject')}
+                            className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              <h3 className="text-lg font-semibold mb-4">Clients</h3>
               <div className="space-y-4">
                 {clients.map((client) => (
                   <div
@@ -572,7 +805,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                 }`}
               >
                 <Monitor className="w-4 h-4" />
-                Pending Devices ({pendingDevices.length})
+                Devices ({pendingDevices.length})
               </button>
               <button
                 onClick={() => setSecurityTab('alerts')}
@@ -593,8 +826,8 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
             {securityTab === 'devices' && (
               <div className={`rounded-lg border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} overflow-hidden`}>
                 <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                  <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Pending Device Activations</h2>
-                  <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Review and approve device activation requests</p>
+                  <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Device Access Controls</h2>
+                  <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Approve, reject, revoke and monitor device activity</p>
                 </div>
                 
                 <div className="overflow-x-auto">
@@ -605,6 +838,9 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>System</th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Device</th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>IP Address</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Fingerprint</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Last Seen</th>
+                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Status</th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Devices</th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Requested</th>
                         <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Actions</th>
@@ -632,6 +868,29 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                               <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{device.ip_address}</div>
                             </td>
                             <td className="px-6 py-4">
+                              <div className={`text-xs font-mono break-all ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {device.device_fingerprint}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                {device.last_seen ? new Date(device.last_seen).toLocaleString() : 'Never'}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                device.status === 'active'
+                                  ? 'bg-green-500/20 text-green-400'
+                                  : device.status === 'pending'
+                                  ? 'bg-yellow-500/20 text-yellow-400'
+                                  : device.status === 'revoked'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : 'bg-gray-500/20 text-gray-400'
+                              }`}>
+                                {device.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
                               <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                                 {device.active_count} / {device.max_activations}
                               </div>
@@ -643,23 +902,40 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex gap-2">
-                                <button
-                                  onClick={() => approveDevice(device.id)}
-                                  className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg flex items-center gap-1"
-                                >
-                                  <CheckCircle className="w-4 h-4" />
-                                  Approve
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    const reason = prompt('Enter rejection reason:');
-                                    if (reason) rejectDevice(device.id, reason);
-                                  }}
-                                  className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg flex items-center gap-1"
-                                >
-                                  <XCircle className="w-4 h-4" />
-                                  Reject
-                                </button>
+                                {device.status === 'pending' && (
+                                  <>
+                                    <button
+                                      onClick={() => approveDevice(device.id)}
+                                      className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg flex items-center gap-1"
+                                    >
+                                      <CheckCircle className="w-4 h-4" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        const reason = prompt('Enter rejection reason:');
+                                        if (reason) rejectDevice(device.id, reason);
+                                      }}
+                                      className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-sm rounded-lg flex items-center gap-1"
+                                    >
+                                      <XCircle className="w-4 h-4" />
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+
+                                {device.status === 'active' && (
+                                  <button
+                                    onClick={() => {
+                                      const reason = prompt('Enter revoke reason:') || 'Revoked by admin';
+                                      revokeDevice(device.id, reason);
+                                    }}
+                                    className="px-3 py-1 bg-orange-600 hover:bg-orange-500 text-white text-sm rounded-lg flex items-center gap-1"
+                                  >
+                                    <XCircle className="w-4 h-4" />
+                                    Revoke
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -670,7 +946,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   
                   {pendingDevices.length === 0 && (
                     <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      No pending device activations
+                      No devices found
                     </div>
                   )}
                 </div>
@@ -770,6 +1046,93 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   {alerts.length === 0 && (
                     <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                       No security alerts found
+                            {activeTab === 'audit' && (
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className={`rounded-lg border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} overflow-hidden`}
+                              >
+                                <div className={`p-6 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'} flex items-center justify-between`}>
+                                  <div>
+                                    <h2 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                      <FileText className="w-5 h-5 text-cyan-500" />
+                                      Audit Trail
+                                    </h2>
+                                    <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                      Downloads, activations, revocations, token refreshes and policy decisions
+                                    </p>
+                                  </div>
+
+                                  <select
+                                    value={auditEventFilter}
+                                    onChange={(e) => setAuditEventFilter(e.target.value)}
+                                    className={`px-4 py-2 border rounded-lg focus:ring-2 focus:ring-cyan-500 ${
+                                      darkMode
+                                        ? 'bg-gray-700 border-gray-600 text-white'
+                                        : 'bg-white border-gray-300 text-gray-900'
+                                    }`}
+                                  >
+                                    <option value="">All events</option>
+                                    <option value="download">Download</option>
+                                    <option value="activation_approved">Activation approved</option>
+                                    <option value="activation_pending">Activation pending</option>
+                                    <option value="approval">Approval</option>
+                                    <option value="rejection">Rejection</option>
+                                    <option value="revocation">Revocation</option>
+                                    <option value="token_refresh">Token refresh</option>
+                                    <option value="validation_blocked">Validation blocked</option>
+                                  </select>
+                                </div>
+
+                                <div className="overflow-x-auto">
+                                  <table className="w-full">
+                                    <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+                                      <tr>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Time</th>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Event</th>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Company</th>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Actor</th>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>IP</th>
+                                        <th className={`px-6 py-3 text-left text-xs font-medium uppercase ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Details</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className={`divide-y ${darkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+                                      {auditLogs.map((entry: any) => {
+                                        const details = typeof entry.details === 'string' ? JSON.parse(entry.details) : entry.details;
+
+                                        return (
+                                          <tr key={entry.id} className={darkMode ? 'hover:bg-gray-750' : 'hover:bg-gray-50'}>
+                                            <td className="px-6 py-4 text-sm">{new Date(entry.created_at).toLocaleString()}</td>
+                                            <td className="px-6 py-4">
+                                              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-cyan-500/20 text-cyan-400">
+                                                {entry.event_type.replace(/_/g, ' ')}
+                                              </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                              <div className={`text-sm ${darkMode ? 'text-white' : 'text-gray-900'}`}>{entry.company_name || '-'}</div>
+                                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>{entry.system_name || ''}</div>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm">{entry.actor || 'system'}</td>
+                                            <td className="px-6 py-4 text-sm">{entry.ip_address || '-'}</td>
+                                            <td className="px-6 py-4">
+                                              <div className={`text-sm max-w-md ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                                {details?.message || details?.reason || JSON.stringify(details || {})}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+
+                                  {auditLogs.length === 0 && (
+                                    <div className={`text-center py-12 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                      No audit entries found
+                                    </div>
+                                  )}
+                                </div>
+                              </motion.div>
+                            )}
                     </div>
                   )}
                 </div>
@@ -812,6 +1175,12 @@ const StatCard: React.FC<any> = ({ title, value, icon, color, darkMode }) => {
 
 // System Card Component
 const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, onDelete }) => {
+  const iconSrc = system.icon_url
+    ? system.icon_url.startsWith('http')
+      ? system.icon_url
+      : `${import.meta.env.VITE_API_URL}${system.icon_url}`
+    : null;
+
   return (
     <motion.div
       whileHover={{ scale: 1.02 }}
@@ -822,11 +1191,27 @@ const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, on
       }`}
     >
       <div className="flex justify-between items-start mb-4">
-        <div>
-          <h3 className="text-xl font-bold">{system.name}</h3>
-          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            {system.category}
-          </p>
+        <div className="flex items-center gap-3">
+          {iconSrc ? (
+            <img
+              src={iconSrc}
+              alt={system.name}
+              className="w-12 h-12 rounded-xl object-cover flex-shrink-0 border border-purple-500/30"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          ) : (
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              darkMode ? 'bg-purple-500/20' : 'bg-purple-100'
+            }`}>
+              <Package className="w-6 h-6 text-purple-400" />
+            </div>
+          )}
+          <div>
+            <h3 className="text-xl font-bold">{system.name}</h3>
+            <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+              {system.category}
+            </p>
+          </div>
         </div>
         <span className={`px-3 py-1 rounded-full text-sm ${
           system.status === 'active'
@@ -1057,13 +1442,56 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
     name: system.name,
     description: system.description,
     category: system.category,
-    python_file_path: system.python_file_path || '',
-    icon_url: system.icon_url || '',
     features: Array.isArray(system.features) ? system.features.join('\n') : '',
     version: system.version || '1.0.0',
     status: system.status
   });
+  const [iconFile, setIconFile] = useState<File | null>(null);
+  const [selectedIconPreview, setSelectedIconPreview] = useState<string | null>(null);
+  const [removeIcon, setRemoveIcon] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const existingIconSrc = system.icon_url
+    ? system.icon_url.startsWith('http')
+      ? system.icon_url
+      : `${import.meta.env.VITE_API_URL}${system.icon_url}`
+    : null;
+
+  useEffect(() => {
+    if (!iconFile) {
+      setSelectedIconPreview(null);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(iconFile);
+    setSelectedIconPreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [iconFile]);
+
+  const handleIconChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size must be less than 5MB');
+      e.target.value = '';
+      return;
+    }
+
+    setIconFile(file);
+    setRemoveIcon(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1071,22 +1499,32 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
 
     try {
       const featuresArray = formData.features.split('\n').filter((f: string) => f.trim());
+      const body = new FormData();
+      body.append('name', formData.name);
+      body.append('description', formData.description);
+      body.append('category', formData.category);
+      body.append('version', formData.version);
+      body.append('status', formData.status);
+      body.append('features', JSON.stringify(featuresArray));
+      body.append('remove_icon', removeIcon ? 'true' : 'false');
+
+      if (iconFile) {
+        body.append('icon', iconFile);
+      }
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${system.id}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
         },
-        body: JSON.stringify({
-          ...formData,
-          features: JSON.stringify(featuresArray)
-        })
+        body
       });
 
       if (response.ok) {
         onSuccess();
       } else {
-        alert('Failed to update system');
+        const errorData = await response.json().catch(() => null);
+        alert(errorData?.message || 'Failed to update system');
       }
     } catch (error) {
       console.error('Error updating system:', error);
@@ -1097,11 +1535,11 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-2xl rounded-2xl p-8 my-8 ${
+        className={`w-full max-w-2xl rounded-2xl p-8 my-6 sm:my-8 max-h-[calc(100vh-3rem)] overflow-y-auto ${
           darkMode ? 'bg-gray-800' : 'bg-white'
         }`}
       >
@@ -1169,18 +1607,6 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Python File Path</label>
-              <input
-                type="text"
-                value={formData.python_file_path}
-                onChange={(e) => setFormData({ ...formData, python_file_path: e.target.value })}
-                className={`w-full px-4 py-3 rounded-lg ${
-                  darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
-                }`}
-              />
-            </div>
-
-            <div>
               <label className="block text-sm font-medium mb-2">Status</label>
               <select
                 value={formData.status}
@@ -1193,18 +1619,73 @@ const EditSystemModal: React.FC<any> = ({ darkMode, system, onClose, onSuccess }
                 <option value="inactive">Inactive</option>
               </select>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">System Logo</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleIconChange}
+                className={`w-full px-3 py-2 rounded-lg border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'
+                }`}
+              />
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Icon URL</label>
-            <input
-              type="text"
-              value={formData.icon_url}
-              onChange={(e) => setFormData({ ...formData, icon_url: e.target.value })}
-              className={`w-full px-4 py-3 rounded-lg ${
-                darkMode ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
-              }`}
-            />
+            <label className="block text-sm font-medium mb-2">Current Logo</label>
+            <div className="flex items-center gap-4">
+              {removeIcon ? (
+                <div className={`w-20 h-20 rounded-lg flex items-center justify-center border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-300 text-gray-500'
+                }`}>
+                  Removed
+                </div>
+              ) : selectedIconPreview ? (
+                <img
+                  src={selectedIconPreview}
+                  alt="Selected system logo"
+                  className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                />
+              ) : existingIconSrc ? (
+                <img
+                  src={existingIconSrc}
+                  alt={`${system.name} logo`}
+                  className="w-20 h-20 rounded-lg object-cover border border-purple-500/30"
+                />
+              ) : (
+                <div className={`w-20 h-20 rounded-lg flex items-center justify-center border ${
+                  darkMode ? 'bg-gray-700 border-gray-600 text-gray-300' : 'bg-gray-100 border-gray-300 text-gray-500'
+                }`}>
+                  No logo
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemoveIcon(true);
+                    setIconFile(null);
+                  }}
+                  className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+                >
+                  Remove Image
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemoveIcon(false);
+                  }}
+                  className={`px-3 py-2 rounded-lg text-sm ${
+                    darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                  }`}
+                >
+                  Keep Image
+                </button>
+              </div>
+            </div>
           </div>
 
           <div>
