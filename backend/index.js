@@ -29,7 +29,7 @@ const invoiceRoutes = require('./routes/invoices');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const FRONTEND_URL = process.env.FRONTEND_URL || ['https://www.zoro9x.com', 'https://zoro9x.com'];
 
 // ============================================
 // SESSION MIDDLEWARE
