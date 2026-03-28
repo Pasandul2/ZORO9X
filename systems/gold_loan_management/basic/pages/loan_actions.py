@@ -52,19 +52,22 @@ class RenewLoanPage:
         info_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
         info_card.pack(fill=tk.X, pady=(0, 10))
         accrual_start = loan.get('renew_date') or loan['issue_date']
+        principal_base = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+        self.principal_base = principal_base
         
         # Get max_interest_months from duration rate settings
         dur_rate = get_duration_rate(loan['duration_months'], loan.get('carat', 22))
         max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
         
-        payable = calculate_total_payable(loan['loan_amount'], loan['interest_rate'],
+        payable = calculate_total_payable(principal_base, loan['interest_rate'],
                                           loan['duration_months'], loan['overdue_interest_rate'],
                           loan['expire_date'], accrual_start, max_interest_months)
         self.payable = payable
 
         details = [
             ('Customer', loan['customer_name']),
-            ('Loan Amount', format_currency(loan['loan_amount'])),
+            ('Advance Amount', format_currency(loan.get('advance_amount') or loan['loan_amount'])),
+            ('Interest Principal', format_currency(principal_base)),
             ('Current Rate', f"{loan['interest_rate']}% / month"),
             ('Duration', f"{loan['duration_months']} month(s)"),
             ('Issue Date', format_date(loan['issue_date'])),
@@ -73,6 +76,12 @@ class RenewLoanPage:
             ('Overdue', f"{'Yes (' + str(payable['overdue_days']) + ' days)' if payable['overdue_days'] > 0 else 'No'}"),
             ('Accrued Interest', format_currency(payable['interest'])),
         ]
+        if loan.get('is_other_bank_ticket'):
+            details.extend([
+                ('Other Bank Paid', format_currency(loan.get('other_bank_paid_amount', 0))),
+                ('Service Charge', format_currency(loan.get('service_charge_amount', 0))),
+                ('Customer Balance', format_currency(loan.get('customer_balance_amount', 0))),
+            ])
         for lbl, val in details:
             r = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=1)
@@ -82,12 +91,13 @@ class RenewLoanPage:
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
 
         self.overdue_interest_display_var = tk.StringVar(value=format_currency(payable['overdue_interest']))
-        overdue_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
-        overdue_row.pack(fill=tk.X, padx=14, pady=1)
-        tk.Label(overdue_row, text='Overdue Interest', font=self.theme.fonts.body, width=16, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
-        tk.Label(overdue_row, textvariable=self.overdue_interest_display_var, font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+        if payable['overdue_days'] > 0:
+            overdue_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
+            overdue_row.pack(fill=tk.X, padx=14, pady=1)
+            tk.Label(overdue_row, text='Overdue Interest', font=self.theme.fonts.body, width=16, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(overdue_row, textvariable=self.overdue_interest_display_var, font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
 
         self.total_outstanding_display_var = tk.StringVar(value=format_currency(payable['interest'] + payable['overdue_interest']))
         total_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
@@ -126,12 +136,13 @@ class RenewLoanPage:
         tk.Label(r2, text=format_currency(payable['interest']), font=self.theme.fonts.body_bold,
              bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
-        r2b = tk.Frame(form, bg=self.theme.palette.bg_surface)
-        r2b.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(r2b, text='Overdue Interest:', font=self.theme.fonts.body_bold, width=16, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         self.overdue_pay_var = tk.StringVar(value=str(payable['overdue_interest']))
-        self.theme.make_entry(r2b, variable=self.overdue_pay_var, width=14).pack(side=tk.LEFT)
+        if payable['overdue_days'] > 0:
+            r2b = tk.Frame(form, bg=self.theme.palette.bg_surface)
+            r2b.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(r2b, text='Overdue Interest:', font=self.theme.fonts.body_bold, width=16, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            self.theme.make_entry(r2b, variable=self.overdue_pay_var, width=14).pack(side=tk.LEFT)
         self.overdue_pay_var.trace_add('write', lambda *a: self._recalc_renewal())
 
         r2c = tk.Frame(form, bg=self.theme.palette.bg_surface)
@@ -219,7 +230,7 @@ class RenewLoanPage:
         total_interest_due = round(normal_due + overdue_due, 2)
         interest_applied = round(min(payment_amount, total_interest_due), 2)
         principal_reduction = round(max(0.0, payment_amount - interest_applied), 2)
-        new_loan_amount = round(max(0.0, float(self.loan['loan_amount']) - principal_reduction), 2)
+        new_loan_amount = round(max(0.0, float(getattr(self, 'principal_base', self.loan['loan_amount'])) - principal_reduction), 2)
 
         return {
             'normal_due': normal_due,
@@ -340,12 +351,14 @@ class RedeemLoanPage:
 
         # Payment breakdown
         accrual_start = loan.get('renew_date') or loan['issue_date']
+        principal_base = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+        self.principal_base = principal_base
         
         # Get max_interest_months from duration rate settings
         dur_rate = get_duration_rate(loan['duration_months'], loan.get('carat', 22))
         max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
         
-        payable = calculate_total_payable(loan['loan_amount'], loan['interest_rate'],
+        payable = calculate_total_payable(principal_base, loan['interest_rate'],
                                           loan['duration_months'], loan['overdue_interest_rate'],
                           loan['expire_date'], accrual_start, max_interest_months)
         self.payable = payable
@@ -366,11 +379,21 @@ class RedeemLoanPage:
 
         breakdown = [
             ('Customer', loan['customer_name']),
-            ('Loan Amount', format_currency(payable['loan_amount'])),
+            ('Advance Amount', format_currency(loan.get('advance_amount') or loan['loan_amount'])),
+            ('Interest Principal', format_currency(payable['loan_amount'])),
             ('Interest', format_currency(payable['interest'])),
-            ('Overdue Days', str(payable['overdue_days'])),
-            ('Overdue Interest', format_currency(payable['overdue_interest'])),
         ]
+        if payable['overdue_days'] > 0:
+            breakdown.extend([
+                ('Overdue Days', str(payable['overdue_days'])),
+                ('Overdue Interest', format_currency(payable['overdue_interest'])),
+            ])
+        if loan.get('is_other_bank_ticket'):
+            breakdown.extend([
+                ('Other Bank Paid', format_currency(loan.get('other_bank_paid_amount', 0))),
+                ('Service Charge', format_currency(loan.get('service_charge_amount', 0))),
+                ('Customer Balance', format_currency(loan.get('customer_balance_amount', 0))),
+            ])
         for lbl, val in breakdown:
             r = tk.Frame(bc.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=2)
@@ -416,12 +439,13 @@ class RedeemLoanPage:
                                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary)
         self.interest_val.pack(side=tk.LEFT)
 
-        r2b = tk.Frame(form, bg=self.theme.palette.bg_surface)
-        r2b.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(r2b, text='Overdue Interest:', font=self.theme.fonts.body_bold, width=16, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         self.overdue_pay_var = tk.StringVar(value=str(payable['overdue_interest']))
-        self.theme.make_entry(r2b, variable=self.overdue_pay_var, width=14).pack(side=tk.LEFT)
+        if payable['overdue_days'] > 0:
+            r2b = tk.Frame(form, bg=self.theme.palette.bg_surface)
+            r2b.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(r2b, text='Overdue Interest:', font=self.theme.fonts.body_bold, width=16, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            self.theme.make_entry(r2b, variable=self.overdue_pay_var, width=14).pack(side=tk.LEFT)
         self.overdue_pay_var.trace_add('write', lambda *a: self._recalc_total())
 
         r3 = tk.Frame(form, bg=self.theme.palette.bg_surface)

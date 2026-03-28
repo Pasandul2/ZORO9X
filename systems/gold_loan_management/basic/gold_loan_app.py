@@ -213,8 +213,19 @@ class GoldLoanSystemApp:
             return
 
         # Initialize database
-        from database import init_database
+        from database import init_database, set_setting
         init_database(self.db_file)
+
+        # Keep core company identity fields aligned with signed downloaded config.
+        # These values are managed by subscription profile and should not drift locally.
+        managed_company_fields = {
+            'company_name': ('company_name', 'company_name_encrypted'),
+            'company_phone': ('contact_phone', 'contact_phone_encrypted'),
+            'company_address': ('business_address', 'business_address_encrypted'),
+        }
+        for setting_key, (config_key, encrypted_key) in managed_company_fields.items():
+            if encrypted_key in self.config:
+                set_setting(setting_key, self.config.get(config_key, ''), user_id=None, db_path=self.db_file)
 
         # Show login
         self._show_login()
@@ -460,7 +471,8 @@ class GoldLoanSystemApp:
             ('📝 New Loan', 'new_ticket'),
             ('🔍 Loans', 'loan_list'),
             ('👥 Customers', 'customers'),
-            ('📋 Reports', 'reports'),
+            ('✉️ Letters', 'letters'),
+            (' Reports', 'reports'),
         ]
 
         if self.current_user['role'] == 'admin':
@@ -566,6 +578,7 @@ class GoldLoanSystemApp:
             'renew_loan': 'Renew Loan',
             'redeem_loan': 'Redeem Loan',
             'customers': 'Customer Management',
+            'letters': 'Letters Center',
             'admin_settings': 'Admin Settings',
             'reports': 'Reports',
             'loan_approvals': 'Loan Approval Requests',
@@ -604,6 +617,10 @@ class GoldLoanSystemApp:
         elif page_name == 'customers':
             from pages.customers import CustomersPage
             CustomersPage(self.page_content, self.theme, self.current_user, self.navigate).render()
+
+        elif page_name == 'letters':
+            from pages.letters import LettersPage
+            LettersPage(self.page_content, self.theme, self.current_user, self.navigate).render()
 
         elif page_name == 'admin_settings':
             from pages.admin_settings import AdminSettingsPage

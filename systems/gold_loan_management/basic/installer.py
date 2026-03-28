@@ -670,6 +670,9 @@ By proceeding, you agree to these terms."""
 
         subscription = payload.get('subscription') or {}
         self.company_name = (subscription.get('company_name') or self.company_name).strip()
+        self.contact_email = (subscription.get('contact_email') or self.contact_email_var.get().strip()).strip()
+        self.contact_phone = (subscription.get('contact_phone') or self.contact_phone_var.get().strip()).strip()
+        self.business_address = (subscription.get('business_address') or self.business_address_var.get().strip()).strip()
         self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or 'gold_loan_database').strip()
         self.database_name_var.set(self.database_name)
 

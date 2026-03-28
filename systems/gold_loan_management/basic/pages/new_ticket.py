@@ -8,10 +8,14 @@ from datetime import datetime
 from database import (get_customer_by_nic, create_customer, create_loan,
                       generate_ticket_no, get_market_rate, get_duration_rate,
                       get_all_duration_rates, add_audit_log, search_recent_purposes,
-                             search_recent_descriptions, create_approval_request,
-                             get_article_types)
+                 search_recent_descriptions, create_approval_request,
+              get_article_types, get_setting, search_recent_customer_jobs)
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                          calculate_interest, get_expire_date, ARTICLE_TYPES, CARAT_OPTIONS)
+
+
+# Persist new-ticket draft across page instances (tab/panel navigation).
+NEW_TICKET_DRAFT = {}
 
 
 class NewTicketPage:
@@ -24,6 +28,10 @@ class NewTicketPage:
         self.duration_rates = get_all_duration_rates()
         self.article_types = get_article_types() or ARTICLE_TYPES
         self._gold_wt_manual_override = False
+        self.is_other_bank_var = tk.BooleanVar(value=False)
+        self.service_charge_payment_mode_var = tk.StringVar(value='financed')
+        self._form_state = dict(NEW_TICKET_DRAFT)
+        self._birthday_syncing = False
 
     def render(self):
         for w in self.container.winfo_children():
@@ -31,12 +39,12 @@ class NewTicketPage:
 
         view = tk.Frame(self.container, bg=self.theme.palette.bg_app)
         # We will pack view at the absolute end to prevent visual stuttering during load.
-
-        # Page header
         hdr = tk.Frame(view, bg=self.theme.palette.bg_app)
         hdr.pack(fill=tk.X, pady=(0, 12))
         tk.Label(hdr, text='📝 Create New Loan Ticket', font=self.theme.fonts.h1,
                  bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        clear_btn = self.theme.make_button(hdr, text='Clear', command=self._clear_form, kind='danger', width=8, pady=4)
+        clear_btn.pack(side=tk.RIGHT)
 
         # Main layout: left = form, right = summary
         main = tk.Frame(view, bg=self.theme.palette.bg_app)
@@ -86,6 +94,19 @@ class NewTicketPage:
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             entry.entry.bind('<Return>', lambda e: e.widget.tk_focusNext().focus_set() or 'break')
             self.cust_entries[key] = entry
+
+        self.cust_vars['birthday'] = tk.StringVar()
+        self._render_birthday_row(cust_form)
+        self.cust_vars['birthday'].trace_add('write', self._on_birthday_var_changed)
+
+        self.cust_vars['job'] = tk.StringVar()
+        self._render_job_row(cust_form)
+
+        self.cust_vars['marital_status'] = tk.StringVar(value='Unmarried')
+        self._render_marital_status_row(cust_form)
+
+        self.cust_vars['language'] = tk.StringVar(value='Sinhala')
+        self._render_language_row(cust_form)
 
         self.customer_id = None
         self.cust_status = tk.Label(cust_form, text='', font=self.theme.fonts.small,
@@ -182,6 +203,7 @@ class NewTicketPage:
         # Purpose
         purpose_entry = self._make_form_row(loan_form, 'Purpose:', 'purpose')
         purpose_entry.entry.bind('<KeyRelease>', self._on_purpose_key)
+
         # Duration
         dur_row = tk.Frame(loan_form, bg=self.theme.palette.bg_surface)
         dur_row.pack(fill=tk.X, pady=(0, 6))
@@ -197,6 +219,47 @@ class NewTicketPage:
         dur_combo.bind('<<ComboboxSelected>>', lambda e: self._recalculate())
         self.duration_var.trace_add('write', lambda *_args: self._recalculate())
 
+        ob_row = tk.Frame(loan_form, bg=self.theme.palette.bg_surface)
+        ob_row.pack(fill=tk.X, pady=(0, 6))
+        self.other_bank_check = self._make_styled_checkbutton(
+            ob_row,
+            text='Another Bank Ticket',
+            variable=self.is_other_bank_var,
+            command=self._on_other_bank_toggle,
+            bg=self.theme.palette.bg_surface,
+            font=self.theme.fonts.body_bold,
+        )
+        self.other_bank_check.pack(side=tk.LEFT)
+
+        self.other_bank_frame = tk.Frame(loan_form, bg=self.theme.palette.bg_surface_alt)
+        self.other_bank_paid_var = tk.StringVar(value='0')
+
+        mode_row = tk.Frame(self.other_bank_frame, bg=self.theme.palette.bg_surface_alt)
+        mode_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(mode_row, text='Service Charge Payment:', font=self.theme.fonts.body_bold, width=20, anchor='w',
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self._make_styled_radiobutton(
+            mode_row,
+            text='Add To Loan',
+            value='financed',
+            variable=self.service_charge_payment_mode_var,
+            command=self._recalculate,
+            bg=self.theme.palette.bg_surface_alt,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self._make_styled_radiobutton(
+            mode_row,
+            text='From Balance',
+            value='balance',
+            variable=self.service_charge_payment_mode_var,
+            command=self._recalculate,
+            bg=self.theme.palette.bg_surface_alt,
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.other_bank_note = tk.Label(self.other_bank_frame, text='', font=self.theme.fonts.small,
+                                        bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted,
+                                        anchor='w', justify='left')
+        self.other_bank_note.pack(fill=tk.X, pady=(0, 6))
+
         # Summary Card
         self.summary_card = self.theme.make_card(right, bg=self.theme.palette.bg_surface)
         self.summary_card.pack(fill=tk.X, pady=(0, 10))
@@ -206,6 +269,7 @@ class NewTicketPage:
         self.custom_assessed_pct_var = tk.StringVar()
         self._assessed_pct_user_edited = False
         self._render_summary()
+        self._on_other_bank_toggle()
 
         # Action buttons
         action_card = self.theme.make_card(right, bg=self.theme.palette.bg_surface)
@@ -222,14 +286,17 @@ class NewTicketPage:
         cancel_btn.pack(fill=tk.X)
 
         # Finished rendering, pack the view to show it instantly
+        self._restore_form_state()
+        self._setup_draft_autosave()
         view.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-    def _make_form_row(self, parent, label, key):
-        row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+    def _make_form_row(self, parent, label, key, variable=None):
+        row_bg = parent.cget('bg')
+        row = tk.Frame(parent, bg=row_bg)
         row.pack(fill=tk.X, pady=(0, 6))
         tk.Label(row, text=label, font=self.theme.fonts.body_bold, width=12, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
-        var = tk.StringVar()
+                 bg=row_bg, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        var = variable or tk.StringVar()
         if not hasattr(self, 'loan_vars'):
             self.loan_vars = {}
         self.loan_vars[key] = var
@@ -289,11 +356,259 @@ class NewTicketPage:
             self.customer_id = customer['id']
             self.cust_vars['name'].set(customer['name'])
             self.cust_vars['phone'].set(customer['phone'])
+            self.cust_vars['birthday'].set(customer.get('birthday', '') or '')
+            self.cust_vars['job'].set(customer.get('job', '') or '')
+            self.cust_vars['marital_status'].set(customer.get('marital_status', '') or 'Unmarried')
+            self.cust_vars['language'].set(customer.get('language', '') or 'Sinhala')
             self.cust_vars['address'].set(customer.get('address', ''))
             self.cust_status.config(text=f'✅ Customer found: {customer["name"]}', fg=self.theme.palette.success)
         else:
             self.customer_id = None
             self.cust_status.config(text='ℹ️ Customer not found. Will be created on save.', fg=self.theme.palette.info)
+
+    def _render_birthday_row(self, parent):
+        row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row, text='Birthday:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+
+        now = datetime.now()
+        self.bday_day_var = tk.StringVar(value='')
+        self.bday_month_var = tk.StringVar(value='')
+        self.bday_year_var = tk.StringVar(value='')
+
+        years = [str(y) for y in range(now.year, now.year - 101, -1)]
+
+        day_spin = tk.Spinbox(
+            row,
+            from_=1,
+            to=31,
+            textvariable=self.bday_day_var,
+            width=4,
+            justify='center',
+            font=self.theme.fonts.body,
+        )
+        day_spin.pack(side=tk.LEFT, padx=(0, 4))
+
+        month_spin = tk.Spinbox(
+            row,
+            from_=1,
+            to=12,
+            textvariable=self.bday_month_var,
+            width=4,
+            justify='center',
+            font=self.theme.fonts.body,
+        )
+        month_spin.pack(side=tk.LEFT, padx=(0, 4))
+
+        year_combo = ttk.Combobox(
+            row,
+            textvariable=self.bday_year_var,
+            values=years,
+            state='normal',
+            width=7,
+            font=self.theme.fonts.body[0:2],
+        )
+        year_combo.pack(side=tk.LEFT)
+
+        day_spin.bind('<Return>', lambda _e: month_spin.focus_set() or 'break')
+        month_spin.bind('<Return>', lambda _e: year_combo.focus_set() or 'break')
+        year_combo.bind('<Return>', lambda _e: self._focus_job_entry() or 'break')
+
+        hint = tk.Label(
+            row,
+            text='DD / MM / YYYY',
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+        )
+        hint.pack(side=tk.LEFT, padx=(8, 0))
+
+        self.bday_day_var.trace_add('write', self._on_birthday_parts_changed)
+        self.bday_month_var.trace_add('write', self._on_birthday_parts_changed)
+        self.bday_year_var.trace_add('write', self._on_birthday_parts_changed)
+
+    def _focus_job_entry(self):
+        if hasattr(self, 'cust_entries') and 'job' in self.cust_entries:
+            self.cust_entries['job'].entry.focus_set()
+
+    def _render_job_row(self, parent):
+        row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row, text='Job:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        job_entry = self.theme.make_entry(row, variable=self.cust_vars['job'])
+        job_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        job_entry.entry.bind('<KeyRelease>', self._on_job_key)
+        self.cust_entries['job'] = job_entry
+
+    def _render_marital_status_row(self, parent):
+        row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row, text='Married:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self._make_styled_radiobutton(
+            row,
+            text='Unmarried',
+            value='Unmarried',
+            variable=self.cust_vars['marital_status'],
+            bg=self.theme.palette.bg_surface,
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        self._make_styled_radiobutton(
+            row,
+            text='Married',
+            value='Married',
+            variable=self.cust_vars['marital_status'],
+            bg=self.theme.palette.bg_surface,
+        ).pack(side=tk.LEFT)
+
+    def _render_language_row(self, parent):
+        row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(row, text='Language:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        for text, value in [('Sinhala', 'Sinhala'), ('Tamil', 'Tamil'), ('English', 'English')]:
+            self._make_styled_radiobutton(
+                row,
+                text=text,
+                value=value,
+                variable=self.cust_vars['language'],
+                bg=self.theme.palette.bg_surface,
+            ).pack(side=tk.LEFT, padx=(0, 10))
+
+    def _make_styled_checkbutton(self, parent, text, variable, command=None, bg=None, font=None):
+        base_bg = bg or self.theme.palette.bg_surface
+        return tk.Checkbutton(
+            parent,
+            text=text,
+            variable=variable,
+            command=command,
+            bg=base_bg,
+            fg=self.theme.palette.text_primary,
+            selectcolor=base_bg,
+            activebackground=base_bg,
+            activeforeground=self.theme.palette.text_primary,
+            font=font or self.theme.fonts.body,
+            cursor='hand2',
+            highlightthickness=0,
+            bd=0,
+            padx=2,
+            pady=2,
+            anchor='w',
+        )
+
+    def _make_styled_radiobutton(self, parent, text, value, variable, command=None, bg=None):
+        base_bg = bg or self.theme.palette.bg_surface
+        return tk.Radiobutton(
+            parent,
+            text=text,
+            value=value,
+            variable=variable,
+            command=command,
+            bg=base_bg,
+            fg=self.theme.palette.text_primary,
+            selectcolor=base_bg,
+            activebackground=base_bg,
+            activeforeground=self.theme.palette.text_primary,
+            font=self.theme.fonts.body,
+            cursor='hand2',
+            highlightthickness=0,
+            bd=0,
+            padx=2,
+            pady=2,
+        )
+
+    def _on_job_key(self, event):
+        val = self.cust_vars['job'].get().strip()
+        if not val or len(val) < 1:
+            return
+
+        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab', 'Shift_L', 'Shift_R', 'BackSpace'):
+            return
+
+        jobs = search_recent_customer_jobs(val)
+        if not jobs:
+            return
+
+        if hasattr(self, '_job_menu'):
+            try:
+                self._job_menu.destroy()
+            except Exception:
+                pass
+
+        entry_widget = event.widget
+        menu = tk.Menu(entry_widget, tearoff=0, font=self.theme.fonts.body,
+                       bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
+                       activebackground=self.theme.palette.accent, activeforeground='#ffffff')
+
+        for job in jobs:
+            menu.add_command(label=job, command=lambda v=job: self._select_job(v))
+
+        x = entry_widget.winfo_rootx()
+        y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
+        menu.tk_popup(x, y)
+        self._job_menu = menu
+
+    def _select_job(self, value):
+        self.cust_vars['job'].set(value)
+
+    def _on_birthday_parts_changed(self, *_args):
+        if self._birthday_syncing:
+            return
+
+        day_raw = self.bday_day_var.get().strip()
+        month_raw = self.bday_month_var.get().strip()
+        year_raw = self.bday_year_var.get().strip()
+
+        if not day_raw and not month_raw and not year_raw:
+            self._birthday_syncing = True
+            self.cust_vars['birthday'].set('')
+            self._birthday_syncing = False
+            return
+
+        if not day_raw or not month_raw or not year_raw:
+            self._birthday_syncing = True
+            self.cust_vars['birthday'].set('')
+            self._birthday_syncing = False
+            return
+
+        try:
+            day = int(day_raw)
+            month = int(month_raw)
+            year = int(year_raw)
+            date_val = datetime(year, month, day)
+            date_str = date_val.strftime('%Y-%m-%d')
+        except (TypeError, ValueError):
+            self._birthday_syncing = True
+            self.cust_vars['birthday'].set('')
+            self._birthday_syncing = False
+            return
+
+        self._birthday_syncing = True
+        self.cust_vars['birthday'].set(date_str)
+        self._birthday_syncing = False
+
+    def _on_birthday_var_changed(self, *_args):
+        if self._birthday_syncing:
+            return
+
+        raw = (self.cust_vars.get('birthday', tk.StringVar()).get() or '').strip()
+        self._birthday_syncing = True
+        if not raw:
+            self.bday_day_var.set('')
+            self.bday_month_var.set('')
+            self.bday_year_var.set('')
+        else:
+            try:
+                parsed = datetime.strptime(raw, '%Y-%m-%d')
+                self.bday_day_var.set(f'{parsed.day:02d}')
+                self.bday_month_var.set(f'{parsed.month:02d}')
+                self.bday_year_var.set(str(parsed.year))
+            except ValueError:
+                self.bday_day_var.set('')
+                self.bday_month_var.set('')
+                self.bday_year_var.set('')
+        self._birthday_syncing = False
 
     @staticmethod
     def _parse_weight(value):
@@ -427,8 +742,151 @@ class NewTicketPage:
         except (ValueError, IndexError):
             return 1
 
+    def _on_other_bank_toggle(self):
+        if self.is_other_bank_var.get():
+            self.other_bank_frame.pack(fill=tk.X, pady=(0, 8))
+            if not self.other_bank_paid_var.get().strip():
+                self.other_bank_paid_var.set('0')
+        else:
+            self.other_bank_frame.pack_forget()
+            self.other_bank_paid_var.set('0')
+            self.service_charge_payment_mode_var.set('financed')
+        self._recalculate()
+
     def _recalculate(self):
+        self._save_form_state()
         self._render_summary()
+
+    def _setup_draft_autosave(self):
+        """Auto-save draft on edits so tab switches keep recent input."""
+        vars_to_track = []
+        vars_to_track.append(self.nic_var)
+        vars_to_track.extend(self.cust_vars.values())
+        vars_to_track.append(self.loan_vars.get('purpose'))
+        vars_to_track.append(self.duration_var)
+        vars_to_track.append(self.advance_amount_var)
+        vars_to_track.append(self.is_other_bank_var)
+        vars_to_track.append(self.other_bank_paid_var)
+        vars_to_track.append(self.service_charge_payment_mode_var)
+
+        for var in vars_to_track:
+            if var is not None:
+                var.trace_add('write', lambda *_args: self._save_form_state())
+
+    def _save_form_state(self):
+        """Save current form state for persistence across tab changes."""
+        self._form_state = {
+            'nic': self.nic_var.get() if hasattr(self, 'nic_var') else '',
+            'name': self.cust_vars.get('name', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
+            'phone': self.cust_vars.get('phone', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
+            'birthday': self.cust_vars.get('birthday', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
+            'job': self.cust_vars.get('job', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
+            'marital_status': self.cust_vars.get('marital_status', tk.StringVar()).get() if hasattr(self, 'cust_vars') else 'Unmarried',
+            'language': self.cust_vars.get('language', tk.StringVar()).get() if hasattr(self, 'cust_vars') else 'Sinhala',
+            'address': self.cust_vars.get('address', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
+            'purpose': self.loan_vars.get('purpose', tk.StringVar()).get() if hasattr(self, 'loan_vars') else '',
+            'duration': self.duration_var.get() if hasattr(self, 'duration_var') else '',
+            'advance_amount': self.advance_amount_var.get() if hasattr(self, 'advance_amount_var') else '',
+            'is_other_bank': self.is_other_bank_var.get() if hasattr(self, 'is_other_bank_var') else False,
+            'other_bank_paid': self.other_bank_paid_var.get() if hasattr(self, 'other_bank_paid_var') else '0',
+            'service_charge_mode': self.service_charge_payment_mode_var.get() if hasattr(self, 'service_charge_payment_mode_var') else 'financed',
+            'items': self.items.copy() if hasattr(self, 'items') else [],
+        }
+        global NEW_TICKET_DRAFT
+        NEW_TICKET_DRAFT = dict(self._form_state)
+
+    def _restore_form_state(self):
+        """Restore previously saved form state when returning to this page."""
+        if not self._form_state:
+            return
+        
+        if hasattr(self, 'nic_var'):
+            self.nic_var.set(self._form_state.get('nic', ''))
+        if hasattr(self, 'cust_vars'):
+            self.cust_vars.get('name', tk.StringVar()).set(self._form_state.get('name', ''))
+            self.cust_vars.get('phone', tk.StringVar()).set(self._form_state.get('phone', ''))
+            self.cust_vars.get('birthday', tk.StringVar()).set(self._form_state.get('birthday', ''))
+            self.cust_vars.get('job', tk.StringVar()).set(self._form_state.get('job', ''))
+            self.cust_vars.get('marital_status', tk.StringVar()).set(self._form_state.get('marital_status', 'Unmarried'))
+            self.cust_vars.get('language', tk.StringVar()).set(self._form_state.get('language', 'Sinhala'))
+            self.cust_vars.get('address', tk.StringVar()).set(self._form_state.get('address', ''))
+        if hasattr(self, 'loan_vars'):
+            self.loan_vars.get('purpose', tk.StringVar()).set(self._form_state.get('purpose', ''))
+        if hasattr(self, 'duration_var'):
+            self.duration_var.set(self._form_state.get('duration', ''))
+        if hasattr(self, 'advance_amount_var'):
+            self.advance_amount_var.set(self._form_state.get('advance_amount', ''))
+        if hasattr(self, 'is_other_bank_var'):
+            self.is_other_bank_var.set(self._form_state.get('is_other_bank', False))
+        if hasattr(self, 'other_bank_paid_var'):
+            self.other_bank_paid_var.set(self._form_state.get('other_bank_paid', '0'))
+        if hasattr(self, 'service_charge_payment_mode_var'):
+            self.service_charge_payment_mode_var.set(self._form_state.get('service_charge_mode', 'financed'))
+        
+        if hasattr(self, 'items'):
+            self.items = self._form_state.get('items', [])
+
+    def _clear_form(self):
+        """Clear all form fields and state."""
+        # Reset customer fields
+        if hasattr(self, 'nic_var'):
+            self.nic_var.set('')
+        if hasattr(self, 'cust_vars'):
+            for key in self.cust_vars:
+                self.cust_vars[key].set('')
+            self.cust_vars.get('marital_status', tk.StringVar()).set('Unmarried')
+            self.cust_vars.get('language', tk.StringVar()).set('Sinhala')
+        
+        # Reset form fields
+        if hasattr(self, 'loan_vars'):
+            for key in self.loan_vars:
+                self.loan_vars[key].set('')
+        
+        if hasattr(self, 'duration_var'):
+            self.duration_var.set('')
+        if hasattr(self, 'advance_amount_var'):
+            self.advance_amount_var.set('')
+        if hasattr(self, 'custom_assessed_pct_var'):
+            self.custom_assessed_pct_var.set('')
+        
+        # Reset other bank fields
+        if hasattr(self, 'is_other_bank_var'):
+            self.is_other_bank_var.set(False)
+        if hasattr(self, 'other_bank_paid_var'):
+            self.other_bank_paid_var.set('0')
+        if hasattr(self, 'service_charge_payment_mode_var'):
+            self.service_charge_payment_mode_var.set('financed')
+        
+        # Clear items
+        self.items = []
+        self._form_state = {}
+        global NEW_TICKET_DRAFT
+        NEW_TICKET_DRAFT = {}
+        
+        # Refresh the page
+        self._recalculate()
+
+    def _autofill_max_advance(self, max_amount):
+        """Auto-fill advance amount with max allowed when clicked."""
+        self.advance_amount_var.set(f"{max_amount:,.2f}")
+        setattr(self, '_advance_user_edited', True)
+        self._validate_advance_amount(max_amount)
+        self._recalculate()
+
+    def _validate_advance_amount(self, max_allowed):
+        """Validate advance amount and change border color if exceeds max."""
+        if not hasattr(self, 'advance_entry_widget'):
+            return
+        
+        raw_advance = self.advance_amount_var.get().strip().replace(',', '')
+        try:
+            advance = float(raw_advance) if raw_advance else 0
+            if advance > max_allowed:
+                self.advance_entry_widget.config(borderwidth=2, foreground='#e54245')  # Red border for invalid
+            else:
+                self.advance_entry_widget.config(borderwidth=1, foreground='#000000')   # Normal border
+        except ValueError:
+            self.advance_entry_widget.config(borderwidth=1, foreground='#000000')
 
     def _get_calculations(self):
         total_gold_wt = sum(it['gold_weight'] for it in self.items)
@@ -466,7 +924,7 @@ class NewTicketPage:
             assessed_pct = default_assessed_pct
 
         assessed_value = calculate_assessed_value(total_market_value, assessed_pct)
-        loan_amount = 0
+        advance_amount = 0
         if hasattr(self, 'advance_amount_var'):
             raw_advance = self.advance_amount_var.get().strip().replace(',', '')
             if raw_advance:
@@ -474,9 +932,34 @@ class NewTicketPage:
                     requested_advance = float(raw_advance)
                     if requested_advance < 0:
                         requested_advance = 0
-                    loan_amount = min(requested_advance, assessed_value)
+                    advance_amount = min(requested_advance, assessed_value)
                 except ValueError:
                     pass
+
+        is_other_bank = bool(self.is_other_bank_var.get())
+        try:
+            service_charge_rate = float(get_setting('other_bank_service_charge_pct', '2.0') or 2.0)
+        except ValueError:
+            service_charge_rate = 2.0
+        if service_charge_rate < 0:
+            service_charge_rate = 0
+
+        mode = self.service_charge_payment_mode_var.get() or 'financed'
+        if mode not in ('financed', 'balance'):
+            mode = 'financed'
+
+        try:
+            other_bank_paid_amount = float((self.other_bank_paid_var.get() or '0').strip().replace(',', ''))
+        except ValueError:
+            other_bank_paid_amount = 0.0
+        other_bank_paid_amount = max(0.0, other_bank_paid_amount)
+
+        service_charge_amount = round(advance_amount * (service_charge_rate / 100.0), 2) if is_other_bank else 0.0
+        financed_service_charge = service_charge_amount if is_other_bank and mode == 'financed' else 0.0
+        loan_amount = round(advance_amount + financed_service_charge, 2)
+
+        balance_deduction = service_charge_amount if is_other_bank and mode == 'balance' else 0.0
+        customer_balance = round(advance_amount - other_bank_paid_amount - balance_deduction, 2) if is_other_bank else round(advance_amount, 2)
 
         interest = calculate_interest(loan_amount, interest_rate, months)
         expire_date = get_expire_date(datetime.now().strftime('%Y-%m-%d'), months)
@@ -491,12 +974,20 @@ class NewTicketPage:
             'assessed_percentage': assessed_pct,
             'default_assessed_pct': default_assessed_pct,
             'assessed_value': assessed_value,
+            'advance_amount': round(advance_amount, 2),
             'loan_amount': loan_amount,
+            'interest_principal_amount': loan_amount,
             'interest_rate': interest_rate,
             'overdue_rate': overdue_rate,
             'interest': interest,
             'duration_months': months,
             'expire_date': expire_date,
+            'is_other_bank_ticket': is_other_bank,
+            'other_bank_paid_amount': round(other_bank_paid_amount, 2),
+            'service_charge_rate': round(service_charge_rate, 2),
+            'service_charge_amount': round(service_charge_amount, 2),
+            'service_charge_payment_mode': mode,
+            'customer_balance_amount': customer_balance,
         }
 
     def _render_summary(self):
@@ -544,6 +1035,7 @@ class NewTicketPage:
             ('Assessed Value', format_currency(calc['assessed_value']) if has_duration else "-"),
             ('Rate of Interest Monthly', f"{calc['interest_rate']}%" if has_duration else "-"),
             ('Duration', f"{calc['duration_months']} month(s)" if has_duration else "-"),
+            ('Interest Principal', format_currency(calc['interest_principal_amount']) if has_duration else "-"),
             ('Interest Amount', format_currency(calc['interest']) if has_duration else "-"),
             ('Expire Date', calc['expire_date'] if has_duration else "-"),
         ]
@@ -590,21 +1082,66 @@ class NewTicketPage:
 
         advance_entry = self.theme.make_entry(advance_row, variable=self.advance_amount_var, width=12)
         advance_entry.pack(side=tk.RIGHT)
+        self.advance_entry_widget = advance_entry.entry
 
         # Mark user edits so future recalculations don't overwrite if we decided to autofill
+        advance_entry.entry.bind('<KeyRelease>', lambda _event: self._validate_advance_amount(calc['assessed_value']))
         advance_entry.entry.bind('<KeyRelease>', lambda _event: setattr(self, '_advance_user_edited', True))
         advance_entry.entry.bind('<FocusOut>', lambda _event: self._recalculate())
         advance_entry.entry.bind('<Return>', lambda _event: self._recalculate())
-        advance_entry.entry.bind('<FocusOut>', lambda _event: self._recalculate())
-        advance_entry.entry.bind('<Return>', lambda _event: self._recalculate())
 
-        tk.Label(
+        max_allowed_label = tk.Label(
             self.summary_frame,
             text=f"Max allowed: {format_currency(calc['assessed_value'])}",
             font=self.theme.fonts.small,
             bg=self.theme.palette.bg_surface,
-            fg=self.theme.palette.text_muted,
-        ).pack(anchor='e', padx=14, pady=(0, 4))
+            fg=self.theme.palette.info,
+            cursor='hand2'
+        )
+        max_allowed_label.pack(anchor='e', padx=14, pady=(0, 4))
+        max_allowed_label.bind('<Button-1>', lambda e: self._autofill_max_advance(calc['assessed_value']))
+
+        # Paid to Other Bank input (shown after max allowed text)
+        if calc['is_other_bank_ticket'] and has_duration:
+            paid_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+            paid_row.pack(fill=tk.X, padx=14, pady=(0, 6))
+            tk.Label(paid_row, text='Paid to Other Bank', font=self.theme.fonts.body, width=18, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            self.other_bank_paid_entry = self.theme.make_entry(paid_row, variable=self.other_bank_paid_var, width=12)
+            self.other_bank_paid_entry.pack(side=tk.RIGHT)
+            self.other_bank_paid_entry.entry.bind('<Return>', lambda _e: self._recalculate())
+
+        if calc['is_other_bank_ticket'] and has_duration:
+            for label, value in [
+                ('Service Charge Rate', f"{calc['service_charge_rate']}%"),
+                ('Service Charge Amount', format_currency(calc['service_charge_amount'])),
+                ('Service Charge Mode', {
+                    'financed': 'Add To Loan',
+                    'balance': 'Deduct From Balance',
+                }.get(calc['service_charge_payment_mode'], 'Add To Loan')),
+            ]:
+                row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+                row.pack(fill=tk.X, padx=14, pady=2)
+                tk.Label(row, text=label, font=self.theme.fonts.body, width=18, anchor='w',
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+                tk.Label(row, text=value, font=self.theme.fonts.body_bold, anchor='e',
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+            
+            # Customer Balance with enhanced styling
+            cb_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+            cb_row.pack(fill=tk.X, padx=14, pady=4)
+            tk.Label(cb_row, text='Customer Balance', font=self.theme.fonts.body, width=18, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(cb_row, text=format_currency(calc['customer_balance_amount']), font=('Segoe UI', 13, 'bold'), anchor='e',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.success).pack(side=tk.RIGHT)
+
+            mode_text = {
+                'financed': 'Service charge is added to the loan; interest applies on advance + service charge.',
+                'balance': 'Service charge is deducted from customer balance; it will not be added to interest principal.',
+            }.get(calc['service_charge_payment_mode'], '')
+            self.other_bank_note.config(text=mode_text)
+        else:
+            self.other_bank_note.config(text='')
 
         sep = tk.Frame(self.summary_frame, bg=self.theme.palette.accent, height=2)
         sep.pack(fill=tk.X, padx=14, pady=8)
@@ -613,14 +1150,26 @@ class NewTicketPage:
         total_row.pack(fill=tk.X, padx=14, pady=(0, 14))
         tk.Label(total_row, text='ADVANCE AMOUNT', font=('Segoe UI', 12, 'bold'),
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.accent).pack(side=tk.LEFT)
-        tk.Label(total_row, text=format_currency(calc['loan_amount']) if has_duration else "-", font=('Segoe UI', 16, 'bold'),
+        tk.Label(total_row, text=format_currency(calc['advance_amount']) if has_duration else "-", font=('Segoe UI', 16, 'bold'),
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.accent).pack(side=tk.RIGHT)
+
+        if calc['is_other_bank_ticket'] and has_duration:
+            total2_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+            total2_row.pack(fill=tk.X, padx=14, pady=(0, 12))
+            tk.Label(total2_row, text='INTEREST PRINCIPAL', font=('Segoe UI', 12, 'bold'),
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.info).pack(side=tk.LEFT)
+            tk.Label(total2_row, text=format_currency(calc['interest_principal_amount']), font=('Segoe UI', 15, 'bold'),
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.info).pack(side=tk.RIGHT)
 
     def _create_ticket(self):
         # Validate customer
         nic = self.nic_var.get().strip()
         name = self.cust_vars['name'].get().strip()
         phone = self.cust_vars['phone'].get().strip()
+        birthday = self.cust_vars['birthday'].get().strip()
+        job = self.cust_vars['job'].get().strip()
+        marital_status = self.cust_vars['marital_status'].get().strip() or 'Unmarried'
+        language = self.cust_vars['language'].get().strip() or 'Sinhala'
         address = self.cust_vars['address'].get().strip()
 
         if not nic or not name or not phone:
@@ -643,20 +1192,45 @@ class NewTicketPage:
 
         # Create or get customer
         if not self.customer_id:
-            cid, msg = create_customer(nic, name, phone, address)
+            cid, msg = create_customer(
+                nic=nic,
+                name=name,
+                phone=phone,
+                address=address,
+                birthday=birthday,
+                job=job,
+                marital_status=marital_status,
+                language=language,
+            )
             if not cid:
                 messagebox.showerror('Customer', msg)
                 return
             self.customer_id = cid
 
         calc = self._get_calculations()
+        if calc['is_other_bank_ticket']:
+            if calc['other_bank_paid_amount'] > (calc['advance_amount'] + 0.01):
+                messagebox.showwarning('Validation', 'Paid amount to other bank cannot exceed advance amount.')
+                return
+            if calc['customer_balance_amount'] < -0.01:
+                messagebox.showwarning('Validation', 'Customer balance is negative. Adjust paid amount or service charge mode.')
+                return
+
         ticket_no = generate_ticket_no()
 
         loan_data = {
             'ticket_no': ticket_no,
             'customer_id': self.customer_id,
             'purpose': self.loan_vars.get('purpose', tk.StringVar()).get() if hasattr(self, 'loan_vars') else '',
+            'advance_amount': calc['advance_amount'],
             'loan_amount': calc['loan_amount'],
+            'interest_principal_amount': calc['interest_principal_amount'],
+            'is_other_bank_ticket': calc['is_other_bank_ticket'],
+            'other_bank_paid_amount': calc['other_bank_paid_amount'],
+            'service_charge_rate': calc['service_charge_rate'],
+            'service_charge_amount': calc['service_charge_amount'],
+            'service_charge_payment_mode': calc['service_charge_payment_mode'],
+            'customer_balance_amount': calc['customer_balance_amount'],
             'assessed_value': calc['assessed_value'],
             'market_value': calc['market_value'],
             'interest_rate': calc['interest_rate'],
@@ -688,8 +1262,8 @@ class NewTicketPage:
             create_approval_request(
                 loan_id=loan_id,
                 ticket_no=ticket_no,
-                default_pct=default_pct,
-                requested_pct=requested_pct,
+                default_val=default_pct,
+                requested_val=requested_pct,
                 requested_by=self.user['id'],
                 requested_by_name=self.user['full_name'],
             )

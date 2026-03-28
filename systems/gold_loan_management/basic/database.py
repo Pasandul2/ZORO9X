@@ -8,6 +8,7 @@ import os
 import hashlib
 import sys
 import time
+import json
 from datetime import datetime, timedelta
 
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +46,10 @@ def init_database(db_path=None):
         name TEXT NOT NULL,
         phone TEXT NOT NULL,
         address TEXT,
+        birthday TEXT,
+        job TEXT,
+        marital_status TEXT,
+        language TEXT,
         created_at TEXT DEFAULT (datetime('now','localtime')),
         updated_at TEXT DEFAULT (datetime('now','localtime'))
     )''')
@@ -54,7 +59,15 @@ def init_database(db_path=None):
         ticket_no TEXT UNIQUE NOT NULL,
         customer_id INTEGER NOT NULL,
         purpose TEXT,
+        advance_amount REAL,
         loan_amount REAL NOT NULL,
+        interest_principal_amount REAL,
+        is_other_bank_ticket INTEGER NOT NULL DEFAULT 0,
+        other_bank_paid_amount REAL NOT NULL DEFAULT 0,
+        service_charge_rate REAL NOT NULL DEFAULT 0,
+        service_charge_amount REAL NOT NULL DEFAULT 0,
+        service_charge_payment_mode TEXT NOT NULL DEFAULT 'financed',
+        customer_balance_amount REAL NOT NULL DEFAULT 0,
         assessed_value REAL NOT NULL,
         market_value REAL NOT NULL,
         interest_rate REAL NOT NULL,
@@ -179,10 +192,143 @@ def init_database(db_path=None):
         FOREIGN KEY (reviewed_by) REFERENCES users(id)
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS letter_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT 'English',
+        category TEXT NOT NULL DEFAULT 'overdue_notice',
+        subject TEXT NOT NULL,
+        body_json TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (created_by) REFERENCES users(id)
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS customer_letters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_id INTEGER,
+        customer_id INTEGER,
+        template_id INTEGER,
+        language TEXT NOT NULL DEFAULT 'English',
+        subject TEXT NOT NULL,
+        body_json TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','printed','sent')),
+        printed_at TEXT,
+        sent_at TEXT,
+        created_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (loan_id) REFERENCES loans(id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id),
+        FOREIGN KEY (template_id) REFERENCES letter_templates(id),
+        FOREIGN KEY (created_by) REFERENCES users(id)
+    )''')
+
     # Backward-compatible schema updates for existing databases.
     loan_cols = {row['name'] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
     if 'renew_date' not in loan_cols:
         c.execute("ALTER TABLE loans ADD COLUMN renew_date TEXT")
+    if 'advance_amount' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN advance_amount REAL")
+    if 'interest_principal_amount' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN interest_principal_amount REAL")
+    if 'is_other_bank_ticket' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN is_other_bank_ticket INTEGER NOT NULL DEFAULT 0")
+    if 'other_bank_paid_amount' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN other_bank_paid_amount REAL NOT NULL DEFAULT 0")
+    if 'service_charge_rate' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN service_charge_rate REAL NOT NULL DEFAULT 0")
+    if 'service_charge_amount' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN service_charge_amount REAL NOT NULL DEFAULT 0")
+    if 'service_charge_payment_mode' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN service_charge_payment_mode TEXT NOT NULL DEFAULT 'financed'")
+    if 'customer_balance_amount' not in loan_cols:
+        c.execute("ALTER TABLE loans ADD COLUMN customer_balance_amount REAL NOT NULL DEFAULT 0")
+
+    customer_cols = {row['name'] for row in c.execute("PRAGMA table_info(customers)").fetchall()}
+    if 'birthday' not in customer_cols:
+        c.execute("ALTER TABLE customers ADD COLUMN birthday TEXT")
+    if 'job' not in customer_cols:
+        c.execute("ALTER TABLE customers ADD COLUMN job TEXT")
+    if 'marital_status' not in customer_cols:
+        c.execute("ALTER TABLE customers ADD COLUMN marital_status TEXT")
+    if 'language' not in customer_cols:
+        c.execute("ALTER TABLE customers ADD COLUMN language TEXT")
+
+    c.execute("UPDATE customers SET marital_status = COALESCE(NULLIF(marital_status, ''), 'Unmarried')")
+    c.execute("UPDATE customers SET language = COALESCE(NULLIF(language, ''), 'Sinhala')")
+
+    # Letters tables can already exist from older builds with a different shape.
+    # Ensure all required columns exist before letter queries run.
+    letter_template_cols = {row['name'] for row in c.execute("PRAGMA table_info(letter_templates)").fetchall()}
+    if 'language' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN language TEXT NOT NULL DEFAULT 'English'")
+    if 'category' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN category TEXT NOT NULL DEFAULT 'overdue_notice'")
+    if 'subject' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN subject TEXT")
+    if 'body_json' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN body_json TEXT")
+    if 'is_default' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0")
+    if 'created_by' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN created_by INTEGER")
+    if 'created_at' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN created_at TEXT")
+    if 'updated_at' not in letter_template_cols:
+        c.execute("ALTER TABLE letter_templates ADD COLUMN updated_at TEXT")
+
+    c.execute("UPDATE letter_templates SET language = COALESCE(NULLIF(language, ''), 'English')")
+    c.execute("UPDATE letter_templates SET category = COALESCE(NULLIF(category, ''), 'overdue_notice')")
+    c.execute("UPDATE letter_templates SET subject = COALESCE(NULLIF(subject, ''), COALESCE(name, 'Letter Notice'))")
+    c.execute(
+        "UPDATE letter_templates SET body_json = COALESCE(NULLIF(body_json, ''), '{\"text\":\"Dear {{customer_name}},\\n\\nThis is a letter from {{company_name}}.\\n\\nThank you.\",\"tags\":[]}')"
+    )
+    c.execute("UPDATE letter_templates SET is_default = COALESCE(is_default, 0)")
+    c.execute("UPDATE letter_templates SET created_at = COALESCE(NULLIF(created_at, ''), datetime('now','localtime'))")
+    c.execute("UPDATE letter_templates SET updated_at = COALESCE(NULLIF(updated_at, ''), datetime('now','localtime'))")
+
+    letter_cols = {row['name'] for row in c.execute("PRAGMA table_info(customer_letters)").fetchall()}
+    if 'loan_id' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN loan_id INTEGER")
+    if 'customer_id' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN customer_id INTEGER")
+    if 'template_id' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN template_id INTEGER")
+    if 'language' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN language TEXT NOT NULL DEFAULT 'English'")
+    if 'subject' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN subject TEXT")
+    if 'body_json' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN body_json TEXT")
+    if 'body_text' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN body_text TEXT")
+    if 'status' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
+    if 'printed_at' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN printed_at TEXT")
+    if 'sent_at' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN sent_at TEXT")
+    if 'created_by' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN created_by INTEGER")
+    if 'created_at' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN created_at TEXT")
+    if 'updated_at' not in letter_cols:
+        c.execute("ALTER TABLE customer_letters ADD COLUMN updated_at TEXT")
+
+    c.execute("UPDATE customer_letters SET language = COALESCE(NULLIF(language, ''), 'English')")
+    c.execute("UPDATE customer_letters SET subject = COALESCE(NULLIF(subject, ''), 'Customer Letter')")
+    c.execute("UPDATE customer_letters SET body_json = COALESCE(NULLIF(body_json, ''), '{\"text\":\"\",\"tags\":[]}')")
+    c.execute("UPDATE customer_letters SET body_text = COALESCE(body_text, '')")
+    c.execute("UPDATE customer_letters SET status = COALESCE(NULLIF(status, ''), 'draft')")
+    c.execute("UPDATE customer_letters SET created_at = COALESCE(NULLIF(created_at, ''), datetime('now','localtime'))")
+    c.execute("UPDATE customer_letters SET updated_at = COALESCE(NULLIF(updated_at, ''), datetime('now','localtime'))")
+
+    c.execute("UPDATE loans SET advance_amount = COALESCE(advance_amount, loan_amount)")
+    c.execute("UPDATE loans SET interest_principal_amount = COALESCE(interest_principal_amount, loan_amount)")
 
     renewal_cols = {row['name'] for row in c.execute("PRAGMA table_info(loan_renewals)").fetchall()}
     if 'payment_amount' not in renewal_cols:
@@ -254,11 +400,69 @@ def init_database(db_path=None):
         'company_address': '',
         'ticket_prefix': 'GL',
         'print_format': 'a4',
+        'other_bank_service_charge_pct': '2.0',
     }
     for key, val in defaults.items():
         existing = c.execute("SELECT key FROM settings WHERE key=?", (key,)).fetchone()
         if not existing:
             c.execute("INSERT INTO settings (key, value) VALUES (?,?)", (key, val))
+
+    template_count = c.execute("SELECT COUNT(*) FROM letter_templates").fetchone()[0]
+    if not template_count:
+        default_templates = [
+            {
+                'name': 'Overdue Notice - English',
+                'language': 'English',
+                'subject': 'Loan Overdue Notice - {{ticket_no}}',
+                'body': (
+                    'Dear {{customer_name}},\n\n'
+                    'Your loan {{ticket_no}} has been overdue for {{overdue_days}} day(s).\n'
+                    'Principal: {{loan_amount}}\n'
+                    'Interest: {{interest_due}}\n'
+                    'Overdue Interest: {{overdue_interest}}\n'
+                    'Total Due: {{total_due}}\n\n'
+                    'Please visit us before {{followup_date}} to renew or redeem your loan.\n\n'
+                    'Thank you,\n{{company_name}}'
+                ),
+            },
+            {
+                'name': 'හිඟ ණය දැනුම්දීම - Sinhala',
+                'language': 'Sinhala',
+                'subject': 'හිඟ ණය දැනුම්දීම - {{ticket_no}}',
+                'body': (
+                    'හිතවත් {{customer_name}},\n\n'
+                    'ඔබගේ ණය අංකය {{ticket_no}} දින {{overdue_days}} කින් හිඟව ඇත.\n'
+                    'මුල් ණය මුදල: {{loan_amount}}\n'
+                    'පොලී: {{interest_due}}\n'
+                    'හිඟ පොලී: {{overdue_interest}}\n'
+                    'ගෙවිය යුතු මුළු මුදල: {{total_due}}\n\n'
+                    'කරුණාකර {{followup_date}} ට පෙර පැමිණ ණය නවීකරණය හෝ මුදා ගැනීම සිදු කරන්න.\n\n'
+                    'ස්තූතියි,\n{{company_name}}'
+                ),
+            },
+            {
+                'name': 'தாமத கடன் அறிவிப்பு - Tamil',
+                'language': 'Tamil',
+                'subject': 'தாமத கடன் அறிவிப்பு - {{ticket_no}}',
+                'body': (
+                    'அன்புள்ள {{customer_name}},\n\n'
+                    'உங்கள் கடன் எண் {{ticket_no}} {{overdue_days}} நாட்களாக தாமதமாக உள்ளது.\n'
+                    'முதன்மை தொகை: {{loan_amount}}\n'
+                    'வட்டி: {{interest_due}}\n'
+                    'தாமத வட்டி: {{overdue_interest}}\n'
+                    'மொத்தம் செலுத்த வேண்டியது: {{total_due}}\n\n'
+                    '{{followup_date}}க்கு முன் வந்து கடனை புதுப்பிக்க அல்லது மீட்டெடுக்கவும்.\n\n'
+                    'நன்றி,\n{{company_name}}'
+                ),
+            },
+        ]
+        for tpl in default_templates:
+            body_json = json.dumps({'text': tpl['body'], 'tags': []}, ensure_ascii=False)
+            c.execute(
+                '''INSERT INTO letter_templates (name, language, category, subject, body_json, is_default)
+                   VALUES (?,?,?,?,?,1)''',
+                (tpl['name'], tpl['language'], 'overdue_notice', tpl['subject'], body_json)
+            )
 
     conn.commit()
     conn.close()
@@ -334,11 +538,13 @@ def get_customer_by_nic(nic, db_path=None):
     return dict(row) if row else None
 
 
-def create_customer(nic, name, phone, address='', db_path=None):
+def create_customer(nic, name, phone, address='', birthday='', job='', marital_status='Unmarried', language='Sinhala', db_path=None):
     conn = get_connection(db_path)
     try:
-        c = conn.execute("INSERT INTO customers (nic, name, phone, address) VALUES (?,?,?,?)",
-                         (nic, name, phone, address))
+        c = conn.execute(
+            "INSERT INTO customers (nic, name, phone, address, birthday, job, marital_status, language) VALUES (?,?,?,?,?,?,?,?)",
+            (nic, name, phone, address, birthday, job, marital_status, language)
+        )
         conn.commit()
         cid = c.lastrowid
         conn.close()
@@ -348,12 +554,28 @@ def create_customer(nic, name, phone, address='', db_path=None):
         return None, "NIC already exists"
 
 
-def update_customer(customer_id, name, phone, address, db_path=None):
+def update_customer(customer_id, name, phone, address, birthday='', job='', marital_status='Unmarried', language='Sinhala', db_path=None):
     conn = get_connection(db_path)
-    conn.execute("UPDATE customers SET name=?, phone=?, address=?, updated_at=datetime('now','localtime') WHERE id=?",
-                 (name, phone, address, customer_id))
+    conn.execute(
+        "UPDATE customers SET name=?, phone=?, address=?, birthday=?, job=?, marital_status=?, language=?, updated_at=datetime('now','localtime') WHERE id=?",
+        (name, phone, address, birthday, job, marital_status, language, customer_id)
+    )
     conn.commit()
     conn.close()
+
+
+def search_recent_customer_jobs(prefix, db_path=None):
+    conn = get_connection(db_path)
+    c = conn.cursor()
+    c.execute('''
+        SELECT DISTINCT job FROM customers
+        WHERE job LIKE ? AND job != ''
+        ORDER BY updated_at DESC
+        LIMIT 8
+    ''', (f"{prefix}%",))
+    rows = [row[0] for row in c.fetchall() if row[0]]
+    conn.close()
+    return rows
 
 
 # ── Loan operations ──
@@ -401,12 +623,23 @@ def create_loan(data, items, db_path=None):
             try:
                 c = conn.cursor()
                 c.execute('''INSERT INTO loans 
-                    (ticket_no, customer_id, purpose, loan_amount, assessed_value, market_value,
-                     interest_rate, overdue_interest_rate, duration_months, issue_date, expire_date,
-                     total_gold_weight, total_item_weight, remarks, created_by, status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (ticket_no, customer_id, purpose, advance_amount, loan_amount, interest_principal_amount,
+                     is_other_bank_ticket, other_bank_paid_amount, service_charge_rate, service_charge_amount,
+                     service_charge_payment_mode, customer_balance_amount,
+                     assessed_value, market_value, interest_rate, overdue_interest_rate, duration_months,
+                     issue_date, expire_date, total_gold_weight, total_item_weight, remarks, created_by, status)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (data['ticket_no'], data['customer_id'], data.get('purpose', ''),
-                           data['loan_amount'], data['assessed_value'], data['market_value'],
+                           data.get('advance_amount', data['loan_amount']),
+                           data['loan_amount'],
+                           data.get('interest_principal_amount', data['loan_amount']),
+                           int(data.get('is_other_bank_ticket', 0)),
+                           data.get('other_bank_paid_amount', 0),
+                           data.get('service_charge_rate', 0),
+                           data.get('service_charge_amount', 0),
+                           data.get('service_charge_payment_mode', 'financed'),
+                           data.get('customer_balance_amount', 0),
+                           data['assessed_value'], data['market_value'],
                            data['interest_rate'], data['overdue_interest_rate'],
                            data['duration_months'], data['issue_date'], data['expire_date'],
                            data['total_gold_weight'], data['total_item_weight'],
@@ -451,7 +684,9 @@ def create_loan(data, items, db_path=None):
 def get_loan(loan_id, db_path=None):
     conn = get_connection(db_path)
     row = conn.execute('''SELECT l.*, c.name as customer_name, c.nic as customer_nic,
-        c.phone as customer_phone, c.address as customer_address
+        c.phone as customer_phone, c.address as customer_address,
+        c.birthday as customer_birthday, c.job as customer_job,
+        c.marital_status as customer_marital_status, c.language as customer_language
         FROM loans l JOIN customers c ON l.customer_id = c.id WHERE l.id=?''', (loan_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -460,7 +695,9 @@ def get_loan(loan_id, db_path=None):
 def get_loan_by_ticket(ticket_no, db_path=None):
     conn = get_connection(db_path)
     row = conn.execute('''SELECT l.*, c.name as customer_name, c.nic as customer_nic,
-        c.phone as customer_phone, c.address as customer_address
+        c.phone as customer_phone, c.address as customer_address,
+        c.birthday as customer_birthday, c.job as customer_job,
+        c.marital_status as customer_marital_status, c.language as customer_language
         FROM loans l JOIN customers c ON l.customer_id = c.id WHERE l.ticket_no=?''', (ticket_no,)).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -521,9 +758,9 @@ def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
                   payment_amount, normal_interest_due, overdue_interest_due, principal_reduction,
                   new_loan_amount, new_interest_rate, new_assessed_value, user_id, remarks))
 
-    conn.execute('''UPDATE loans SET loan_amount=?, renew_date=?, expire_date=?, duration_months=?, interest_rate=?,
+    conn.execute('''UPDATE loans SET loan_amount=?, interest_principal_amount=?, renew_date=?, expire_date=?, duration_months=?, interest_rate=?,
         status='active', updated_at=datetime('now','localtime') WHERE id=?''',
-                 (new_loan_amount, new_issue, new_expire, new_duration, new_interest_rate, loan_id))
+                 (new_loan_amount, new_loan_amount, new_issue, new_expire, new_duration, new_interest_rate, loan_id))
 
     if interest_paid > 0:
         conn.execute('''INSERT INTO loan_payments (loan_id, payment_type, amount, received_by, remarks)
@@ -798,3 +1035,159 @@ def review_approval_request(req_id, status, reviewed_by, reviewed_by_name, revie
         (status, reviewed_by, reviewed_by_name, review_note, req_id))
     conn.commit()
     conn.close()
+
+
+# -- Letters & Templates --
+
+def list_letter_templates(language='', category='', db_path=None):
+    conn = get_connection(db_path)
+    sql = "SELECT * FROM letter_templates WHERE 1=1"
+    params = []
+    if language:
+        sql += " AND language=?"
+        params.append(language)
+    if category:
+        sql += " AND category=?"
+        params.append(category)
+    sql += " ORDER BY is_default DESC, updated_at DESC, id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_letter_template(template_id, db_path=None):
+    conn = get_connection(db_path)
+    row = conn.execute("SELECT * FROM letter_templates WHERE id=?", (template_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_letter_template(name, language, category, subject, body_json, user_id=None, template_id=None, db_path=None):
+    conn = get_connection(db_path)
+    if template_id:
+        conn.execute(
+            '''UPDATE letter_templates
+               SET name=?, language=?, category=?, subject=?, body_json=?,
+                   updated_at=datetime('now','localtime')
+               WHERE id=?''',
+            (name, language, category, subject, body_json, template_id)
+        )
+        conn.commit()
+        conn.close()
+        return template_id
+
+    c = conn.cursor()
+    c.execute(
+        '''INSERT INTO letter_templates (name, language, category, subject, body_json, created_by)
+           VALUES (?,?,?,?,?,?)''',
+        (name, language, category, subject, body_json, user_id)
+    )
+    conn.commit()
+    tid = c.lastrowid
+    conn.close()
+    return tid
+
+
+def delete_letter_template(template_id, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute("DELETE FROM letter_templates WHERE id=?", (template_id,))
+    conn.commit()
+    conn.close()
+
+
+def search_overdue_loans_for_letters(query='', language='', db_path=None):
+    conn = get_connection(db_path)
+    sql = '''
+        SELECT l.id, l.ticket_no, l.loan_amount, l.interest_rate, l.overdue_interest_rate,
+               l.duration_months, l.issue_date, l.renew_date, l.expire_date, l.status,
+               c.id AS customer_id, c.name AS customer_name, c.nic AS customer_nic,
+               c.phone AS customer_phone, c.address AS customer_address,
+               COALESCE(NULLIF(c.language, ''), 'Sinhala') AS customer_language
+        FROM loans l
+        JOIN customers c ON l.customer_id = c.id
+        WHERE l.status='active' AND date(l.expire_date) < date('now')
+    '''
+    params = []
+    if query:
+        sql += " AND (l.ticket_no LIKE ? OR c.name LIKE ? OR c.nic LIKE ? OR c.phone LIKE ?)"
+        q = f"%{query}%"
+        params.extend([q, q, q, q])
+    if language:
+        sql += " AND COALESCE(NULLIF(c.language, ''), 'Sinhala') = ?"
+        params.append(language)
+    sql += " ORDER BY l.expire_date ASC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_customer_letter(loan_id, customer_id, template_id, language, subject,
+                         body_json, body_text, status='draft', created_by=None,
+                         letter_id=None, db_path=None):
+    conn = get_connection(db_path)
+    if letter_id:
+        sent_at = "datetime('now','localtime')" if status == 'sent' else 'sent_at'
+        printed_at = "datetime('now','localtime')" if status == 'printed' else 'printed_at'
+        conn.execute(
+            f'''UPDATE customer_letters
+                SET loan_id=?, customer_id=?, template_id=?, language=?, subject=?,
+                    body_json=?, body_text=?, status=?,
+                    printed_at={printed_at}, sent_at={sent_at},
+                    updated_at=datetime('now','localtime')
+                WHERE id=?''',
+            (loan_id, customer_id, template_id, language, subject, body_json,
+             body_text, status, letter_id)
+        )
+        conn.commit()
+        conn.close()
+        return letter_id
+
+    c = conn.cursor()
+    printed_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == 'printed' else None
+    sent_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == 'sent' else None
+    c.execute(
+        '''INSERT INTO customer_letters
+           (loan_id, customer_id, template_id, language, subject, body_json, body_text,
+            status, printed_at, sent_at, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (loan_id, customer_id, template_id, language, subject, body_json, body_text,
+         status, printed_at, sent_at, created_by)
+    )
+    conn.commit()
+    lid = c.lastrowid
+    conn.close()
+    return lid
+
+
+def get_customer_letter(letter_id, db_path=None):
+    conn = get_connection(db_path)
+    row = conn.execute(
+        '''SELECT cl.*, l.ticket_no, c.name AS customer_name, c.nic AS customer_nic
+           FROM customer_letters cl
+           LEFT JOIN loans l ON cl.loan_id = l.id
+           LEFT JOIN customers c ON cl.customer_id = c.id
+           WHERE cl.id=?''',
+        (letter_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_customer_letters(query='', db_path=None):
+    conn = get_connection(db_path)
+    sql = '''
+        SELECT cl.*, l.ticket_no, c.name AS customer_name, c.nic AS customer_nic
+        FROM customer_letters cl
+        LEFT JOIN loans l ON cl.loan_id = l.id
+        LEFT JOIN customers c ON cl.customer_id = c.id
+        WHERE 1=1
+    '''
+    params = []
+    if query:
+        sql += " AND (cl.subject LIKE ? OR c.name LIKE ? OR c.nic LIKE ? OR l.ticket_no LIKE ?)"
+        q = f"%{query}%"
+        params.extend([q, q, q, q])
+    sql += " ORDER BY cl.updated_at DESC, cl.id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

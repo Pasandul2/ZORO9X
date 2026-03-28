@@ -28,6 +28,9 @@ class LoanListPage:
         tk.Label(hdr, text='🔍 Loan Management', font=self.theme.fonts.h1,
                  bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
+        self.stats_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
+        self.stats_wrap.pack(fill=tk.X, pady=(0, 10))
+
         # Search & Filter bar
         filter_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
         filter_card.pack(fill=tk.X, pady=(0, 10))
@@ -39,6 +42,9 @@ class LoanListPage:
         self.search_var = tk.StringVar()
         search_entry = self.theme.make_entry(fbar, variable=self.search_var, width=25)
         search_entry.pack(side=tk.LEFT, padx=(8, 16))
+        self.search_var.trace_add('write', self._on_search_change)
+        if hasattr(search_entry, 'entry'):
+            search_entry.entry.bind('<Return>', lambda _e: self._do_search())
 
         tk.Label(fbar, text='Status:', font=self.theme.fonts.body_bold,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
@@ -47,6 +53,7 @@ class LoanListPage:
                                     values=['all', 'active', 'renewed', 'redeemed', 'forfeited'],
                                     state='readonly', font=self.theme.fonts.body[0:2], width=12)
         status_combo.pack(side=tk.LEFT, padx=(8, 16))
+        status_combo.bind('<<ComboboxSelected>>', lambda _e: self._do_search())
 
         search_btn = self.theme.make_button(fbar, text='🔍 Search', command=self._do_search,
                                             kind='primary', width=10, pady=6)
@@ -60,35 +67,73 @@ class LoanListPage:
         self.table_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
         self.table_card.pack(fill=tk.BOTH, expand=True)
         self.table_frame = self.table_card.inner
+        self._search_after_id = None
         self._do_search()
 
+    def _render_stats(self, loans):
+        for w in self.stats_wrap.winfo_children():
+            w.destroy()
+
+        shown_count = len(loans)
+        active_count = sum(1 for loan in loans if loan.get('status') == 'active')
+        overdue_count = sum(1 for loan in loans if loan.get('status') == 'active' and is_overdue(loan.get('expire_date', '')))
+        total_amount = sum(float(loan.get('loan_amount') or 0) for loan in loans)
+
+        stats = [
+            ('Loans Shown', str(shown_count), self.theme.palette.accent),
+            ('Active Loans', str(active_count), self.theme.palette.success),
+            ('Overdue Active', str(overdue_count), self.theme.palette.danger),
+            ('Shown Amount', format_currency(total_amount), self.theme.palette.info),
+        ]
+
+        for title, value, color in stats:
+            card = self.theme.make_card(self.stats_wrap, bg=self.theme.palette.bg_surface)
+            card.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+            tk.Label(card.inner, text=title, font=self.theme.fonts.small,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=12, pady=(8, 2))
+            tk.Label(card.inner, text=value, font=self.theme.fonts.h2,
+                     bg=self.theme.palette.bg_surface, fg=color).pack(anchor='w', padx=12, pady=(0, 8))
+
+    def _on_search_change(self, *_args):
+        if self._search_after_id is not None:
+            self.container.after_cancel(self._search_after_id)
+        self._search_after_id = self.container.after(220, self._do_search)
+
     def _do_search(self):
+        self._search_after_id = None
         for w in self.table_frame.winfo_children():
             w.destroy()
 
         loans = search_loans(self.search_var.get().strip(), self.status_var.get())
+        self._render_stats(loans)
 
         tk.Label(self.table_frame, text=f'Results: {len(loans)} loan(s)', font=self.theme.fonts.body,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(10, 6))
 
         # Table
         cols = ['Ticket #', 'Customer', 'NIC', 'Amount', 'Status', 'Issue', 'Expire', 'Actions']
-        widths = [10, 16, 14, 12, 10, 10, 10, 14]
+        col_widths = [110, 170, 140, 120, 110, 110, 110, 170]
 
         tbl = tk.Frame(self.table_frame, bg=self.theme.palette.bg_surface)
         tbl.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
         hdr = tk.Frame(tbl, bg=self.theme.palette.bg_surface_alt)
         hdr.pack(fill=tk.X)
-        for col, w in zip(cols, widths):
-            tk.Label(hdr, text=col, font=self.theme.fonts.body_bold, width=w, anchor='w',
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=3, pady=6)
+        for idx, (col, width_px) in enumerate(zip(cols, col_widths)):
+            hdr.grid_columnconfigure(idx, minsize=width_px, weight=0)
+            tk.Label(hdr, text=col, font=self.theme.fonts.body_bold, anchor='w',
+                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).grid(
+                        row=0, column=idx, sticky='w', padx=6, pady=6
+                     )
 
         for loan in loans:
             row_bg = self.theme.palette.bg_surface
             row = tk.Frame(tbl, bg=row_bg)
             row.pack(fill=tk.X)
             tk.Frame(tbl, bg=self.theme.palette.border, height=1).pack(fill=tk.X)
+
+            for idx, width_px in enumerate(col_widths):
+                row.grid_columnconfigure(idx, minsize=width_px, weight=0)
 
             status_text = get_status_text(loan['status'], loan['expire_date'])
             status_color = get_status_color(loan['status'], loan['expire_date'])
@@ -103,15 +148,15 @@ class LoanListPage:
                 (format_date(loan['expire_date']), self.theme.palette.text_muted),
             ]
 
-            for (val, fg), w in zip(vals, widths[:-1]):
-                lbl = tk.Label(row, text=val, font=self.theme.fonts.body, width=w, anchor='w',
+            for col_idx, (val, fg) in enumerate(vals):
+                lbl = tk.Label(row, text=val, font=self.theme.fonts.body, anchor='w',
                                bg=row_bg, fg=fg, cursor='hand2')
-                lbl.pack(side=tk.LEFT, padx=3, pady=5)
+                lbl.grid(row=0, column=col_idx, sticky='w', padx=6, pady=5)
                 lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('loan_detail', lid))
 
             # Action buttons
             act_frame = tk.Frame(row, bg=row_bg)
-            act_frame.pack(side=tk.LEFT, padx=3)
+            act_frame.grid(row=0, column=7, sticky='w', padx=6)
             view_lbl = tk.Label(act_frame, text='👁 View', font=self.theme.fonts.small,
                                 bg=row_bg, fg=self.theme.palette.accent, cursor='hand2')
             view_lbl.pack(side=tk.LEFT, padx=(0, 6))
@@ -187,7 +232,9 @@ class LoanDetailPage:
         tk.Label(cc.inner, text='👤 Customer', font=self.theme.fonts.h3,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
         for lbl, val in [('Name', loan['customer_name']), ('NIC', loan['customer_nic']),
-                         ('Phone', loan['customer_phone']), ('Address', loan.get('customer_address', ''))]:
+                         ('Phone', loan['customer_phone']), ('Birthday', loan.get('customer_birthday', '')),
+                         ('Job', loan.get('customer_job', '')), ('Married Status', loan.get('customer_marital_status', '')),
+                         ('Language', loan.get('customer_language', '')), ('Address', loan.get('customer_address', ''))]:
             r = tk.Frame(cc.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=1)
             tk.Label(r, text=f'{lbl}:', font=self.theme.fonts.body_bold, width=10, anchor='w',
@@ -263,12 +310,13 @@ class LoanDetailPage:
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
 
         accrual_start = loan.get('renew_date') or loan['issue_date']
+        principal_base = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
         
         # Get max_interest_months from duration rate settings
         dur_rate = get_duration_rate(loan['duration_months'], loan.get('carat', 22))
         max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
         
-        payable = calculate_total_payable(loan['loan_amount'], loan['interest_rate'],
+        payable = calculate_total_payable(principal_base, loan['interest_rate'],
                           loan['duration_months'], loan['overdue_interest_rate'],
                           loan['expire_date'], accrual_start, max_interest_months)
 
@@ -278,7 +326,8 @@ class LoanDetailPage:
             ('Market Value', format_currency(loan['market_value'])),
             ('Assessed Value', format_currency(loan['assessed_value'])),
             ('Assessed %', f"{assessed_pct:.1f}%"),
-            ('Loan Amount', format_currency(loan['loan_amount'])),
+            ('Advance Amount', format_currency(loan.get('advance_amount') or loan['loan_amount'])),
+            ('Interest Principal', format_currency(principal_base)),
             ('Interest Rate', f"{loan['interest_rate']}% / month"),
             ('Duration', f"{loan['duration_months']} month(s)"),
             ('Issue Date', format_date(loan['issue_date'])),
@@ -292,6 +341,18 @@ class LoanDetailPage:
             ('Total Outstanding', format_currency(payable['total'])),
         ]
 
+        if loan.get('is_other_bank_ticket'):
+            fin_data[4:4] = [
+                ('Other Bank Paid', format_currency(loan.get('other_bank_paid_amount', 0))),
+                ('Service Charge Rate', f"{loan.get('service_charge_rate', 0)}%"),
+                ('Service Charge Amount', format_currency(loan.get('service_charge_amount', 0))),
+                ('Service Charge Mode', {
+                    'financed': 'Add To Loan',
+                    'balance': 'Deduct From Balance',
+                }.get(loan.get('service_charge_payment_mode'), 'Add To Loan')),
+                ('Customer Balance', format_currency(loan.get('customer_balance_amount', 0))),
+            ]
+
         if approval:
             status_map = {
                 'pending': ('⏳ Pending Approval', self.theme.palette.accent),
@@ -304,9 +365,12 @@ class LoanDetailPage:
         fin_data.extend([
             ('─' * 30, ''),
             ('Interest', format_currency(payable['interest'])),
-            ('Overdue Days', str(payable['overdue_days'])),
-            ('Overdue Interest', format_currency(payable['overdue_interest'])),
         ])
+        if payable['overdue_days'] > 0:
+            fin_data.extend([
+                ('Overdue Days', str(payable['overdue_days'])),
+                ('Overdue Interest', format_currency(payable['overdue_interest'])),
+            ])
         for lbl, val in fin_data:
             r = tk.Frame(fc.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=1)

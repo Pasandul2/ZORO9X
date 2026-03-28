@@ -569,7 +569,9 @@ class AdminSettingsPage:
             ('Phone:', 'company_phone'),
             ('Address:', 'company_address'),
             ('Ticket Prefix:', 'ticket_prefix'),
+            ('Other Bank Service Charge %:', 'other_bank_service_charge_pct'),
         ]
+        self._locked_company_keys = {'company_name', 'company_phone', 'company_address'}
 
         self.setting_vars = {}
         for label, key in settings:
@@ -579,12 +581,32 @@ class AdminSettingsPage:
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
             var = tk.StringVar(value=get_setting(key))
             self.setting_vars[key] = var
-            self.theme.make_entry(r, variable=var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.theme.make_entry(r, variable=var, readonly=(key in self._locked_company_keys)).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        tk.Label(
+            form,
+            text='Company Name, Phone, and Address are managed by your web subscription profile.',
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+            anchor='w',
+        ).pack(fill=tk.X, pady=(0, 6))
 
         self.theme.make_button(form, text='💾 Save Settings', command=self._save_company_settings,
                                kind='primary', width=18, pady=8).pack(pady=(8, 0))
 
     def _save_company_settings(self):
+        try:
+            sc = float(self.setting_vars.get('other_bank_service_charge_pct', tk.StringVar(value='0')).get().strip() or '0')
+            if sc < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning('Validation', 'Other Bank Service Charge % must be a valid non-negative number.')
+            return
+
+        locked_keys = getattr(self, '_locked_company_keys', set())
         for key, var in self.setting_vars.items():
+            if key in locked_keys:
+                continue
             set_setting(key, var.get().strip(), user_id=self.user['id'])
         messagebox.showinfo('Success', 'Company settings saved.')
