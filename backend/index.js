@@ -29,7 +29,10 @@ const invoiceRoutes = require('./routes/invoices');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const FRONTEND_URL = process.env.FRONTEND_URL || ['https://www.zoro9x.com', 'https://zoro9x.com'];
+const DEFAULT_FRONTEND_ORIGINS = ['https://www.zoro9x.com', 'https://zoro9x.com'];
+const FRONTEND_ORIGINS = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : DEFAULT_FRONTEND_ORIGINS;
 
 // ============================================
 // SESSION MIDDLEWARE
@@ -51,7 +54,14 @@ app.use(session({
 // ============================================
 // CORS Configuration - Allow requests from frontend
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: (origin, callback) => {
+    // Allow non-browser clients and same-origin server-to-server calls.
+    if (!origin || FRONTEND_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
   credentials: true,
   exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length']
 }));
@@ -189,7 +199,7 @@ async function startServer() {
       console.log(`🚀 ZORO9X Backend Server Started`);
       console.log(`${'='.repeat(50)}`);
       console.log(`📍 Server URL: http://localhost:${PORT}`);
-      console.log(`🌐 Frontend URL: ${FRONTEND_URL}`);
+      console.log(`🌐 Allowed Frontend Origins: ${FRONTEND_ORIGINS.join(', ')}`);
       console.log(`📦 Node Environment: ${process.env.NODE_ENV}`);
       console.log(`📊 Database: ${process.env.DB_NAME}`);
       console.log(`${'='.repeat(50)}\n`);
