@@ -41,6 +41,9 @@ interface Subscription {
   activation_count?: number;
   max_activations?: number;
   is_activated?: boolean;
+  days_remaining?: number | null;
+  renewal_recommended?: boolean;
+  renewal_message?: string | null;
 }
 
 interface SecurityInfo {
@@ -52,9 +55,33 @@ interface SecurityInfo {
   last_seen: string | null;
   days_offline: number;
   grace_period_days: number;
+  grace_period_minutes?: number;
+  offline_minutes?: number;
+  heartbeat_window_minutes?: number;
+  online_status?: boolean;
   is_activated: boolean;
   subscription_status?: string;
   payment_status?: string;
+}
+
+interface RenewalRequest {
+  id: number;
+  amount: number;
+  receipt_url?: string | null;
+  transaction_reference?: string | null;
+  notes?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  admin_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  payment_period_start?: string;
+  payment_period_end?: string;
+}
+
+interface BankDetails {
+  account_no: string;
+  account_name: string;
+  bank_name: string;
 }
 
 interface ActiveDevice {
@@ -94,6 +121,8 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
   const [usageStats, setUsageStats] = useState<any>(null);
   const [securityInfo, setSecurityInfo] = useState<SecurityInfo | null>(null);
+  const [renewalRequests, setRenewalRequests] = useState<RenewalRequest[]>([]);
+  const [bankDetails, setBankDetails] = useState<BankDetails | null>(null);
   const [activeDevices, setActiveDevices] = useState<ActiveDevice[]>([]);
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null);
   const [latestBusinessRequest, setLatestBusinessRequest] = useState<BusinessRequestStatus | null>(null);
@@ -114,6 +143,13 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [copiedKey, setCopiedKey] = useState<string>('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
+  const [isLoadingRenewals, setIsLoadingRenewals] = useState(false);
+  const [renewalForm, setRenewalForm] = useState({
+    transaction_reference: '',
+    notes: '',
+    receipt: null as File | null,
+  });
   const [isDownloadingInstaller, setIsDownloadingInstaller] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadMessage, setDownloadMessage] = useState('Preparing installer package...');
@@ -207,9 +243,17 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        return;
+      }
+
       if (response.ok) {
         const data = await response.json();
         setSubscriptions(data.subscriptions);
+        setBankDetails(data.bank_details || null);
         if (data.subscriptions.length > 0) {
           setSelectedSubscription(data.subscriptions[0]);
           fetchUsageStats(data.subscriptions[0].id);
@@ -248,14 +292,9 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
 
       if (secResponse.ok) {
         const secData = await secResponse.json();
-        
-        // Calculate days offline
-        let daysOffline = 0;
-        if (secData.security.last_seen) {
-          const lastSeen = new Date(secData.security.last_seen);
-          const now = new Date();
-          daysOffline = Math.floor((now.getTime() - lastSeen.getTime()) / (1000 * 60 * 60 * 24));
-        }
+        const offlineMinutes = Number(secData.security.offline_minutes || 0);
+        const graceMinutes = Number(secData.security.grace_period_minutes || 3);
+        const daysOffline = Math.floor(offlineMinutes / (60 * 24));
         
         setSecurityInfo({
           device_count: secData.security.device_count || 0,
@@ -265,7 +304,11 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
           downloads_remaining: (secData.security.max_activations || 3) - (secData.security.activation_count || 0),
           last_seen: secData.security.last_seen || null,
           days_offline: daysOffline,
-          grace_period_days: 7,
+          grace_period_days: Number(secData.security.grace_period_days || Math.max(1, Math.ceil(graceMinutes / (60 * 24)))),
+          grace_period_minutes: graceMinutes,
+          offline_minutes: offlineMinutes,
+          heartbeat_window_minutes: Number(secData.security.heartbeat_window_minutes || 3),
+          online_status: !!secData.security.online_status,
           is_activated: secData.security.is_activated || false,
           subscription_status: secData.security.subscription_status,
           payment_status: secData.security.payment_status
@@ -283,6 +326,10 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         last_seen: null,
         days_offline: 0,
         grace_period_days: 7,
+        grace_period_minutes: 3,
+        offline_minutes: 0,
+        heartbeat_window_minutes: 3,
+        online_status: false,
         is_activated: false,
         subscription_status: 'unknown',
         payment_status: 'unknown'
@@ -308,6 +355,78 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
     }
 
     await fetchBusinessInfo(subscriptionId);
+    await fetchRenewalRequests(subscriptionId);
+  };
+
+  const fetchRenewalRequests = async (subscriptionId: number) => {
+    const token = localStorage.getItem('token');
+    setIsLoadingRenewals(true);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/renew-requests`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) {
+        setRenewalRequests([]);
+        return;
+      }
+
+      const data = await response.json();
+      setRenewalRequests(Array.isArray(data.requests) ? data.requests : []);
+    } catch (error) {
+      console.error('Error fetching renewal requests:', error);
+      setRenewalRequests([]);
+    } finally {
+      setIsLoadingRenewals(false);
+    }
+  };
+
+  const submitRenewalRequest = async () => {
+    if (!selectedSubscription) {
+      return;
+    }
+
+    if (!renewalForm.receipt) {
+      alert('Please upload the bank transfer receipt before submitting.');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    setIsSubmittingRenewal(true);
+
+    try {
+      const payload = new FormData();
+      payload.append('receipt', renewalForm.receipt);
+      payload.append('transaction_reference', renewalForm.transaction_reference.trim());
+      payload.append('notes', renewalForm.notes.trim());
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${selectedSubscription.id}/renew-request`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: payload,
+        }
+      );
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        alert(data?.message || 'Failed to submit renewal request');
+        return;
+      }
+
+      alert(data?.message || 'Renewal request submitted successfully');
+      setRenewalForm({ transaction_reference: '', notes: '', receipt: null });
+      await fetchRenewalRequests(selectedSubscription.id);
+      await fetchSubscriptions();
+    } catch (error) {
+      console.error('Error submitting renewal request:', error);
+      alert('Failed to submit renewal request');
+    } finally {
+      setIsSubmittingRenewal(false);
+    }
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -794,6 +913,134 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                     </p>
                   </div>
                 </div>
+
+                {selectedSubscription.renewal_recommended && (
+                  <div className={`mt-5 rounded-lg border p-4 ${
+                    darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-800'
+                  }`}>
+                    <p className="font-semibold">Renewal Recommended</p>
+                    <p className="text-sm mt-1">{selectedSubscription.renewal_message || 'Please renew your subscription to avoid service interruption.'}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Renewal Requests */}
+              <div className={`rounded-2xl p-6 border ${
+                darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+              }`}>
+                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                  <Calendar className="w-6 h-6 text-purple-500" />
+                  Renewal & Payment Verification
+                </h2>
+
+                <div className={`rounded-lg p-4 border mb-5 ${
+                  darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'
+                }`}>
+                  <p className="text-sm font-semibold mb-2">Bank Transfer Details</p>
+                  <div className="grid md:grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-400">Bank</p>
+                      <p className="font-semibold">{bankDetails?.bank_name || 'HNB'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Account Number</p>
+                      <p className="font-semibold">{bankDetails?.account_no || '2002342027'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400">Account Name</p>
+                      <p className="font-semibold">{bankDetails?.account_name || 'Pamith Pasandul'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="text-sm text-gray-400 mb-2 block">Transaction Reference (Optional)</label>
+                    <input
+                      type="text"
+                      value={renewalForm.transaction_reference}
+                      onChange={(e) => setRenewalForm((prev) => ({ ...prev, transaction_reference: e.target.value }))}
+                      placeholder="Bank reference number"
+                      className={`w-full px-4 py-3 rounded-lg ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-gray-100 border border-gray-300'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-400 mb-2 block">Receipt Upload (Required)</label>
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      onChange={(e) => setRenewalForm((prev) => ({ ...prev, receipt: e.target.files?.[0] || null }))}
+                      className={`w-full px-4 py-3 rounded-lg ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-gray-100 border border-gray-300'}`}
+                    />
+                    {renewalForm.receipt && (
+                      <p className="text-xs mt-1 text-green-400">Selected: {renewalForm.receipt.name}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <label className="text-sm text-gray-400 mb-2 block">Note (Optional)</label>
+                  <textarea
+                    value={renewalForm.notes}
+                    onChange={(e) => setRenewalForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    placeholder="Any note for admin review"
+                    rows={3}
+                    className={`w-full px-4 py-3 rounded-lg ${darkMode ? 'bg-gray-800 border border-gray-700' : 'bg-gray-100 border border-gray-300'}`}
+                  />
+                </div>
+
+                <button
+                  onClick={submitRenewalRequest}
+                  disabled={isSubmittingRenewal}
+                  className="bg-purple-600 hover:bg-purple-500 disabled:opacity-70 text-white px-5 py-3 rounded-lg font-semibold"
+                >
+                  {isSubmittingRenewal ? 'Submitting Renewal...' : 'Submit Renewal Request'}
+                </button>
+
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold mb-3">Recent Renewal Requests</h3>
+                  {isLoadingRenewals ? (
+                    <p className="text-sm text-gray-400">Loading renewal requests...</p>
+                  ) : renewalRequests.length === 0 ? (
+                    <p className="text-sm text-gray-400">No renewal requests yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {renewalRequests.map((request) => (
+                        <div
+                          key={request.id}
+                          className={`rounded-lg border p-3 ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold">LKR {Number(request.amount || 0).toFixed(2)}</p>
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
+                              request.status === 'approved'
+                                ? 'bg-green-500/20 text-green-400'
+                                : request.status === 'rejected'
+                                ? 'bg-red-500/20 text-red-400'
+                                : 'bg-yellow-500/20 text-yellow-400'
+                            }`}>
+                              {request.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Submitted: {new Date(request.created_at).toLocaleString()}
+                          </p>
+                          {request.transaction_reference && (
+                            <p className="text-xs mt-1">Reference: {request.transaction_reference}</p>
+                          )}
+                          {request.payment_period_start && request.payment_period_end && (
+                            <p className="text-xs mt-1 text-blue-300">
+                              Coverage: {new Date(request.payment_period_start).toLocaleDateString()} - {new Date(request.payment_period_end).toLocaleDateString()}
+                            </p>
+                          )}
+                          {request.admin_note && (
+                            <p className="text-xs mt-1 text-cyan-300">Admin note: {request.admin_note}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Business Information */}
@@ -1120,7 +1367,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                     {/* Last Seen */}
                     <div className="pt-3 border-t border-gray-700">
                       <div className="flex items-center gap-2 mb-2">
-                        {securityInfo.last_seen ? (
+                        {securityInfo.online_status ? (
                           <>
                             <Wifi className="w-4 h-4 text-green-400" />
                             <span className="text-xs font-semibold text-green-400">Online</span>
@@ -1128,7 +1375,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                         ) : (
                           <>
                             <WifiOff className="w-4 h-4 text-gray-400" />
-                            <span className="text-xs font-semibold text-gray-400">Never Connected</span>
+                            <span className="text-xs font-semibold text-gray-400">Offline</span>
                           </>
                         )}
                       </div>
@@ -1137,6 +1384,9 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                           Last seen: {new Date(securityInfo.last_seen).toLocaleString()}
                         </p>
                       )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        Offline: {securityInfo.offline_minutes || 0} minute(s) / Grace: {securityInfo.grace_period_minutes || 3} minute(s)
+                      </p>
                     </div>
 
                     {/* Warning Messages */}
@@ -1151,7 +1401,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                       </div>
                     )}
 
-                    {securityInfo.days_offline >= securityInfo.grace_period_days && (
+                    {(securityInfo.offline_minutes || 0) >= (securityInfo.grace_period_minutes || 3) && (
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
                         <div className="flex gap-2">
                           <Clock className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />

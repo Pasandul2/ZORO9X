@@ -15,6 +15,13 @@ APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else 
 DB_FILE = os.path.join(APP_DIR, 'gold_loan_basic_database.db')
 
 
+def set_db_file(db_path):
+    """Set active database file for all module-level operations."""
+    global DB_FILE
+    if db_path:
+        DB_FILE = db_path
+
+
 def get_connection(db_path=None):
     conn = sqlite3.connect(db_path or DB_FILE)
     conn.row_factory = sqlite3.Row
@@ -27,6 +34,9 @@ def hash_password(password):
 
 
 def init_database(db_path=None):
+    if db_path:
+        set_db_file(db_path)
+
     conn = get_connection(db_path)
     c = conn.cursor()
 

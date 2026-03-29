@@ -22,7 +22,7 @@ from theme import GOLD_THEME
 APP_EXE_NAME = 'gold_loan_app.exe'
 APP_SCRIPT_NAME = 'gold_loan_app.py'
 CONFIG_FILE_NAME = 'gold_loan_config.json'
-API_URL = 'http://localhost:5001'
+API_URL = 'https://www.zoro9x.com'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
 CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 

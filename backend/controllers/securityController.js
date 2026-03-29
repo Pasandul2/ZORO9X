@@ -6,6 +6,44 @@
 const { pool } = require('../config/database');
 const crypto = require('crypto');
 
+const DEFAULT_OFFLINE_GRACE_MINUTES = Math.max(
+  1,
+  parseInt(process.env.OFFLINE_GRACE_MINUTES || '3', 10)
+);
+const DEFAULT_OFFLINE_GRACE_DAYS = Math.max(
+  1,
+  Math.ceil(DEFAULT_OFFLINE_GRACE_MINUTES / (60 * 24))
+);
+const LICENSE_TOKEN_TTL_MINUTES = Math.max(
+  DEFAULT_OFFLINE_GRACE_MINUTES,
+  parseInt(process.env.OFFLINE_TOKEN_TTL_MINUTES || String(7 * 24 * 60), 10)
+);
+let deviceApprovalColumnsReady = false;
+
+async function ensureDeviceApprovalColumns() {
+  if (deviceApprovalColumnsReady) {
+    return;
+  }
+
+  const alterStatements = [
+    'ALTER TABLE device_activations ADD COLUMN approved_by INT NULL',
+    'ALTER TABLE device_activations ADD COLUMN approved_at TIMESTAMP NULL',
+    'ALTER TABLE device_activations ADD COLUMN rejection_reason TEXT NULL',
+  ];
+
+  for (const sql of alterStatements) {
+    try {
+      await pool.execute(sql);
+    } catch (error) {
+      if (error.code !== 'ER_DUP_FIELDNAME') {
+        throw error;
+      }
+    }
+  }
+
+  deviceApprovalColumnsReady = true;
+}
+
 /**
  * Helper: write an entry to audit_logs (fire-and-forget, never throws)
  */
@@ -37,7 +75,7 @@ function generateLicenseToken(subscriptionId, deviceFingerprint) {
     sub_id: subscriptionId,
     device: deviceFingerprint,
     issued: Date.now(),
-    expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+    expires: Date.now() + (LICENSE_TOKEN_TTL_MINUTES * 60 * 1000)
   };
   
   const secret = process.env.OFFLINE_TOKEN_SECRET || process.env.JWT_SECRET || 'your-secret-key';
@@ -99,15 +137,16 @@ exports.activateDevice = async (req, res) => {
         await pool.execute(
           `INSERT INTO license_tokens 
            (subscription_id, device_fingerprint, token, expires_at) 
-           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
-          [subscription.id, device_fingerprint, token]
+           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+          [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
         );
         
         return res.json({
           success: true,
           message: 'Device already activated',
           token,
-          grace_period_days: parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10),
+          grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
+          grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
           subscription: {
             id: subscription.id,
             company_name: subscription.company_name,
@@ -193,8 +232,8 @@ exports.activateDevice = async (req, res) => {
       await pool.execute(
         `INSERT INTO license_tokens 
          (subscription_id, device_fingerprint, token, expires_at) 
-         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
-        [subscription.id, device_fingerprint, token]
+         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
       );
 
       await logAuditEvent({
@@ -210,7 +249,8 @@ exports.activateDevice = async (req, res) => {
         success: true,
         message: 'Device activated successfully',
         token,
-        grace_period_days: parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10),
+        grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
+        grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
         subscription: {
           id: subscription.id,
           company_name: subscription.company_name,
@@ -305,7 +345,11 @@ exports.validateApiKey = async (req, res) => {
     );
 
     const paymentStatus = recentPayments.length > 0 ? recentPayments[0].status : 'completed';
-    if (recentPayments.length > 0 && paymentStatus !== 'completed') {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const subscriptionEndIso = subscription.end_date ? new Date(subscription.end_date).toISOString().slice(0, 10) : null;
+    const isCurrentActiveWindow = subscription.status === 'active' && (!subscriptionEndIso || subscriptionEndIso >= todayIso);
+
+    if (recentPayments.length > 0 && paymentStatus !== 'completed' && !isCurrentActiveWindow) {
       return res.status(402).json({
         success: false,
         valid: false,
@@ -567,8 +611,8 @@ exports.validateApiKey = async (req, res) => {
       await pool.execute(
         `INSERT INTO license_tokens 
          (subscription_id, device_fingerprint, token, expires_at) 
-         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))`,
-        [subscription.id, device_fingerprint, token]
+         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
       );
     }
 
@@ -583,13 +627,12 @@ exports.validateApiKey = async (req, res) => {
       });
     }
 
-    const gracePeriodDays = parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10);
-
     res.json({
       success: true,
       valid: true,
       token,
-      grace_period_days: gracePeriodDays,
+      grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
+      grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
       subscription_status: subscription.status,
       payment_status: paymentStatus,
       subscription: {
@@ -611,6 +654,67 @@ exports.validateApiKey = async (req, res) => {
       success: false,
       message: 'Failed to validate API key'
     });
+  }
+};
+
+/**
+ * Heartbeat endpoint to keep device online status fresh while app is running.
+ */
+exports.heartbeat = async (req, res) => {
+  try {
+    const { api_key, device_fingerprint } = req.body;
+    const ip = req.ip;
+
+    if (!api_key || !device_fingerprint) {
+      return res.status(400).json({
+        success: false,
+        message: 'api_key and device_fingerprint are required'
+      });
+    }
+
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.id
+       FROM client_subscriptions cs
+       WHERE cs.api_key = ? AND cs.status = 'active'`,
+      [api_key]
+    );
+
+    if (subscriptions.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid or inactive API key' });
+    }
+
+    const subscriptionId = subscriptions[0].id;
+
+    const [devices] = await pool.execute(
+      `SELECT id, status
+       FROM device_activations
+       WHERE subscription_id = ? AND device_fingerprint = ?
+       LIMIT 1`,
+      [subscriptionId, device_fingerprint]
+    );
+
+    if (devices.length === 0) {
+      return res.status(403).json({ success: false, message: 'Device not activated' });
+    }
+
+    if (devices[0].status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: `Device status is ${devices[0].status}`
+      });
+    }
+
+    await pool.execute(
+      `UPDATE device_activations
+       SET last_seen = NOW(), ip_address = ?
+       WHERE id = ?`,
+      [ip, devices[0].id]
+    );
+
+    return res.json({ success: true, message: 'Heartbeat updated' });
+  } catch (error) {
+    console.error('Error updating heartbeat:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update heartbeat' });
   }
 };
 
@@ -726,15 +830,16 @@ exports.getPendingDevices = async (req, res) => {
  */
 exports.revokeDevice = async (req, res) => {
   try {
+    await ensureDeviceApprovalColumns();
     const { id } = req.params;
     const { reason } = req.body;
     const adminId = req.user.id;
 
     await pool.execute(
       `UPDATE device_activations
-       SET status = 'revoked', approved_by = ?, approved_at = NOW(), rejection_reason = ?
+       SET status = 'revoked', approved_at = NOW(), rejection_reason = ?
        WHERE id = ?`,
-      [adminId, reason || 'Revoked by administrator', id]
+      [reason || 'Revoked by administrator', id]
     );
 
     // Recompute active device count for subscription
@@ -781,15 +886,16 @@ exports.revokeDevice = async (req, res) => {
  */
 exports.approveDevice = async (req, res) => {
   try {
+    await ensureDeviceApprovalColumns();
     const { id } = req.params;
     const adminId = req.user.id;
     
     // Update device status
     await pool.execute(
       `UPDATE device_activations 
-       SET status = 'active', approved_by = ?, approved_at = NOW() 
+       SET status = 'active', approved_at = NOW() 
        WHERE id = ?`,
-      [adminId, id]
+      [id]
     );
     
     // Update device count
@@ -836,15 +942,16 @@ exports.approveDevice = async (req, res) => {
  */
 exports.rejectDevice = async (req, res) => {
   try {
+    await ensureDeviceApprovalColumns();
     const { id } = req.params;
     const { reason } = req.body;
     const adminId = req.user.id;
     
     await pool.execute(
       `UPDATE device_activations 
-       SET status = 'rejected', approved_by = ?, approved_at = NOW(), rejection_reason = ? 
+       SET status = 'rejected', approved_at = NOW(), rejection_reason = ? 
        WHERE id = ?`,
-      [adminId, reason || 'Rejected by administrator', id]
+      [reason || 'Rejected by administrator', id]
     );
     
     const [device] = await pool.execute(

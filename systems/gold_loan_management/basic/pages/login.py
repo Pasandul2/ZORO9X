@@ -2,6 +2,7 @@
 
 import tkinter as tk
 from tkinter import messagebox
+import traceback
 
 
 class LoginPage:
@@ -131,19 +132,26 @@ class LoginPage:
         self._do_login()
 
     def _do_login(self):
-        from database import authenticate_user
-        username = self.username_var.get().strip()
-        password = self.password_var.get().strip()
+        try:
+            from database import authenticate_user
+            username = self.username_var.get().strip()
+            password = self.password_var.get().strip()
 
-        if not username or not password:
-            messagebox.showwarning('Login', 'Please enter username and password.')
-            return
+            if not username or not password:
+                messagebox.showwarning('Login', 'Please enter username and password.')
+                return
 
-        user = authenticate_user(username, password)
-        if user:
-            self.on_login_success(user)
-        else:
-            messagebox.showerror('Login Failed', 'Invalid username or password.')
+            user = authenticate_user(username, password)
+            if user:
+                self.on_login_success(user)
+            else:
+                messagebox.showerror('Login Failed', 'Invalid username or password.')
+        except Exception as error:
+            traceback.print_exc()
+            messagebox.showerror(
+                'Login Error',
+                f'An unexpected error occurred while signing in.\n\n{error}'
+            )
 
     def show(self):
         self.frame.pack(fill=tk.BOTH, expand=True)

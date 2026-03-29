@@ -15,6 +15,7 @@ const dbSync = require('../utils/databaseSync');
 const { generateInstaller } = require('../templates/installerTemplate');
 
 let businessInfoSchemaReady = false;
+let renewalSchemaReady = false;
 
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
@@ -170,10 +171,18 @@ async function ensureBusinessInfoSchema() {
     return;
   }
 
-  await pool.execute(`
-    ALTER TABLE clients
-    ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500) NULL
-  `);
+  // Add logo_url column if it doesn't exist (MySQL 5.7 compatible)
+  try {
+    await pool.execute(`
+      ALTER TABLE clients
+      ADD COLUMN logo_url VARCHAR(500) NULL
+    `);
+  } catch (err) {
+    // Column likely already exists, continue
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add logo_url column:', err.message);
+    }
+  }
 
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS business_info_change_requests (
@@ -199,6 +208,87 @@ async function ensureBusinessInfoSchema() {
   businessInfoSchemaReady = true;
 }
 
+async function ensureRenewalSchema() {
+  if (renewalSchemaReady) {
+    return;
+  }
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS subscription_renewal_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      subscription_id INT NOT NULL,
+      client_id INT NOT NULL,
+      user_id INT NOT NULL,
+      amount DECIMAL(10, 2) NOT NULL,
+      receipt_url VARCHAR(500) NULL,
+      transaction_reference VARCHAR(255) NULL,
+      notes TEXT NULL,
+      status ENUM('pending','approved','rejected') DEFAULT 'pending',
+      payment_id INT NULL,
+      admin_note TEXT NULL,
+      reviewed_by INT NULL,
+      reviewed_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+      FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+      FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_renew_subscription (subscription_id),
+      INDEX idx_renew_status (status),
+      INDEX idx_renew_created_at (created_at)
+    )
+  `);
+
+  renewalSchemaReady = true;
+}
+
+function addBillingCycle(baseDateValue, billingCycle) {
+  const baseDate = new Date(baseDateValue);
+  if (Number.isNaN(baseDate.getTime())) {
+    const fallback = new Date();
+    return fallback.toISOString().slice(0, 10);
+  }
+
+  const normalized = String(billingCycle || '').toLowerCase();
+  if (normalized === 'yearly') {
+    baseDate.setFullYear(baseDate.getFullYear() + 1);
+  } else if (normalized === 'quarterly') {
+    baseDate.setMonth(baseDate.getMonth() + 3);
+  } else {
+    baseDate.setMonth(baseDate.getMonth() + 1);
+  }
+
+  return baseDate.toISOString().slice(0, 10);
+}
+
+function addDays(baseDateValue, days) {
+  const date = new Date(baseDateValue);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getRenewalCoverageWindow(currentEndDateValue, billingCycle, referenceDateValue = new Date()) {
+  const todayIso = new Date(referenceDateValue).toISOString().slice(0, 10);
+  const currentEndIso = currentEndDateValue ? new Date(currentEndDateValue).toISOString().slice(0, 10) : null;
+
+  if (currentEndIso && currentEndIso >= todayIso) {
+    return {
+      payment_period_start: addDays(currentEndIso, 1),
+      payment_period_end: addBillingCycle(currentEndIso, billingCycle),
+    };
+  }
+
+  return {
+    payment_period_start: todayIso,
+    payment_period_end: addBillingCycle(todayIso, billingCycle),
+  };
+}
+
 function parseJsonObject(rawValue, fallback = {}) {
   if (!rawValue || typeof rawValue !== 'string') {
     return fallback;
@@ -219,6 +309,7 @@ function boolFromValue(value) {
 // Export security controller methods
 exports.activateDevice = securityController.activateDevice;
 exports.validateApiKey = securityController.validateApiKey;
+exports.heartbeat = securityController.heartbeat;
 exports.getSecurityAlerts = securityController.getSecurityAlerts;
 exports.getPendingDevices = securityController.getPendingDevices;
 exports.approveDevice = securityController.approveDevice;
@@ -692,6 +783,7 @@ exports.purchaseSubscription = async (req, res) => {
  */
 exports.getMySubscriptions = async (req, res) => {
   try {
+    await ensureRenewalSchema();
     const userId = req.user.id;
     
     const [subscriptions] = await pool.execute(
@@ -719,9 +811,42 @@ exports.getMySubscriptions = async (req, res) => {
       [userId]
     );
     
+    const now = new Date();
+    const enriched = subscriptions.map((subscription) => {
+      const endDate = subscription.end_date ? new Date(subscription.end_date) : null;
+      const daysRemaining = endDate
+        ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+
+      const needsRenewal =
+        subscription.status === 'expired' ||
+        subscription.status === 'cancelled' ||
+        (typeof daysRemaining === 'number' && daysRemaining <= 7);
+
+      return {
+        ...subscription,
+        days_remaining: daysRemaining,
+        renewal_recommended: needsRenewal,
+        renewal_message: needsRenewal
+          ? (
+              subscription.status === 'expired'
+                ? 'Subscription expired. Renew now to restore full access.'
+                : subscription.status === 'cancelled'
+                  ? 'Subscription is inactive. Renew now to reactivate.'
+                  : `Subscription ends in ${Math.max(daysRemaining || 0, 0)} day(s). Renew soon.`
+            )
+          : null,
+      };
+    });
+
     res.json({
       success: true,
-      subscriptions
+      subscriptions: enriched,
+      bank_details: {
+        account_no: '2002342027',
+        account_name: 'Pamith Pasandul',
+        bank_name: 'HNB',
+      },
     });
   } catch (error) {
     console.error('Error fetching subscriptions:', error);
@@ -1236,6 +1361,29 @@ exports.getSecurityInfo = async (req, res) => {
     );
 
     const paymentStatus = recentPayments.length > 0 ? recentPayments[0].status : 'completed';
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const subscriptionEndIso = subscription.end_date ? new Date(subscription.end_date).toISOString().slice(0, 10) : null;
+    const isCurrentlyActive = subscription.status === 'active' && (!subscriptionEndIso || subscriptionEndIso >= todayIso);
+    const effectivePaymentStatus = isCurrentlyActive && paymentStatus !== 'completed' ? 'completed' : paymentStatus;
+    const heartbeatWindowMinutes = Math.max(
+      1,
+      parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || process.env.OFFLINE_GRACE_MINUTES || '3', 10)
+    );
+    const gracePeriodMinutes = Math.max(
+      1,
+      parseInt(process.env.OFFLINE_GRACE_MINUTES || '3', 10)
+    );
+    const gracePeriodDays = Math.max(1, Math.ceil(gracePeriodMinutes / (60 * 24)));
+
+    let onlineStatus = false;
+    let offlineMinutes = null;
+    if (deviceStats[0]?.last_seen) {
+      const lastSeenTime = new Date(deviceStats[0].last_seen).getTime();
+      const nowTime = Date.now();
+      const diffMinutes = Math.floor((nowTime - lastSeenTime) / (1000 * 60));
+      offlineMinutes = Math.max(diffMinutes, 0);
+      onlineStatus = diffMinutes <= heartbeatWindowMinutes;
+    }
 
     res.json({
       success: true,
@@ -1246,8 +1394,13 @@ exports.getSecurityInfo = async (req, res) => {
         max_activations: subscription.max_activations || 3,
         is_activated: subscription.is_activated || false,
         last_seen: deviceStats[0]?.last_seen || null,
+        online_status: onlineStatus,
+        offline_minutes: offlineMinutes,
+        heartbeat_window_minutes: heartbeatWindowMinutes,
+        grace_period_minutes: gracePeriodMinutes,
+        grace_period_days: gracePeriodDays,
         subscription_status: subscription.status,
-        payment_status: paymentStatus,
+        payment_status: effectivePaymentStatus,
       }
     });
   } catch (error) {
@@ -1310,6 +1463,375 @@ exports.cancelSubscription = async (req, res) => {
       success: false,
       message: 'Failed to cancel subscription'
     });
+  }
+};
+
+/**
+ * Submit renewal request with bank transfer receipt (Client)
+ */
+exports.submitRenewalRequest = async (req, res) => {
+  try {
+    await ensureRenewalSchema();
+
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+    const { transaction_reference, notes } = req.body;
+
+    const [subs] = await pool.execute(
+      `SELECT cs.id, cs.client_id, cs.status, cs.total_amount, cs.end_date, sp.price, sp.billing_cycle
+       FROM client_subscriptions cs
+       JOIN clients c ON c.id = cs.client_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE cs.id = ? AND c.user_id = ?
+       LIMIT 1`,
+      [subscriptionId, userId]
+    );
+
+    if (subs.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const subscription = subs[0];
+    const [pending] = await pool.execute(
+      `SELECT id FROM subscription_renewal_requests
+       WHERE subscription_id = ? AND status = 'pending'
+       LIMIT 1`,
+      [subscriptionId]
+    );
+
+    if (pending.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'A renewal request is already pending review for this subscription.'
+      });
+    }
+
+    const amount = Number(subscription.price || subscription.total_amount || 0);
+    const receiptPath = req.file ? `/uploads/receipts/${req.file.filename}` : null;
+
+    const [requestResult] = await pool.execute(
+      `INSERT INTO subscription_renewal_requests
+       (subscription_id, client_id, user_id, amount, receipt_url, transaction_reference, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [
+        subscriptionId,
+        subscription.client_id,
+        userId,
+        amount,
+        receiptPath,
+        transaction_reference || null,
+        notes || null,
+      ]
+    );
+
+    const [paymentResult] = await pool.execute(
+      `INSERT INTO payments (client_id, subscription_id, amount, payment_method, transaction_id, status, notes)
+       VALUES (?, ?, ?, 'bank_transfer', ?, 'pending', ?)`,
+      [
+        subscription.client_id,
+        subscriptionId,
+        amount,
+        transaction_reference || `renew-${subscriptionId}-${Date.now()}`,
+        `Renewal request #${requestResult.insertId}`,
+      ]
+    );
+
+    await pool.execute(
+      `UPDATE subscription_renewal_requests
+       SET payment_id = ?
+       WHERE id = ?`,
+      [paymentResult.insertId, requestResult.insertId]
+    );
+
+    await pool.execute(
+      `INSERT INTO system_notifications (client_id, subscription_id, title, message, type)
+       VALUES (?, ?, ?, ?, 'info')`,
+      [
+        subscription.client_id,
+        subscriptionId,
+        'Renewal Request Submitted',
+        'Your bank transfer renewal request was submitted and is pending admin review.',
+      ]
+    );
+
+    return res.json({
+      success: true,
+      message: 'Renewal request submitted successfully',
+      request_id: requestResult.insertId,
+    });
+  } catch (error) {
+    console.error('Error submitting renewal request:', error);
+    return res.status(500).json({ success: false, message: 'Failed to submit renewal request' });
+  }
+};
+
+/**
+ * Get renewal requests for a subscription (Client)
+ */
+exports.getSubscriptionRenewalRequests = async (req, res) => {
+  try {
+    await ensureRenewalSchema();
+    const { subscriptionId } = req.params;
+    const userId = req.user.id;
+
+    const [owned] = await pool.execute(
+      `SELECT cs.id
+       FROM client_subscriptions cs
+       JOIN clients c ON c.id = cs.client_id
+       WHERE cs.id = ? AND c.user_id = ?
+       LIMIT 1`,
+      [subscriptionId, userId]
+    );
+
+    if (owned.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const [requests] = await pool.execute(
+      `SELECT rr.id, rr.amount, rr.receipt_url, rr.transaction_reference, rr.notes, rr.status, rr.admin_note, rr.created_at, rr.reviewed_at,
+              cs.end_date, sp.billing_cycle
+       FROM subscription_renewal_requests rr
+       JOIN client_subscriptions cs ON cs.id = rr.subscription_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE rr.subscription_id = ?
+       ORDER BY rr.created_at DESC
+       LIMIT 20`,
+      [subscriptionId]
+    );
+
+    const withPeriods = requests.map((request) => ({
+      ...request,
+      ...getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at),
+    }));
+
+    return res.json({ success: true, requests: withPeriods });
+  } catch (error) {
+    console.error('Error fetching renewal requests:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch renewal requests' });
+  }
+};
+
+/**
+ * Admin: list renewal requests
+ */
+exports.getRenewalRequestsAdmin = async (req, res) => {
+  try {
+    await ensureRenewalSchema();
+    const status = (req.query.status || 'all').toString();
+
+    let whereClause = '';
+    const params = [];
+    if (status !== 'all') {
+      whereClause = 'WHERE rr.status = ?';
+      params.push(status);
+    }
+
+    const [requests] = await pool.execute(
+      `SELECT rr.*, c.company_name, u.email as user_email, s.name as system_name, cs.end_date, sp.billing_cycle
+       FROM subscription_renewal_requests rr
+       JOIN clients c ON c.id = rr.client_id
+       JOIN users u ON u.id = rr.user_id
+       JOIN client_subscriptions cs ON cs.id = rr.subscription_id
+       JOIN systems s ON s.id = cs.system_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       ${whereClause}
+       ORDER BY rr.created_at DESC`,
+      params
+    );
+
+    const withPeriods = requests.map((request) => ({
+      ...request,
+      ...getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at),
+    }));
+
+    return res.json({ success: true, requests: withPeriods });
+  } catch (error) {
+    console.error('Error fetching admin renewal requests:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch renewal requests' });
+  }
+};
+
+/**
+ * Admin: review renewal request (approve/reject)
+ */
+exports.reviewRenewalRequestAdmin = async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await ensureRenewalSchema();
+    const { requestId } = req.params;
+    const adminId = req.user.id;
+    const action = String(req.body.action || '').toLowerCase();
+    const adminNote = req.body.admin_note || null;
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
+    }
+
+    await connection.beginTransaction();
+
+    const [rows] = await connection.execute(
+      `SELECT rr.*, cs.end_date, cs.client_id, cs.id as subscription_id, cs.status as subscription_status,
+              sp.billing_cycle
+       FROM subscription_renewal_requests rr
+       JOIN client_subscriptions cs ON cs.id = rr.subscription_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE rr.id = ?
+       LIMIT 1 FOR UPDATE`,
+      [requestId]
+    );
+
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Renewal request not found' });
+    }
+
+    const reqRow = rows[0];
+    if (reqRow.status !== 'pending') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: 'Request already reviewed' });
+    }
+
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    await connection.execute(
+      `UPDATE subscription_renewal_requests
+       SET status = ?, admin_note = ?, reviewed_at = NOW()
+       WHERE id = ?`,
+      [newStatus, adminNote, requestId]
+    );
+
+    if (reqRow.payment_id) {
+      await connection.execute(
+        `UPDATE payments
+         SET status = ?, notes = CONCAT(COALESCE(notes, ''), ' | reviewed:', ?)
+         WHERE id = ?`,
+        [action === 'approve' ? 'completed' : 'failed', action, reqRow.payment_id]
+      );
+    }
+
+    if (action === 'approve') {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const baseDate = reqRow.end_date && reqRow.end_date > todayIso ? reqRow.end_date : todayIso;
+      const newEndDate = addBillingCycle(baseDate, reqRow.billing_cycle);
+      const coverage = getRenewalCoverageWindow(reqRow.end_date, reqRow.billing_cycle, new Date());
+
+      await connection.execute(
+        `UPDATE client_subscriptions
+         SET status = 'active',
+             start_date = CASE WHEN start_date IS NULL THEN ? ELSE start_date END,
+             end_date = ?,
+             next_billing_date = ?,
+             last_payment_date = NOW(),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [todayIso, newEndDate, newEndDate, reqRow.subscription_id]
+      );
+
+      await connection.execute(
+        `INSERT INTO system_notifications (client_id, subscription_id, title, message, type)
+         VALUES (?, ?, ?, ?, 'success')`,
+        [
+          reqRow.client_id,
+          reqRow.subscription_id,
+          'Renewal Approved',
+          `Your renewal was approved. Coverage: ${coverage.payment_period_start} to ${coverage.payment_period_end}. Subscription is active until ${newEndDate}.`,
+        ]
+      );
+    } else {
+      await connection.execute(
+        `INSERT INTO system_notifications (client_id, subscription_id, title, message, type)
+         VALUES (?, ?, ?, ?, 'warning')`,
+        [
+          reqRow.client_id,
+          reqRow.subscription_id,
+          'Renewal Rejected',
+          'Your renewal request was rejected. Please contact support or resubmit with a valid receipt.',
+        ]
+      );
+    }
+
+    await connection.commit();
+    return res.json({ success: true, message: `Renewal request ${newStatus}` });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error reviewing renewal request:', error);
+    return res.status(500).json({ success: false, message: 'Failed to review renewal request' });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * Admin: list all subscriptions for lifecycle management
+ */
+exports.getAllSubscriptionsAdmin = async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT cs.id, cs.status, cs.start_date, cs.end_date, cs.auto_renew, cs.next_billing_date,
+              cs.device_count, cs.max_devices, cs.max_activations, cs.activation_count,
+              c.company_name, u.email as user_email, s.name as system_name, sp.name as plan_name, sp.billing_cycle
+       FROM client_subscriptions cs
+       JOIN clients c ON c.id = cs.client_id
+       JOIN users u ON u.id = c.user_id
+       JOIN systems s ON s.id = cs.system_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       ORDER BY cs.updated_at DESC, cs.id DESC`
+    );
+
+    return res.json({ success: true, subscriptions: rows });
+  } catch (error) {
+    console.error('Error fetching admin subscriptions:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch subscriptions' });
+  }
+};
+
+/**
+ * Admin: set subscription status (active/cancelled/expired)
+ */
+exports.setSubscriptionStatusAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, note } = req.body;
+    const allowed = ['active', 'cancelled', 'expired'];
+
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status value' });
+    }
+
+    const [subs] = await pool.execute(
+      `SELECT id, client_id
+       FROM client_subscriptions
+       WHERE id = ?
+       LIMIT 1`,
+      [id]
+    );
+
+    if (subs.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    await pool.execute(
+      `UPDATE client_subscriptions
+       SET status = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [status, id]
+    );
+
+    await pool.execute(
+      `INSERT INTO system_notifications (client_id, subscription_id, title, message, type)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        subs[0].client_id,
+        id,
+        `Subscription ${status}`,
+        note || `Your subscription status was updated to ${status} by administrator.`,
+        status === 'active' ? 'success' : 'warning',
+      ]
+    );
+
+    return res.json({ success: true, message: 'Subscription status updated' });
+  } catch (error) {
+    console.error('Error setting subscription status:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update subscription status' });
   }
 };
 
@@ -1423,8 +1945,9 @@ exports.downloadSystem = async (req, res) => {
     const { subscriptionId } = req.params;
     const userId = req.user.id;
     
-    // Verify subscription belongs to user and is active
-    const [subscriptions] = await pool.execute(`
+    // Verify subscription belongs to user and is active.
+    // If the requested ID is stale, gracefully fall back to the latest active subscription.
+    let [subscriptions] = await pool.execute(`
             SELECT cs.*, s.name as system_name, s.python_file_path, s.icon_url as system_logo,
               s.category, s.features as system_features, sp.name as plan_name,
               c.company_name, c.contact_email, c.phone as contact_phone, c.address as business_address,
@@ -1434,15 +1957,32 @@ exports.downloadSystem = async (req, res) => {
       JOIN systems s ON cs.system_id = s.id
       JOIN subscription_plans sp ON cs.plan_id = sp.id
       WHERE cs.id = ? AND c.user_id = ? AND cs.status = 'active'
+      LIMIT 1
     `, [subscriptionId, userId]);
-    
+
+    if (subscriptions.length === 0) {
+      [subscriptions] = await pool.execute(`
+              SELECT cs.*, s.name as system_name, s.python_file_path, s.icon_url as system_logo,
+                s.category, s.features as system_features, sp.name as plan_name,
+                c.company_name, c.contact_email, c.phone as contact_phone, c.address as business_address,
+                c.website, c.tax_id, c.logo_url
+        FROM client_subscriptions cs
+        JOIN clients c ON cs.client_id = c.id
+        JOIN systems s ON cs.system_id = s.id
+        JOIN subscription_plans sp ON cs.plan_id = sp.id
+        WHERE c.user_id = ? AND cs.status = 'active'
+        ORDER BY cs.id DESC
+        LIMIT 1
+      `, [userId]);
+    }
+
     if (subscriptions.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'Active subscription not found'
+        message: 'No active subscription found for download'
       });
     }
-    
+
     const subscription = subscriptions[0];
     
     // Determine tier from plan name
@@ -1501,15 +2041,36 @@ exports.downloadSystem = async (req, res) => {
       apiUrl: readServerApiUrl(packageDir),
     });
 
+
     fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
 
-    let installerPath = buildInstallerIfMissing(packageDir, true);
+    // Try to use pre-built installer from source system folder first
+    let installerPath = findInstallerExecutable(systemFolder);
+    
+    // If no pre-built installer, try to build one in package dir
+    if (!installerPath) {
+      installerPath = buildInstallerIfMissing(packageDir, false);
+    }
+    
     if (!installerPath) {
       return res.status(404).json({
         success: false,
         message: 'Installer executable could not be built for this system.'
       });
     }
+    
+    // If using source installer, copy it to package dir for cleanup
+    if (!installerPath.startsWith(packageDir)) {
+      const destPath = path.join(packageDir, path.basename(installerPath));
+      fs.copyFileSync(installerPath, destPath);
+      installerPath = destPath;
+    }
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+      'Surrogate-Control': 'no-store',
+    });
 
     return res.download(installerPath, downloadName, async (downloadError) => {
       try {

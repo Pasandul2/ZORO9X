@@ -14,6 +14,45 @@ const passport = require('passport');
 
 const router = express.Router();
 
+const DEFAULT_FRONTEND_URL = 'http://localhost:5173';
+
+function parseFrontendCandidates(rawValue) {
+  if (!rawValue || typeof rawValue !== 'string') {
+    return [];
+  }
+
+  return rawValue
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      if (item.startsWith('https//')) {
+        return item.replace('https//', 'https://');
+      }
+      if (item.startsWith('http//')) {
+        return item.replace('http//', 'http://');
+      }
+      return item;
+    });
+}
+
+function getFrontendUrl() {
+  const candidates = parseFrontendCandidates(process.env.FRONTEND_URL);
+
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        return `${url.protocol}//${url.host}`;
+      }
+    } catch (error) {
+      // Ignore invalid URL and continue trying next candidate.
+    }
+  }
+
+  return DEFAULT_FRONTEND_URL;
+}
+
 // ============================================
 // GOOGLE OAUTH LOGIN
 // ============================================
@@ -35,7 +74,7 @@ router.get('/google', passport.authenticate('google', { scope: ['profile', 'emai
 router.get(
   '/google/callback',
   passport.authenticate('google', { 
-    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_failed` 
+    failureRedirect: `${getFrontendUrl()}/login?error=auth_failed` 
   }),
   (req, res) => {
     try {
@@ -55,11 +94,11 @@ router.get(
       // REDIRECT TO FRONTEND WITH TOKEN
       // ============================================
       // Send token and user data to frontend via URL params
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const frontendUrl = getFrontendUrl();
       res.redirect(`${frontendUrl}/?token=${token}&user=${encodeURIComponent(JSON.stringify(user))}`);
     } catch (error) {
       console.error('❌ Google callback error:', error.message);
-      res.redirect(process.env.FRONTEND_URL + '/login?error=token_generation_failed');
+      res.redirect(`${getFrontendUrl()}/login?error=token_generation_failed`);
     }
   }
 );

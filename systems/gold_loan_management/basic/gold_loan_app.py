@@ -8,10 +8,12 @@ from tkinter import ttk, messagebox
 import sqlite3
 import json
 import os
+import traceback
 import hashlib
 import platform
 import uuid
 import requests
+import webbrowser
 from datetime import datetime
 import base64
 import sys
@@ -22,10 +24,13 @@ from theme import GOLD_THEME
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, 'gold_loan_config.json')
 LICENSE_CACHE_FILE = os.path.join(APP_DIR, 'gold_loan_license.json')
+DEFAULT_OFFLINE_GRACE_MINUTES = 3
 DEFAULT_OFFLINE_GRACE_DAYS = 7
-API_URL = 'http://localhost:5001'
+API_URL = 'https://www.zoro9x.com'
+PAYMENT_PORTAL_URL = f'{API_URL}/client-dashboard'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
 ACTIVATE_ENDPOINT = '/api/saas/activate-device'
+HEARTBEAT_ENDPOINT = '/api/saas/heartbeat'
 TOKEN_VERIFY_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 DEV_BYPASS_ENV = 'ZORO9X_DEV_BYPASS_LICENSE'
@@ -144,6 +149,21 @@ def verify_server_signed_token(token):
         return False, {}
 
 
+def resolve_grace_period_minutes(payload):
+    try:
+        if payload.get('grace_period_minutes') is not None:
+            return max(1, int(payload.get('grace_period_minutes')))
+    except Exception:
+        pass
+
+    try:
+        grace_days = int(payload.get('grace_period_days') or DEFAULT_OFFLINE_GRACE_DAYS)
+    except Exception:
+        grace_days = DEFAULT_OFFLINE_GRACE_DAYS
+
+    return max(1, grace_days * 24 * 60)
+
+
 def sign_cache(cache_data, device_fp):
     signable = {
         'valid': cache_data.get('valid', False),
@@ -151,6 +171,7 @@ def sign_cache(cache_data, device_fp):
         'token': cache_data.get('token', ''),
         'subscription_id': cache_data.get('subscription_id'),
         'device_fingerprint': cache_data.get('device_fingerprint', ''),
+        'grace_period_minutes': cache_data.get('grace_period_minutes', DEFAULT_OFFLINE_GRACE_MINUTES),
         'grace_period_days': cache_data.get('grace_period_days', DEFAULT_OFFLINE_GRACE_DAYS),
     }
     material = json.dumps(signable, sort_keys=True, separators=(',', ':'))
@@ -196,6 +217,7 @@ class GoldLoanSystemApp:
         )
         self.theme = GOLD_THEME
         self.current_user = None
+        self.heartbeat_job = None
 
         # Load configuration
         self.config = self.load_config()
@@ -213,7 +235,8 @@ class GoldLoanSystemApp:
             return
 
         # Initialize database
-        from database import init_database, set_setting
+        from database import init_database, set_setting, set_db_file
+        set_db_file(self.db_file)
         init_database(self.db_file)
 
         # Keep core company identity fields aligned with signed downloaded config.
@@ -253,6 +276,89 @@ class GoldLoanSystemApp:
     # ------------------------------------------------------------------
     # License validation (preserved from original)
     # ------------------------------------------------------------------
+
+    def _is_payment_required_error(self, message, status_code=None):
+        normalized = (message or '').strip().lower()
+        status_is_payment = status_code in {401, 402, 403}
+        text_indicates_expired = any(keyword in normalized for keyword in ['expired', 'renew', 'payment', 'pay'])
+        return status_is_payment and text_indicates_expired
+
+    def _show_payment_required_popup(self, details=''):
+        popup = tk.Toplevel(self.root)
+        popup.title('Subscription Expired')
+        popup.configure(bg='white')
+        popup.resizable(False, False)
+
+        frame = tk.Frame(popup, bg='white', padx=24, pady=20)
+        frame.pack(fill='both', expand=True)
+
+        tk.Label(
+            frame,
+            text='Your subscription has expired.',
+            bg='white',
+            fg='#111827',
+            font=('Segoe UI', 13, 'bold'),
+        ).pack(anchor='w')
+
+        tk.Label(
+            frame,
+            text='Please complete your payment to continue using this system.',
+            bg='white',
+            fg='#374151',
+            justify='left',
+            wraplength=460,
+            font=('Segoe UI', 10),
+        ).pack(anchor='w', pady=(8, 4))
+
+        if details:
+            tk.Label(
+                frame,
+                text=details,
+                bg='white',
+                fg='#6b7280',
+                justify='left',
+                wraplength=460,
+                font=('Segoe UI', 9),
+            ).pack(anchor='w', pady=(0, 12))
+
+        actions = tk.Frame(frame, bg='white')
+        actions.pack(fill='x', pady=(4, 0))
+
+        def _open_payment_portal():
+            webbrowser.open(PAYMENT_PORTAL_URL)
+            popup.destroy()
+
+        tk.Button(
+            actions,
+            text='Go To Payment Website',
+            command=_open_payment_portal,
+            bg='#d97706',
+            fg='white',
+            activebackground='#b45309',
+            activeforeground='white',
+            relief='flat',
+            padx=14,
+            pady=8,
+            cursor='hand2',
+        ).pack(side='left')
+
+        tk.Button(
+            actions,
+            text='Close',
+            command=popup.destroy,
+            bg='#e5e7eb',
+            fg='#111827',
+            relief='flat',
+            padx=14,
+            pady=8,
+            cursor='hand2',
+        ).pack(side='left', padx=(10, 0))
+
+        popup.transient(self.root)
+        popup.grab_set()
+        popup.focus_force()
+        self.root.update_idletasks()
+        self.root.wait_window(popup)
 
     def validate_license(self):
         if is_license_bypass_enabled():
@@ -294,23 +400,30 @@ class GoldLoanSystemApp:
             )
             data = resp.json()
             if resp.status_code == 200 and data.get('valid'):
-                grace_period_days = int(data.get('grace_period_days') or DEFAULT_OFFLINE_GRACE_DAYS)
+                grace_period_minutes = resolve_grace_period_minutes(data)
                 cache_data = {
                     'valid': True,
                     'last_check': datetime.now().isoformat(),
                     'token': data.get('token', ''),
                     'subscription_id': data.get('subscription', {}).get('id'),
                     'device_fingerprint': device_fp,
-                    'grace_period_days': grace_period_days,
+                    'grace_period_minutes': grace_period_minutes,
+                    'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
                 }
                 cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
                 save_license_cache(cache_data)
+                self._send_heartbeat(device_fp)
+                self._schedule_heartbeat(device_fp)
                 return True
             if resp.status_code == 403 and 'not activated' in data.get('message', '').lower():
                 return self._activate_device(api_key, device_fp, device_info)
+            license_message = data.get('message', 'License validation failed. Please contact support.')
+            if self._is_payment_required_error(license_message, resp.status_code):
+                self._show_payment_required_popup(license_message)
+                return False
             messagebox.showerror(
                 'License Error',
-                data.get('message', 'License validation failed. Please contact support.')
+                license_message
             )
             return False
         except requests.exceptions.ConnectionError:
@@ -330,16 +443,20 @@ class GoldLoanSystemApp:
             )
             data = resp.json()
             if resp.status_code == 200 and data.get('success'):
+                grace_period_minutes = resolve_grace_period_minutes(data)
                 cache_data = {
                     'valid': True,
                     'last_check': datetime.now().isoformat(),
                     'token': data.get('token', ''),
                     'subscription_id': data.get('subscription', {}).get('id'),
                     'device_fingerprint': device_fp,
-                    'grace_period_days': int(data.get('grace_period_days') or DEFAULT_OFFLINE_GRACE_DAYS),
+                    'grace_period_minutes': grace_period_minutes,
+                    'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
                 }
                 cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
                 save_license_cache(cache_data)
+                self._send_heartbeat(device_fp)
+                self._schedule_heartbeat(device_fp)
                 return True
             if resp.status_code == 202:
                 messagebox.showinfo(
@@ -391,27 +508,61 @@ class GoldLoanSystemApp:
                                  'Offline token does not match this subscription.\nPlease reconnect to renew license.')
             return False
         if expires_ms and datetime.now().timestamp() * 1000 > expires_ms:
-            messagebox.showerror('Offline Token Expired',
-                                 'Stored token has expired.\nPlease connect to internet to refresh your license.')
+            self._show_payment_required_popup(
+                'Stored token has expired. Please connect to internet and renew your subscription.'
+            )
             return False
-        grace_period_days = int(cache.get('grace_period_days') or DEFAULT_OFFLINE_GRACE_DAYS)
+        grace_period_minutes = resolve_grace_period_minutes(cache)
         try:
             last_check = datetime.fromisoformat(cache.get('last_check', '2000-01-01T00:00:00'))
         except Exception:
             messagebox.showerror('License Cache Invalid',
                                  'Offline cache timestamp is invalid.\nPlease reconnect to refresh your license.')
             return False
-        days_offline = (datetime.now() - last_check).days
-        if days_offline > grace_period_days:
-            messagebox.showerror('Offline Grace Period Expired',
-                                 f'No server contact for {days_offline} days (limit: {grace_period_days}).\n'
-                                 'Please connect to internet to continue.')
+        offline_minutes = int((datetime.now() - last_check).total_seconds() // 60)
+        if offline_minutes > grace_period_minutes:
+            self._show_payment_required_popup(
+                f'No server contact for {offline_minutes} minute(s) '
+                f'(limit: {grace_period_minutes}). Please reconnect and renew if your plan has expired.'
+            )
             return False
-        remaining = grace_period_days - days_offline
-        if remaining <= 2:
+        remaining = grace_period_minutes - offline_minutes
+        if remaining <= 1:
             messagebox.showwarning('Offline Mode',
-                                   f'Running in offline mode. Internet required within {remaining} day(s).')
+                                   f'Running in offline mode. Internet required within {remaining} minute(s).')
         return True
+
+    def _send_heartbeat(self, device_fp=None):
+        api_key = self.config.get('api_key', '')
+        if not api_key:
+            return
+
+        api_url = get_effective_api_url()
+        if not is_remote_api_url(api_url):
+            return
+
+        payload = {
+            'api_key': api_key,
+            'device_fingerprint': device_fp or get_device_fingerprint(),
+        }
+
+        try:
+            requests.post(f'{api_url}{HEARTBEAT_ENDPOINT}', json=payload, timeout=5)
+        except Exception:
+            pass
+
+    def _schedule_heartbeat(self, device_fp=None):
+        if self.heartbeat_job:
+            try:
+                self.root.after_cancel(self.heartbeat_job)
+            except Exception:
+                pass
+
+        def heartbeat_tick():
+            self._send_heartbeat(device_fp)
+            self.heartbeat_job = self.root.after(60000, heartbeat_tick)
+
+        self.heartbeat_job = self.root.after(60000, heartbeat_tick)
 
     # ------------------------------------------------------------------
     # Application UI
@@ -429,9 +580,17 @@ class GoldLoanSystemApp:
 
     def _on_login_success(self, user):
         """Handle successful login."""
-        self.current_user = user
-        self.login_page.hide()
-        self._build_main_ui()
+        try:
+            self.current_user = user
+            self.login_page.hide()
+            self._build_main_ui()
+        except Exception as error:
+            traceback.print_exc()
+            messagebox.showerror(
+                'Application Error',
+                f'Login succeeded, but loading the dashboard failed.\n\n{error}'
+            )
+            self._show_login()
 
     def _build_main_ui(self):
         """Build the main application UI with sidebar navigation."""

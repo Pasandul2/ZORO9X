@@ -50,6 +50,37 @@ interface BusinessInfoRequest {
   };
 }
 
+interface RenewalAdminRequest {
+  id: number;
+  subscription_id: number;
+  company_name: string;
+  user_email: string;
+  system_name: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  receipt_url?: string | null;
+  transaction_reference?: string | null;
+  notes?: string | null;
+  admin_note?: string | null;
+  created_at: string;
+  payment_period_start?: string;
+  payment_period_end?: string;
+}
+
+interface AdminSubscription {
+  id: number;
+  status: 'active' | 'cancelled' | 'expired';
+  company_name: string;
+  user_email: string;
+  system_name: string;
+  plan_name: string;
+  billing_cycle: string;
+  start_date: string;
+  end_date: string;
+  activation_count: number;
+  max_activations: number;
+}
+
 const parseFeaturesSafely = (features: unknown): string[] => {
   if (Array.isArray(features)) {
     return features.filter((item): item is string => typeof item === 'string');
@@ -84,6 +115,8 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [selectedSystem, setSelectedSystem] = useState<System | null>(null);
   const [businessInfoRequests, setBusinessInfoRequests] = useState<BusinessInfoRequest[]>([]);
   const [businessInfoRequestCounts, setBusinessInfoRequestCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
+  const [renewalRequests, setRenewalRequests] = useState<RenewalAdminRequest[]>([]);
+  const [adminSubscriptions, setAdminSubscriptions] = useState<AdminSubscription[]>([]);
   
   // Security states
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -203,6 +236,8 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       }
 
       await fetchBusinessInfoRequests();
+      await fetchRenewalRequests();
+      await fetchAdminSubscriptions();
 
       setLoading(false);
     } catch (error) {
@@ -250,6 +285,101 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       setBusinessInfoRequestCounts(data.counts || { pending: 0, approved: 0, rejected: 0 });
     } catch (error) {
       console.error('Error fetching business info requests:', error);
+    }
+  };
+
+  const fetchRenewalRequests = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/renewal-requests?status=all`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setRenewalRequests(Array.isArray(data.requests) ? data.requests : []);
+    } catch (error) {
+      console.error('Error fetching renewal requests:', error);
+    }
+  };
+
+  const fetchAdminSubscriptions = async () => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/subscriptions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setAdminSubscriptions(Array.isArray(data.subscriptions) ? data.subscriptions : []);
+    } catch (error) {
+      console.error('Error fetching admin subscriptions:', error);
+    }
+  };
+
+  const reviewRenewalRequest = async (requestId: number, action: 'approve' | 'reject') => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const adminNote = prompt(action === 'approve' ? 'Optional approval note:' : 'Reason for rejection:') || '';
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/renewal-requests/${requestId}/review`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action, admin_note: adminNote })
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        alert(data?.message || `Failed to ${action} renewal request`);
+        return;
+      }
+
+      alert(data?.message || `Renewal request ${action}d successfully`);
+      await fetchRenewalRequests();
+      await fetchAdminSubscriptions();
+      await fetchDashboardData();
+    } catch (error) {
+      console.error(`Error trying to ${action} renewal request:`, error);
+      alert(`Failed to ${action} renewal request`);
+    }
+  };
+
+  const updateSubscriptionStatus = async (subscriptionId: number, status: 'active' | 'cancelled' | 'expired') => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const note = prompt('Optional admin note for client notification:') || '';
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/subscriptions/${subscriptionId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status, note })
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        alert(data?.message || 'Failed to update subscription status');
+        return;
+      }
+
+      alert(data?.message || 'Subscription status updated');
+      await fetchAdminSubscriptions();
+      await fetchDashboardData();
+    } catch (error) {
+      console.error('Error updating subscription status:', error);
+      alert('Failed to update subscription status');
     }
   };
 
@@ -637,6 +767,141 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
           >
+            <div className={`rounded-2xl p-6 border mb-6 ${
+              darkMode
+                ? 'bg-gray-800/50 border-purple-500/20'
+                : 'bg-white/80 border-purple-200'
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Renewal Requests (Bank Transfer)</h2>
+                <span className="px-2 py-1 rounded-full bg-orange-500/20 text-orange-400 text-xs">
+                  Pending: {renewalRequests.filter((r) => r.status === 'pending').length}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {renewalRequests.filter((r) => r.status === 'pending').length === 0 && (
+                  <div className={`p-4 rounded-lg ${darkMode ? 'bg-gray-700/40 text-gray-400' : 'bg-gray-100 text-gray-600'}`}>
+                    No pending renewal requests.
+                  </div>
+                )}
+
+                {renewalRequests
+                  .filter((r) => r.status === 'pending')
+                  .map((request) => (
+                    <div
+                      key={request.id}
+                      className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-1 text-sm">
+                          <p className="font-semibold">{request.company_name} ({request.system_name})</p>
+                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{request.user_email}</p>
+                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Amount: LKR {Number(request.amount || 0).toFixed(2)}</p>
+                          {request.transaction_reference && (
+                            <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Ref: {request.transaction_reference}</p>
+                          )}
+                          {request.payment_period_start && request.payment_period_end && (
+                            <p className={darkMode ? 'text-cyan-300' : 'text-cyan-700'}>
+                              Coverage: {new Date(request.payment_period_start).toLocaleDateString()} - {new Date(request.payment_period_end).toLocaleDateString()}
+                            </p>
+                          )}
+                          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Submitted: {new Date(request.created_at).toLocaleString()}
+                          </p>
+                          {request.receipt_url && (
+                            <a
+                              href={`${import.meta.env.VITE_API_URL}${request.receipt_url}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex text-cyan-400 hover:text-cyan-300 text-xs"
+                            >
+                              View Receipt
+                            </a>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => reviewRenewalRequest(request.id, 'approve')}
+                            className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => reviewRenewalRequest(request.id, 'reject')}
+                            className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-6 border mb-6 ${
+              darkMode
+                ? 'bg-gray-800/50 border-purple-500/20'
+                : 'bg-white/80 border-purple-200'
+            }`}>
+              <h2 className="text-xl font-bold mb-4">Subscription Lifecycle Controls</h2>
+              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                {adminSubscriptions.map((subscription) => (
+                  <div
+                    key={subscription.id}
+                    className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="text-sm">
+                        <p className="font-semibold">{subscription.company_name} ({subscription.system_name})</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{subscription.user_email}</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
+                          Plan: {subscription.plan_name} ({subscription.billing_cycle})
+                        </p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
+                          Ends: {new Date(subscription.end_date).toLocaleDateString()} | Activations: {subscription.activation_count}/{subscription.max_activations}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2 items-end">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
+                          subscription.status === 'active'
+                            ? 'bg-green-500/20 text-green-400'
+                            : subscription.status === 'expired'
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {subscription.status}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => updateSubscriptionStatus(subscription.id, 'active')}
+                            className="px-3 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs"
+                          >
+                            Activate
+                          </button>
+                          <button
+                            onClick={() => updateSubscriptionStatus(subscription.id, 'cancelled')}
+                            className="px-3 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs"
+                          >
+                            Deactivate
+                          </button>
+                          <button
+                            onClick={() => updateSubscriptionStatus(subscription.id, 'expired')}
+                            className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs"
+                          >
+                            Mark Expired
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className={`rounded-2xl p-6 border ${
               darkMode 
                 ? 'bg-gray-800/50 border-purple-500/20' 

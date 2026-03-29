@@ -59,6 +59,13 @@ const Dashboard: React.FC = () => {
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
+      if (profileRes.status === 401 || profileRes.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        return;
+      }
+
       if (!profileRes.ok) throw new Error('Failed to fetch profile');
       const profileData = await profileRes.json();
       setUser(profileData.user);
@@ -67,6 +74,13 @@ const Dashboard: React.FC = () => {
       const subsRes = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/my-subscriptions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      if (subsRes.status === 401 || subsRes.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        return;
+      }
 
       if (subsRes.ok) {
         const subsData = await subsRes.json();

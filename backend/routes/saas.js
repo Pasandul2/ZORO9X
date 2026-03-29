@@ -19,6 +19,11 @@ if (!fs.existsSync(logosDir)) {
   fs.mkdirSync(logosDir, { recursive: true });
 }
 
+const receiptsDir = path.join(__dirname, '../uploads/receipts');
+if (!fs.existsSync(receiptsDir)) {
+  fs.mkdirSync(receiptsDir, { recursive: true });
+}
+
 // Configure multer for logo uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -68,6 +73,42 @@ const handleBusinessLogoUpload = (req, res, next) => {
       });
     }
 
+    next();
+  });
+};
+
+const receiptStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, receiptsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, `receipt-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+const receiptUpload = multer({
+  storage: receiptStorage,
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|pdf|webp/;
+    const extname = allowed.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = /image\/jpeg|image\/jpg|image\/png|image\/webp|application\/pdf/.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    }
+    return cb(new Error('Only JPG, PNG, WEBP or PDF receipts are allowed'));
+  },
+});
+
+const handleReceiptUpload = (req, res, next) => {
+  receiptUpload.single('receipt')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'Invalid receipt upload',
+      });
+    }
     next();
   });
 };
@@ -147,6 +188,9 @@ router.get('/subscriptions/:subscriptionId/security', authenticateToken, saasCon
  */
 router.get('/subscriptions/:subscriptionId/devices', authenticateToken, saasController.getClientSubscriptionDevices);
 
+router.post('/subscriptions/:subscriptionId/renew-request', authenticateToken, handleReceiptUpload, saasController.submitRenewalRequest);
+router.get('/subscriptions/:subscriptionId/renew-requests', authenticateToken, saasController.getSubscriptionRenewalRequests);
+
 /**
  * GET /api/saas/subscriptions/:subscriptionId/business-info
  * Get business information + latest change request status
@@ -190,6 +234,7 @@ router.post('/activate-device', saasController.activateDevice);
  * Validate API key, check device, and log usage
  */
 router.post('/validate-key', saasController.validateApiKey);
+router.post('/heartbeat', saasController.heartbeat);
 
 // ============================================
 // ADMIN ROUTES - System Management
@@ -208,6 +253,10 @@ router.get('/admin/dashboard', authenticateToken, authenticateAdmin, saasControl
  * Requires admin authentication
  */
 router.get('/admin/clients', authenticateToken, authenticateAdmin, saasController.getAllClientsAndSubscriptions);
+router.get('/admin/subscriptions', authenticateToken, authenticateAdmin, saasController.getAllSubscriptionsAdmin);
+router.patch('/admin/subscriptions/:id/status', authenticateToken, authenticateAdmin, saasController.setSubscriptionStatusAdmin);
+router.get('/admin/renewal-requests', authenticateToken, authenticateAdmin, saasController.getRenewalRequestsAdmin);
+router.post('/admin/renewal-requests/:requestId/review', authenticateToken, authenticateAdmin, saasController.reviewRenewalRequestAdmin);
 
 /**
  * GET /api/saas/admin/business-info-requests

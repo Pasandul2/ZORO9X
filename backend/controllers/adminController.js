@@ -127,9 +127,40 @@ const getAdminProfile = async (req, res) => {
  */
 const getAllUsers = async (req, res) => {
   try {
-    // Fetch all users from database (exclude passwords)
+    const [columnRows] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
+    );
+
+    const availableColumns = new Set(columnRows.map((row) => row.COLUMN_NAME));
+    const fullNameExpr = availableColumns.has('fullName')
+      ? 'fullName'
+      : availableColumns.has('full_name')
+        ? 'full_name AS fullName'
+        : 'email AS fullName';
+    const isVerifiedExpr = availableColumns.has('is_verified')
+      ? 'is_verified AS isVerified'
+      : availableColumns.has('isVerified')
+        ? 'isVerified'
+        : 'FALSE AS isVerified';
+    const createdAtExpr = availableColumns.has('created_at')
+      ? 'created_at'
+      : availableColumns.has('createdAt')
+        ? 'createdAt AS created_at'
+        : 'NOW() AS created_at';
+    const lastLoginExpr = availableColumns.has('lastLogin')
+      ? 'lastLogin'
+      : availableColumns.has('last_login')
+        ? 'last_login AS lastLogin'
+        : 'NULL AS lastLogin';
+    const orderByColumn = availableColumns.has('created_at')
+      ? 'created_at'
+      : availableColumns.has('createdAt')
+        ? 'createdAt'
+        : 'id';
+
+    // Fetch users with safe aliases so frontend receives consistent field names.
     const [users] = await pool.query(
-      'SELECT id, email, fullName, isVerified, created_at, lastLogin FROM users ORDER BY created_at DESC'
+      `SELECT id, email, ${fullNameExpr}, ${isVerifiedExpr}, ${createdAtExpr}, ${lastLoginExpr} FROM users ORDER BY ${orderByColumn} DESC`
     );
 
     res.status(200).json({ 
