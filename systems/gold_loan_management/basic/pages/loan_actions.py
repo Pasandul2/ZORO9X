@@ -85,16 +85,30 @@ class RenewLoanPage:
         for lbl, val in details:
             r = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=lbl, font=self.theme.fonts.body, width=16, anchor='w',
+            tk.Label(r, text=lbl, font=self.theme.fonts.body, width=20, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(r, text=val, font=self.theme.fonts.body_bold,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
 
         self.overdue_interest_display_var = tk.StringVar(value=format_currency(payable['overdue_interest']))
         if payable['overdue_days'] > 0:
+            overdue_base_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
+            overdue_base_row.pack(fill=tk.X, padx=14, pady=1)
+            tk.Label(overdue_base_row, text='Overdue Base (2.5%)', font=self.theme.fonts.body, width=20, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(overdue_base_row, text=format_currency(payable.get('overdue_base_interest', 0)), font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+
+            overdue_penalty_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
+            overdue_penalty_row.pack(fill=tk.X, padx=14, pady=1)
+            tk.Label(overdue_penalty_row, text='Overdue Penalty (5%)', font=self.theme.fonts.body, width=20, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(overdue_penalty_row, text=format_currency(payable.get('overdue_penalty_interest', 0)), font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+
             overdue_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
             overdue_row.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(overdue_row, text='Overdue Interest', font=self.theme.fonts.body, width=16, anchor='w',
+            tk.Label(overdue_row, text='Overdue Interest', font=self.theme.fonts.body, width=20, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(overdue_row, textvariable=self.overdue_interest_display_var, font=self.theme.fonts.body_bold,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
@@ -102,7 +116,7 @@ class RenewLoanPage:
         self.total_outstanding_display_var = tk.StringVar(value=format_currency(payable['interest'] + payable['overdue_interest']))
         total_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
         total_row.pack(fill=tk.X, padx=14, pady=1)
-        tk.Label(total_row, text='Total Outstanding', font=self.theme.fonts.body, width=16, anchor='w',
+        tk.Label(total_row, text='Total Outstanding', font=self.theme.fonts.body, width=20, anchor='w',
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
         tk.Label(total_row, textvariable=self.total_outstanding_display_var, font=self.theme.fonts.body_bold,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
@@ -136,20 +150,22 @@ class RenewLoanPage:
         tk.Label(r2, text=format_currency(payable['interest']), font=self.theme.fonts.body_bold,
              bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
-        self.overdue_pay_var = tk.StringVar(value=str(payable['overdue_interest']))
+        self.overdue_penalty_var = tk.StringVar(value=str(payable.get('overdue_penalty_interest', 0)))
         if payable['overdue_days'] > 0:
             r2b = tk.Frame(form, bg=self.theme.palette.bg_surface)
             r2b.pack(fill=tk.X, pady=(0, 8))
-            tk.Label(r2b, text='Overdue Interest:', font=self.theme.fonts.body_bold, width=16, anchor='w',
+            tk.Label(r2b, text='Overdue Penalty Amount:', font=self.theme.fonts.body_bold, width=20, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
-            self.theme.make_entry(r2b, variable=self.overdue_pay_var, width=14).pack(side=tk.LEFT)
-        self.overdue_pay_var.trace_add('write', lambda *a: self._recalc_renewal())
+            self.theme.make_entry(r2b, variable=self.overdue_penalty_var, width=14).pack(side=tk.LEFT)
+        self.overdue_penalty_var.trace_add('write', lambda *a: self._recalc_renewal())
 
         r2c = tk.Frame(form, bg=self.theme.palette.bg_surface)
         r2c.pack(fill=tk.X, pady=(0, 8))
         tk.Label(r2c, text='Payment Amount:', font=self.theme.fonts.body_bold, width=16, anchor='w',
              bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
-        self.payment_amount_var = tk.StringVar(value=str(payable['interest'] + payable['overdue_interest']))
+        self.payment_amount_var = tk.StringVar(
+            value=str(payable['interest'] + payable.get('overdue_base_interest', 0) + payable.get('overdue_penalty_interest', 0))
+        )
         self.theme.make_entry(r2c, variable=self.payment_amount_var, width=14).pack(side=tk.LEFT)
         self.payment_amount_var.trace_add('write', lambda *a: self._recalc_renewal())
 
@@ -211,17 +227,20 @@ class RenewLoanPage:
 
     def _calculate_payment_breakdown(self):
         normal_due = float(self.payable['interest'])
-        max_overdue_due = float(self.payable['overdue_interest'])
-        overdue_input_raw = self.overdue_pay_var.get() or 0.0
+        overdue_base_due = float(self.payable.get('overdue_base_interest', 0))
+        max_penalty_due = float(self.payable.get('overdue_penalty_interest', 0))
+        penalty_input_raw = self.overdue_penalty_var.get() or 0.0
         try:
-            overdue_input_val = float(overdue_input_raw)
-            overdue_due = max(0.0, overdue_input_val)
+            penalty_input_val = float(penalty_input_raw)
+            penalty_due = max(0.0, penalty_input_val)
         except ValueError:
-            overdue_input_val = 0.0
-            overdue_due = 0.0
-        overdue_due = min(overdue_due, max_overdue_due)
-        if abs(overdue_due - overdue_input_val) > 0.009:
-            self.overdue_pay_var.set(str(round(overdue_due, 2)))
+            penalty_input_val = 0.0
+            penalty_due = 0.0
+        penalty_due = min(penalty_due, max_penalty_due)
+        if abs(penalty_due - penalty_input_val) > 0.009:
+            self.overdue_penalty_var.set(str(round(penalty_due, 2)))
+
+        overdue_due = round(overdue_base_due + penalty_due, 2)
         try:
             payment_amount = max(0.0, float(self.payment_amount_var.get() or 0.0))
         except ValueError:
@@ -234,6 +253,9 @@ class RenewLoanPage:
 
         return {
             'normal_due': normal_due,
+            'overdue_base_due': overdue_base_due,
+            'overdue_penalty_due': penalty_due,
+            'max_overdue_penalty_due': max_penalty_due,
             'overdue_due': overdue_due,
             'payment_amount': payment_amount,
             'total_interest_due': total_interest_due,
@@ -259,21 +281,21 @@ class RenewLoanPage:
             return
 
         try:
-            overdue_paid = float(self.overdue_pay_var.get())
+            overdue_penalty_paid = float(self.overdue_penalty_var.get())
         except ValueError:
             messagebox.showwarning('Renewal', 'Enter valid interest amounts.')
             return
 
-        if overdue_paid > (self.payable['overdue_interest'] + 0.01):
-            messagebox.showwarning('Renewal', 'Overdue interest cannot be increased. You can only reduce it.')
+        if overdue_penalty_paid > (breakdown['max_overdue_penalty_due'] + 0.01):
+            messagebox.showwarning('Renewal', 'Overdue penalty cannot be increased above the calculated penalty amount.')
             return
 
         if breakdown['new_loan_amount'] <= 0:
             messagebox.showwarning('Renewal', 'Loan principal is fully settled. Use redemption instead of renewal.')
             return
 
-        default_overdue = self.payable['overdue_interest']
-        needs_approval = overdue_paid < (default_overdue - 0.01)
+        default_overdue_penalty = breakdown['max_overdue_penalty_due']
+        needs_approval = overdue_penalty_paid < (default_overdue_penalty - 0.01)
 
         if not messagebox.askyesno('Confirm Renewal',
                                    f'Renew loan {self.loan["ticket_no"]} for {months} month(s)?\n'
@@ -287,8 +309,8 @@ class RenewLoanPage:
             create_approval_request(
                 loan_id=self.loan_id,
                 ticket_no=self.loan['ticket_no'],
-                default_val=default_overdue,
-                requested_val=overdue_paid,
+                default_val=default_overdue_penalty,
+                requested_val=overdue_penalty_paid,
                 requested_by=self.user['id'],
                 requested_by_name=self.user['full_name'],
                 request_type='overdue_waiver'

@@ -98,6 +98,10 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
     return existingInstaller;
   }
 
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
   const buildScript = path.join(systemFolder, 'BUILD.bat');
   if (!fs.existsSync(buildScript)) {
     return null;
@@ -121,6 +125,21 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   }
 
   return findInstallerExecutable(systemFolder);
+}
+
+function createZipArchive(sourceDir, outFilePath) {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(outFilePath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', () => resolve(outFilePath));
+    output.on('error', reject);
+    archive.on('error', reject);
+
+    archive.pipe(output);
+    archive.directory(sourceDir, false);
+    archive.finalize();
+  });
 }
 
 function parseFeaturesSafely(featuresValue) {
@@ -2011,7 +2030,7 @@ exports.downloadSystem = async (req, res) => {
 
     const safeSystemName = (subscription.system_name || 'system').replace(/\s+/g, '_');
     const installerFilename = `${safeSystemName}_${tier}_installer.exe`;
-    const downloadName = installerFilename;
+    let downloadName = installerFilename;
 
     const tempRoot = path.join(__dirname, '../uploads/temp');
     fs.mkdirSync(tempRoot, { recursive: true });
@@ -2052,19 +2071,26 @@ exports.downloadSystem = async (req, res) => {
       installerPath = buildInstallerIfMissing(packageDir, false);
     }
     
+    let downloadPath = installerPath;
+    let deliveryMode = 'exe';
+    const cleanupPaths = [packageDir];
+
     if (!installerPath) {
-      return res.status(404).json({
-        success: false,
-        message: 'Installer executable could not be built for this system.'
-      });
-    }
-    
-    // If using source installer, copy it to package dir for cleanup
-    if (!installerPath.startsWith(packageDir)) {
+      const zipName = `${safeSystemName}_${tier}_system.zip`;
+      const zipPath = path.join(tempRoot, `download_${subscription.id}_${Date.now()}.zip`);
+      await createZipArchive(packageDir, zipPath);
+      downloadPath = zipPath;
+      downloadName = zipName;
+      deliveryMode = 'zip';
+      cleanupPaths.push(zipPath);
+    } else if (!installerPath.startsWith(packageDir)) {
+      // If using source installer, copy it to package dir for cleanup.
       const destPath = path.join(packageDir, path.basename(installerPath));
       fs.copyFileSync(installerPath, destPath);
       installerPath = destPath;
+      downloadPath = installerPath;
     }
+
     res.set({
       'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
       Pragma: 'no-cache',
@@ -2072,9 +2098,19 @@ exports.downloadSystem = async (req, res) => {
       'Surrogate-Control': 'no-store',
     });
 
-    return res.download(installerPath, downloadName, async (downloadError) => {
+    return res.download(downloadPath, downloadName, async (downloadError) => {
       try {
-        fs.rmSync(packageDir, { recursive: true, force: true });
+        cleanupPaths.forEach((cleanupPath) => {
+          if (!fs.existsSync(cleanupPath)) {
+            return;
+          }
+          const stat = fs.statSync(cleanupPath);
+          if (stat.isDirectory()) {
+            fs.rmSync(cleanupPath, { recursive: true, force: true });
+          } else {
+            fs.rmSync(cleanupPath, { force: true });
+          }
+        });
       } catch (cleanupError) {
         console.error('Failed to cleanup installer package temp directory:', cleanupError);
       }
@@ -2105,7 +2141,7 @@ exports.downloadSystem = async (req, res) => {
               system_name: subscription.system_name,
               plan: subscription.plan_name,
               includes_business_info: false,
-              delivery: 'exe',
+              delivery: deliveryMode,
               config_mode: 'api_key_online_fetch',
             }),
             req.ip,

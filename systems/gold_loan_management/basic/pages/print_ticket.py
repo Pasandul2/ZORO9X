@@ -52,16 +52,41 @@ class PrintTicketPage:
         opt_frame.pack(fill=tk.X, pady=(0, 10))
         self.theme.make_button(opt_frame, text='🖨 Print A4', command=lambda: self._do_print('a4'),
                                kind='primary', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 10))
-        receipt_title = '🧾 Print Cash Slip (1/3 A4)' if self.doc_type == 'cash_credit' else '🧾 Print Receipt (1/3 A4)'
-        self.theme.make_button(opt_frame, text=receipt_title,
-                               command=lambda: self._do_print('receipt'),
-                               kind='secondary', width=22, pady=8).pack(side=tk.LEFT)
 
         # Preview
-        preview_card = self.theme.make_card(view, bg='#ffffff')
+        preview_card = self.theme.make_card(view, bg='#ffffff', padding=(6, 6))
         preview_card.pack(fill=tk.BOTH, expand=True)
+        preview_card.configure(height=980)
         self.preview_frame = preview_card.inner
         self._render_preview('a4')
+
+    def _create_scrollable_preview_host(self):
+        host = tk.Frame(self.preview_frame, bg='#ffffff')
+        host.pack(fill=tk.BOTH, expand=True)
+        host.configure(height=920)
+        host.pack_propagate(False)
+
+        canvas = tk.Canvas(host, bg='#ffffff', highlightthickness=0, bd=0)
+        canvas.configure(height=900)
+        vbar = self.theme.make_scrollbar(host, canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        content = tk.Frame(canvas, bg='#ffffff')
+        win = canvas.create_window((0, 0), window=content, anchor='nw')
+
+        content.bind('<Configure>', lambda _e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+
+        canvas.bind('<Enter>', lambda _e: self.container.bind_all('<MouseWheel>', _on_mousewheel))
+        canvas.bind('<Leave>', lambda _e: self.container.unbind_all('<MouseWheel>'))
+        canvas.yview_moveto(0)
+        return content
 
     def _render_preview(self, format_type='a4'):
         if self.doc_type == 'cash_credit':
@@ -70,6 +95,8 @@ class PrintTicketPage:
 
         for w in self.preview_frame.winfo_children():
             w.destroy()
+
+        content_host = self._create_scrollable_preview_host()
 
         loan = self.loan
         items = self.items
@@ -83,18 +110,19 @@ class PrintTicketPage:
         accent = '#415bd8'
 
         if format_type == 'receipt':
-            max_w = 320
+            max_w = 380
         else:
-            max_w = 700
+            current_w = self.preview_frame.winfo_width() or self.container.winfo_width() or 980
+            avail_w = max(500, current_w - 180)
+            max_w = min(620, avail_w)
 
-        container = tk.Frame(self.preview_frame, bg=bg, width=max_w)
-        container.pack(fill=tk.Y, expand=True, padx=20, pady=20)
-        container.pack_propagate(False)
+        container = tk.Frame(content_host, bg=bg, width=max_w)
+        container.pack(anchor='n', padx=10, pady=(2, 8))
         container.configure(width=max_w)
 
         # Header
-        tk.Label(container, text=company, font=('Segoe UI', 14 if format_type == 'a4' else 10, 'bold'),
-                 bg=bg, fg=fg).pack(pady=(10, 2))
+        tk.Label(container, text=company, font=('Segoe UI', 16 if format_type == 'a4' else 10, 'bold'),
+             bg=bg, fg=fg).pack(pady=(2, 2))
         if address:
             tk.Label(container, text=address, font=('Segoe UI', 8), bg=bg, fg=muted,
                      wraplength=max_w - 40).pack()
@@ -103,7 +131,7 @@ class PrintTicketPage:
 
         tk.Frame(container, bg='#000000', height=2).pack(fill=tk.X, padx=10, pady=8)
 
-        tk.Label(container, text='GOLD LOAN TICKET', font=('Segoe UI', 12 if format_type == 'a4' else 9, 'bold'),
+        tk.Label(container, text='GOLD LOAN TICKET', font=('Segoe UI', 13 if format_type == 'a4' else 9, 'bold'),
                  bg=bg, fg=accent).pack()
 
         tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
@@ -118,7 +146,7 @@ class PrintTicketPage:
             ('Phone', loan['customer_phone']),
         ]
 
-        font_size = 9 if format_type == 'a4' else 7
+        font_size = 10 if format_type == 'a4' else 7
         for lbl, val in details:
             r = tk.Frame(container, bg=bg)
             r.pack(fill=tk.X, padx=14, pady=1)
@@ -128,19 +156,44 @@ class PrintTicketPage:
 
         tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
 
-        # Articles
-        tk.Label(container, text='ARTICLES', font=('Segoe UI', font_size + 1, 'bold'),
+        # Articles (match system print preview table layout)
+        tk.Label(container, text='Articles', font=('Segoe UI', font_size + 1, 'bold'),
                  bg=bg, fg=fg).pack(anchor='w', padx=14)
 
-        for item in items:
-            r = tk.Frame(container, bg=bg)
-            r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=f"• {item['article_type']} ({item['carat']}K) - {item['gold_weight']}g",
-                     font=('Segoe UI', font_size), bg=bg, fg=fg, anchor='w').pack(side=tk.LEFT)
-            tk.Label(r, text=format_currency(item['estimated_value']),
-                     font=('Segoe UI', font_size), bg=bg, fg=fg).pack(side=tk.RIGHT)
+        table = tk.Frame(container, bg=bg)
+        table.pack(fill=tk.X, padx=14, pady=(2, 4))
+        table.columnconfigure(0, weight=3)
+        table.columnconfigure(1, weight=1)
+        table.columnconfigure(2, weight=2)
+        table.columnconfigure(3, weight=2)
+        table.columnconfigure(4, weight=2)
 
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
+        headers = ['Type', 'Carat', 'Gold Wt', 'Total Wt', 'Value']
+        for ci, head in enumerate(headers):
+            tk.Label(
+                table,
+                text=head,
+                font=('Segoe UI', max(8, font_size - 1), 'bold'),
+                bg=bg,
+                fg=fg,
+                anchor='w' if ci < 4 else 'e'
+            ).grid(row=0, column=ci, sticky='ew', padx=(0, 6), pady=(0, 2))
+
+        tk.Frame(container, bg='#d4d4d4', height=1).pack(fill=tk.X, padx=14, pady=(0, 2))
+
+        for ri, item in enumerate(items, start=1):
+            tk.Label(table, text=item['article_type'], font=('Segoe UI', max(8, font_size - 1)),
+                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=0, sticky='ew', padx=(0, 6), pady=1)
+            tk.Label(table, text=f"{item['carat']}K", font=('Segoe UI', max(8, font_size - 1)),
+                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=1, sticky='ew', padx=(0, 6), pady=1)
+            tk.Label(table, text=f"{item['gold_weight']}g", font=('Segoe UI', max(8, font_size - 1)),
+                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=2, sticky='ew', padx=(0, 6), pady=1)
+            tk.Label(table, text=f"{item['total_weight']}g", font=('Segoe UI', max(8, font_size - 1)),
+                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=3, sticky='ew', padx=(0, 6), pady=1)
+            tk.Label(table, text=format_currency(item['estimated_value']), font=('Segoe UI', max(8, font_size - 1)),
+                     bg=bg, fg=fg, anchor='e').grid(row=ri, column=4, sticky='ew', pady=1)
+
+        tk.Frame(container, bg='#d4d4d4', height=1).pack(fill=tk.X, padx=14, pady=(4, 6))
 
         # Summary
         summary = [
@@ -170,15 +223,22 @@ class PrintTicketPage:
 
         # Footer
         if loan.get('purpose'):
-            tk.Label(container, text=f'Purpose: {loan["purpose"]}', font=('Segoe UI', font_size - 1),
-                     bg=bg, fg=muted, wraplength=max_w - 40).pack(padx=14, anchor='w')
+            r = tk.Frame(container, bg=bg)
+            r.pack(fill=tk.X, padx=14, pady=(0, 2))
+            tk.Label(r, text='Purpose:', font=('Segoe UI', max(7, font_size - 1)),
+                     bg=bg, fg=muted).pack(side=tk.LEFT)
+            tk.Label(r, text=loan['purpose'], font=('Segoe UI', max(7, font_size - 1)),
+                     bg=bg, fg=fg).pack(side=tk.RIGHT)
 
-        tk.Label(container, text='Terms: Gold articles are held as collateral. Interest is charged monthly.',
-                 font=('Segoe UI', font_size - 2), bg=bg, fg=muted,
-                 wraplength=max_w - 40, justify='left').pack(padx=14, pady=(4, 2), anchor='w')
-        tk.Label(container, text='Articles will be forfeited if loan is not redeemed/renewed by expiry.',
-                 font=('Segoe UI', font_size - 2), bg=bg, fg=muted,
-                 wraplength=max_w - 40, justify='left').pack(padx=14, anchor='w')
+        tk.Label(
+            container,
+            text='Terms: Gold articles held as collateral. Interest charged monthly. Articles forfeited if not redeemed/renewed by expiry.',
+            font=('Segoe UI', max(6, font_size - 3)),
+            bg=bg,
+            fg=muted,
+            wraplength=max_w - 40,
+            justify='left',
+        ).pack(padx=14, pady=(4, 2), anchor='w')
 
         tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=8)
 
@@ -190,7 +250,7 @@ class PrintTicketPage:
                 sf = tk.Frame(sig_frame, bg=bg)
                 sf.pack(side=tk.LEFT, expand=True)
                 tk.Frame(sf, bg='#999999', height=1, width=120).pack(pady=(20, 4))
-                tk.Label(sf, text=label, font=('Segoe UI', 7), bg=bg, fg=muted).pack()
+                tk.Label(sf, text=label.split(' ')[0], font=('Segoe UI', 7), bg=bg, fg=fg).pack()
 
         tk.Label(container, text='Thank you for choosing our services.',
                  font=('Segoe UI', font_size - 1, 'italic'), bg=bg, fg=muted).pack(pady=(8, 12))
@@ -198,6 +258,8 @@ class PrintTicketPage:
     def _render_cash_credit_preview(self, format_type='a4'):
         for w in self.preview_frame.winfo_children():
             w.destroy()
+
+        content_host = self._create_scrollable_preview_host()
 
         loan = self.loan
         ren = self.latest_renewal or {}
@@ -210,15 +272,19 @@ class PrintTicketPage:
         muted = '#64748b'
         accent = '#415bd8'
 
-        max_w = 320 if format_type == 'receipt' else 700
+        if format_type == 'receipt':
+            max_w = 380
+        else:
+            current_w = self.preview_frame.winfo_width() or self.container.winfo_width() or 980
+            avail_w = max(500, current_w - 180)
+            max_w = min(620, avail_w)
 
-        container = tk.Frame(self.preview_frame, bg=bg, width=max_w)
-        container.pack(fill=tk.Y, expand=True, padx=20, pady=20)
-        container.pack_propagate(False)
+        container = tk.Frame(content_host, bg=bg, width=max_w)
+        container.pack(anchor='n', padx=10, pady=(2, 8))
         container.configure(width=max_w)
 
-        tk.Label(container, text=company, font=('Segoe UI', 14 if format_type == 'a4' else 10, 'bold'),
-                 bg=bg, fg=fg).pack(pady=(10, 2))
+        tk.Label(container, text=company, font=('Segoe UI', 16 if format_type == 'a4' else 10, 'bold'),
+             bg=bg, fg=fg).pack(pady=(2, 2))
         if address:
             tk.Label(container, text=address, font=('Segoe UI', 8), bg=bg, fg=muted,
                      wraplength=max_w - 40).pack()
@@ -226,7 +292,7 @@ class PrintTicketPage:
             tk.Label(container, text=f'Tel: {phone}', font=('Segoe UI', 8), bg=bg, fg=muted).pack()
 
         tk.Frame(container, bg='#000000', height=2).pack(fill=tk.X, padx=10, pady=8)
-        tk.Label(container, text='CASH CREDIT SLIP', font=('Segoe UI', 12 if format_type == 'a4' else 9, 'bold'),
+        tk.Label(container, text='CASH CREDIT SLIP', font=('Segoe UI', 13 if format_type == 'a4' else 9, 'bold'),
                  bg=bg, fg=accent).pack()
         tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
 
@@ -240,7 +306,7 @@ class PrintTicketPage:
             ('Balance Loan Amount', format_currency(loan['loan_amount'])),
         ]
 
-        font_size = 9 if format_type == 'a4' else 7
+        font_size = 10 if format_type == 'a4' else 7
         for lbl, val in details:
             r = tk.Frame(container, bg=bg)
             r.pack(fill=tk.X, padx=14, pady=1)
@@ -257,7 +323,6 @@ class PrintTicketPage:
         """Print using system print dialog."""
         try:
             import tempfile
-            import os
             import webbrowser
 
             loan = self.loan
@@ -301,7 +366,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 tmp.write(html)
                 tmp.close()
                 webbrowser.open('file://' + tmp.name)
-                messagebox.showinfo('Print', 'Print dialog opened in browser.\nUse Ctrl+P if needed.')
+                messagebox.showinfo('Print', 'Windows print preview opened for A4 printing.')
                 return
 
             page_width = '210mm' if format_type == 'a4' else '80mm'
@@ -374,7 +439,7 @@ th {{ background: #f5f5f5; font-weight: bold; }}
             tmp.write(html)
             tmp.close()
             webbrowser.open('file://' + tmp.name)
-            messagebox.showinfo('Print', 'Print dialog opened in browser.\nUse Ctrl+P if needed.')
+            messagebox.showinfo('Print', 'Windows print preview opened for A4 printing.')
 
         except Exception as e:
             messagebox.showerror('Print Error', f'Could not open print preview:\n{str(e)}')

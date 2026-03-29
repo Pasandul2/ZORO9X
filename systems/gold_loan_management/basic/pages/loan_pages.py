@@ -253,9 +253,6 @@ class LoanDetailPage:
             itf = tk.Frame(ic.inner, bg=self.theme.palette.bg_surface_alt)
             itf.pack(fill=tk.X, padx=14, pady=4)
             
-            market_val = loan.get('market_value', 1) or 1
-            item_loan_amt = (item.get('estimated_value', 0) / market_val) * loan.get('loan_amount', 0)
-            
             desc_text = f" — {item.get('description')}" if item.get('description') else ""
             deduct_wt = item['total_weight'] - item['gold_weight']
             
@@ -267,12 +264,7 @@ class LoanDetailPage:
             # Middle row: Weights
             tk.Label(itf, text=f"Total: {item['total_weight']}g  |  Deduct: {deduct_wt:.2f}g  |  Gold: {item['gold_weight']}g",
                      font=self.theme.fonts.small, bg=self.theme.palette.bg_surface_alt,
-                     fg=self.theme.palette.text_muted, anchor='w').pack(fill=tk.X, padx=8, pady=(0,2))
-            
-            # Bottom row: Loan amount
-            tk.Label(itf, text=f"Loan Amount: {format_currency(item_loan_amt)}",
-                     font=self.theme.fonts.small, bg=self.theme.palette.bg_surface_alt,
-                     fg=self.theme.palette.accent, anchor='w').pack(fill=tk.X, padx=8, pady=(0,6))
+                     fg=self.theme.palette.text_muted, anchor='w').pack(fill=tk.X, padx=8, pady=(0,6))
                      
         tk.Frame(ic.inner, height=4, bg=self.theme.palette.bg_surface).pack()
 
@@ -337,6 +329,9 @@ class LoanDetailPage:
             ('Deduction Wt', f"{loan['total_item_weight'] - loan['total_gold_weight']:.2f} g"),
             ('Gold Weight', f"{loan['total_gold_weight']} g"),
             ('Accrued Interest', format_currency(payable['interest'])),
+            ('Overdue Days', str(payable['overdue_days'])),
+            ('Overdue Base (2.5%)', format_currency(payable.get('overdue_base_interest', 0))),
+            ('Overdue Penalty (5%)', format_currency(payable.get('overdue_penalty_interest', 0))),
             ('Overdue Interest', format_currency(payable['overdue_interest'])),
             ('Total Outstanding', format_currency(payable['total'])),
         ]
@@ -362,19 +357,10 @@ class LoanDetailPage:
             app_text, app_color = status_map.get(approval['status'], ('Unknown', self.theme.palette.text_muted))
             fin_data.insert(3, ('Approval Status', app_text))
             
-        fin_data.extend([
-            ('─' * 30, ''),
-            ('Interest', format_currency(payable['interest'])),
-        ])
-        if payable['overdue_days'] > 0:
-            fin_data.extend([
-                ('Overdue Days', str(payable['overdue_days'])),
-                ('Overdue Interest', format_currency(payable['overdue_interest'])),
-            ])
         for lbl, val in fin_data:
             r = tk.Frame(fc.inner, bg=self.theme.palette.bg_surface)
             r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=lbl, font=self.theme.fonts.body, width=18, anchor='w',
+            tk.Label(r, text=lbl, font=self.theme.fonts.body, width=22, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             
             fg_color = self.theme.palette.text_primary

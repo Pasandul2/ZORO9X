@@ -202,6 +202,7 @@ class NewTicketPage:
 
         # Purpose
         purpose_entry = self._make_form_row(loan_form, 'Purpose:', 'purpose')
+        self._purpose_entry = purpose_entry.entry
         purpose_entry.entry.bind('<KeyRelease>', self._on_purpose_key)
 
         # Duration
@@ -307,39 +308,73 @@ class NewTicketPage:
 
     def _on_purpose_key(self, event):
         val = self.loan_vars['purpose'].get().strip()
-        if not val or len(val) < 1:
+        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+            self._hide_purpose_suggestions()
             return
-            
-        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab', 'Shift_L', 'Shift_R', 'BackSpace'):
+
+        if not val or len(val) < 1:
+            self._hide_purpose_suggestions()
             return
 
         purposes = search_recent_purposes(val)
         if not purposes:
+            self._hide_purpose_suggestions()
             return
 
-        if hasattr(self, '_purpose_menu'):
-            try:
-                self._purpose_menu.destroy()
-            except:
-                pass
-                
-        entry_widget = event.widget
-        menu = tk.Menu(entry_widget, tearoff=0, font=self.theme.fonts.body,
-                       bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                       activebackground=self.theme.palette.accent, activeforeground='#ffffff')
-        
-        for p in purposes:
-            menu.add_command(label=p, command=lambda v=p: self._select_purpose(v))
-
-        x = entry_widget.winfo_rootx()
-        y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
-        menu.tk_popup(x, y)
-        self._purpose_menu = menu
+        self._show_purpose_suggestions(event.widget, purposes)
 
     def _select_purpose(self, val):
         self.loan_vars['purpose'].set(val)
-        # We need the reference to entry.
-        # We could just wait for the user to tab out.
+        self._hide_purpose_suggestions()
+        if hasattr(self, '_purpose_entry'):
+            self._purpose_entry.focus_set()
+
+    def _hide_purpose_suggestions(self):
+        popup = getattr(self, '_purpose_popup', None)
+        if popup is not None:
+            try:
+                popup.destroy()
+            except Exception:
+                pass
+            self._purpose_popup = None
+
+    def _show_purpose_suggestions(self, entry_widget, purposes):
+        self._hide_purpose_suggestions()
+
+        popup = tk.Toplevel(self.container)
+        popup.overrideredirect(True)
+        popup.configure(bg=self.theme.palette.border)
+
+        listbox = tk.Listbox(
+            popup,
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+            activestyle='none',
+            selectbackground=self.theme.palette.accent,
+            selectforeground='#ffffff',
+            height=min(6, len(purposes)),
+            relief='flat',
+            bd=0,
+            exportselection=False,
+        )
+        listbox.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        for item in purposes:
+            listbox.insert(tk.END, item)
+
+        def _pick(_event=None):
+            sel = listbox.curselection()
+            if sel:
+                self._select_purpose(listbox.get(sel[0]))
+
+        listbox.bind('<ButtonRelease-1>', _pick)
+        listbox.bind('<Return>', _pick)
+
+        x = entry_widget.winfo_rootx()
+        y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
+        popup.geometry(f'+{x}+{y}')
+        self._purpose_popup = popup
 
     def _on_nic_enter(self):
         self._search_customer()
@@ -439,6 +474,7 @@ class NewTicketPage:
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         job_entry = self.theme.make_entry(row, variable=self.cust_vars['job'])
         job_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._job_entry = job_entry.entry
         job_entry.entry.bind('<KeyRelease>', self._on_job_key)
         self.cust_entries['job'] = job_entry
 
@@ -520,37 +556,73 @@ class NewTicketPage:
 
     def _on_job_key(self, event):
         val = self.cust_vars['job'].get().strip()
-        if not val or len(val) < 1:
+        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+            self._hide_job_suggestions()
             return
 
-        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab', 'Shift_L', 'Shift_R', 'BackSpace'):
+        if not val or len(val) < 1:
+            self._hide_job_suggestions()
             return
 
         jobs = search_recent_customer_jobs(val)
         if not jobs:
+            self._hide_job_suggestions()
             return
 
-        if hasattr(self, '_job_menu'):
-            try:
-                self._job_menu.destroy()
-            except Exception:
-                pass
-
-        entry_widget = event.widget
-        menu = tk.Menu(entry_widget, tearoff=0, font=self.theme.fonts.body,
-                       bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                       activebackground=self.theme.palette.accent, activeforeground='#ffffff')
-
-        for job in jobs:
-            menu.add_command(label=job, command=lambda v=job: self._select_job(v))
-
-        x = entry_widget.winfo_rootx()
-        y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
-        menu.tk_popup(x, y)
-        self._job_menu = menu
+        self._show_job_suggestions(event.widget, jobs)
 
     def _select_job(self, value):
         self.cust_vars['job'].set(value)
+        self._hide_job_suggestions()
+        if hasattr(self, '_job_entry'):
+            self._job_entry.focus_set()
+
+    def _hide_job_suggestions(self):
+        popup = getattr(self, '_job_popup', None)
+        if popup is not None:
+            try:
+                popup.destroy()
+            except Exception:
+                pass
+            self._job_popup = None
+
+    def _show_job_suggestions(self, entry_widget, jobs):
+        self._hide_job_suggestions()
+
+        popup = tk.Toplevel(self.container)
+        popup.overrideredirect(True)
+        popup.configure(bg=self.theme.palette.border)
+
+        listbox = tk.Listbox(
+            popup,
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+            activestyle='none',
+            selectbackground=self.theme.palette.accent,
+            selectforeground='#ffffff',
+            height=min(6, len(jobs)),
+            relief='flat',
+            bd=0,
+            exportselection=False,
+        )
+        listbox.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        for item in jobs:
+            listbox.insert(tk.END, item)
+
+        def _pick(_event=None):
+            sel = listbox.curselection()
+            if sel:
+                self._select_job(listbox.get(sel[0]))
+
+        listbox.bind('<ButtonRelease-1>', _pick)
+        listbox.bind('<Return>', _pick)
+
+        x = entry_widget.winfo_rootx()
+        y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
+        popup.geometry(f'+{x}+{y}')
+        self._job_popup = popup
 
     def _on_birthday_parts_changed(self, *_args):
         if self._birthday_syncing:
@@ -623,36 +695,76 @@ class NewTicketPage:
 
     def _on_desc_key(self, event):
         val = self.desc_var.get().strip()
-        if not val or len(val) < 1:
+        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+            self._hide_desc_suggestions()
             return
-            
-        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab', 'Shift_L', 'Shift_R', 'BackSpace'):
+
+        if not val or len(val) < 1:
+            self._hide_desc_suggestions()
             return
 
         descriptions = search_recent_descriptions(val)
         if not descriptions:
+            self._hide_desc_suggestions()
             return
 
-        if hasattr(self, '_desc_menu'):
+        self._show_desc_suggestions(event.widget, descriptions)
+
+    def _hide_desc_suggestions(self):
+        popup = getattr(self, '_desc_popup', None)
+        if popup is not None:
             try:
-                self._desc_menu.destroy()
-            except:
+                popup.destroy()
+            except Exception:
                 pass
-                
-        entry_widget = event.widget
-        menu = tk.Menu(entry_widget, tearoff=0, font=self.theme.fonts.body,
-                       bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                       activebackground=self.theme.palette.accent, activeforeground='#ffffff')
-        
-        for d in descriptions:
-            menu.add_command(label=d, command=lambda v=d: (self.desc_var.set(v), self.desc_entry.entry.icursor(tk.END)))
+            self._desc_popup = None
+
+    def _show_desc_suggestions(self, entry_widget, descriptions):
+        self._hide_desc_suggestions()
+
+        popup = tk.Toplevel(self.container)
+        popup.overrideredirect(True)
+        popup.configure(bg=self.theme.palette.border)
+
+        listbox = tk.Listbox(
+            popup,
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+            activestyle='none',
+            selectbackground=self.theme.palette.accent,
+            selectforeground='#ffffff',
+            height=min(6, len(descriptions)),
+            relief='flat',
+            bd=0,
+            exportselection=False,
+        )
+        listbox.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        for item in descriptions:
+            listbox.insert(tk.END, item)
+
+        def _pick(_event=None):
+            sel = listbox.curselection()
+            if sel:
+                self._select_desc(listbox.get(sel[0]))
+
+        listbox.bind('<ButtonRelease-1>', _pick)
+        listbox.bind('<Return>', _pick)
 
         x = entry_widget.winfo_rootx()
         y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
-        menu.tk_popup(x, y)
-        self._desc_menu = menu
+        popup.geometry(f'+{x}+{y}')
+        self._desc_popup = popup
+
+    def _select_desc(self, value):
+        self.desc_var.set(value)
+        self._hide_desc_suggestions()
+        self.desc_entry.entry.icursor(tk.END)
+        self.desc_entry.entry.focus_set()
 
     def _add_item(self):
+        self._hide_desc_suggestions()
         try:
             total_wt = self._parse_weight(self.total_wt_var.get())
             if total_wt is None:

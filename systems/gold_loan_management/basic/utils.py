@@ -63,12 +63,9 @@ def calculate_overdue_interest(principal, overdue_rate_monthly, overdue_days):
 
 def calculate_total_payable(loan_amount, interest_rate, duration_months, overdue_rate, expire_date_str, issue_date_str, max_interest_months=3):
     """
-    Calculate total amount payable for redemption using daily interest with interest rate capping.
+    Calculate total amount payable for redemption using daily interest.
     Normal interest is charged from issue date until today.
-    Overdue interest is charged from expire date until today, with a rate cap after max_interest_months.
-    
-    The effective interest rate grows as: base_rate + min(overdue_months, max_interest_months) * overdue_rate
-    After max_interest_months of being overdue, the interest rate stops increasing.
+    Once loan is overdue, overdue period uses full monthly rate: base_rate + overdue_rate.
     """
     try:
         issue = datetime.strptime(issue_date_str.split(' ')[0], '%Y-%m-%d')
@@ -83,12 +80,9 @@ def calculate_total_payable(loan_amount, interest_rate, duration_months, overdue
         # Monthly rates divided by 30 to get daily rates
         daily_rate = float(interest_rate) / 30.0
         
-        # Calculate overdue months
+        # Keep these values for reporting/compatibility with existing callers.
         overdue_months = overdue_days / 30.0 if overdue_days > 0 else 0
-        
-        # Cap the overdue months at max_interest_months
-        # Effective overdue increase is limited to max_interest_months months
-        effective_overdue_months = min(overdue_months, max(0, max_interest_months))
+        effective_overdue_months = 1 if overdue_days > 0 else 0
         overdue_daily_rate = float(overdue_rate) / 30.0
         
         # Interest calculation:
@@ -97,15 +91,18 @@ def calculate_total_payable(loan_amount, interest_rate, duration_months, overdue
         if overdue_days <= 0:
             # Loan not yet overdue
             interest = round(float(loan_amount) * (daily_rate / 100.0) * total_days, 2)
+            overdue_base_interest = 0
+            overdue_penalty_interest = 0
             overdue_interest = 0
         else:
             # Core (until expiry): base rate only
             days_until_expire = max(0, (expire - issue).days)
             interest = round(float(loan_amount) * (daily_rate / 100.0) * min(total_days, days_until_expire), 2)
             
-            # Overdue portion: base rate + capped overdue rate
-            effective_rate = daily_rate + (overdue_daily_rate * effective_overdue_months)
-            overdue_interest = round(float(loan_amount) * (effective_rate / 100.0) * overdue_days, 2)
+            # Overdue portion split into base interest + overdue penalty interest.
+            overdue_base_interest = round(float(loan_amount) * (daily_rate / 100.0) * overdue_days, 2)
+            overdue_penalty_interest = round(float(loan_amount) * (overdue_daily_rate / 100.0) * overdue_days, 2)
+            overdue_interest = round(overdue_base_interest + overdue_penalty_interest, 2)
         
         total = float(loan_amount) + interest + overdue_interest
         
@@ -113,6 +110,8 @@ def calculate_total_payable(loan_amount, interest_rate, duration_months, overdue
             'loan_amount': float(loan_amount),
             'interest': interest,
             'overdue_days': overdue_days,
+            'overdue_base_interest': overdue_base_interest,
+            'overdue_penalty_interest': overdue_penalty_interest,
             'overdue_interest': overdue_interest,
             'total': round(total, 2),
             'days_passed': total_days,
@@ -124,6 +123,8 @@ def calculate_total_payable(loan_amount, interest_rate, duration_months, overdue
             'loan_amount': float(loan_amount),
             'interest': 0,
             'overdue_days': 0,
+            'overdue_base_interest': 0,
+            'overdue_penalty_interest': 0,
             'overdue_interest': 0,
             'total': float(loan_amount),
             'days_passed': 0
