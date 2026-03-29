@@ -47,7 +47,8 @@ def init_database(db_path=None):
         full_name TEXT NOT NULL,
         role TEXT NOT NULL CHECK(role IN ('admin','cashier')),
         is_active INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT (datetime('now','localtime'))
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS customers (
@@ -476,6 +477,31 @@ def init_database(db_path=None):
 
     conn.commit()
     conn.close()
+    
+    # Run migrations
+    ensure_users_updated_at_column(db_path)
+
+
+def ensure_users_updated_at_column(db_path=None):
+    """Add updated_at column to users table if it doesn't exist (migration)."""
+    conn = get_connection(db_path)
+    c = conn.cursor()
+    
+    try:
+        # Check if updated_at column exists
+        c.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in c.fetchall()]
+        
+        if 'updated_at' not in columns:
+            # Add the column without default (SQLite doesn't allow function defaults in ALTER)
+            c.execute("ALTER TABLE users ADD COLUMN updated_at TEXT")
+            # Update all existing rows to have the current timestamp
+            c.execute("UPDATE users SET updated_at = datetime('now','localtime')")
+            conn.commit()
+    except Exception as e:
+        print(f"Migration info: {e}")
+    finally:
+        conn.close()
 
 
 # ── User operations ──

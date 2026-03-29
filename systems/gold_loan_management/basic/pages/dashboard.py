@@ -31,60 +31,61 @@ class DashboardPage:
 
         stats = get_dashboard_stats()
 
-        # Stat cards row
-        cards_frame = tk.Frame(view, bg=self.theme.palette.bg_app)
-        cards_frame.pack(fill=tk.X, pady=(0, 12))
-        for col in range(4):
-            cards_frame.grid_columnconfigure(col, weight=1, uniform='stat')
+        # Stat cards row (admin only)
+        if self.user['role'] == 'admin':
+            cards_frame = tk.Frame(view, bg=self.theme.palette.bg_app)
+            cards_frame.pack(fill=tk.X, pady=(0, 12))
+            for col in range(4):
+                cards_frame.grid_columnconfigure(col, weight=1, uniform='stat')
 
-        card_data = [
-            ('Active Loans', str(stats['total_active']), self.theme.palette.accent, '📋'),
-            ('Today Revenue', format_currency(stats['today_revenue']), self.theme.palette.success, '💰'),
-            ('Overdue Loans', str(stats['overdue_count']), self.theme.palette.danger, '⚠️'),
-            ('Total Customers', str(stats['total_customers']), self.theme.palette.info, '👥'),
-        ]
+            card_data = [
+                ('Active Loans', str(stats['total_active']), self.theme.palette.accent, '📋'),
+                ('Today Revenue', format_currency(stats['today_revenue']), self.theme.palette.success, '💰'),
+                ('Overdue Loans', str(stats['overdue_count']), self.theme.palette.danger, '⚠️'),
+                ('Total Customers', str(stats['total_customers']), self.theme.palette.info, '👥'),
+            ]
 
-        for i, (title, value, color, icon) in enumerate(card_data):
-            card = self.theme.make_card(cards_frame, bg=self.theme.palette.bg_surface)
-            card.grid(row=0, column=i, sticky='nsew', padx=(0, 10) if i < 3 else 0)
+            for i, (title, value, color, icon) in enumerate(card_data):
+                card = self.theme.make_card(cards_frame, bg=self.theme.palette.bg_surface)
+                card.grid(row=0, column=i, sticky='nsew', padx=(0, 10) if i < 3 else 0)
 
-            stripe = tk.Frame(card.inner, bg=color, height=4)
-            stripe.pack(fill=tk.X)
-            body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-            body.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
+                stripe = tk.Frame(card.inner, bg=color, height=4)
+                stripe.pack(fill=tk.X)
+                body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+                body.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
 
-            top_row = tk.Frame(body, bg=self.theme.palette.bg_surface)
-            top_row.pack(fill=tk.X)
-            tk.Label(top_row, text=icon, font=('Segoe UI', 18),
-                     bg=self.theme.palette.bg_surface).pack(side=tk.LEFT)
-            tk.Label(top_row, text=title, font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(8, 0))
+                top_row = tk.Frame(body, bg=self.theme.palette.bg_surface)
+                top_row.pack(fill=tk.X)
+                tk.Label(top_row, text=icon, font=('Segoe UI', 18),
+                         bg=self.theme.palette.bg_surface).pack(side=tk.LEFT)
+                tk.Label(top_row, text=title, font=self.theme.fonts.body,
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(8, 0))
 
-            tk.Label(body, text=value, font=('Segoe UI', 22, 'bold'),
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(8, 0))
+                tk.Label(body, text=value, font=('Segoe UI', 22, 'bold'),
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(8, 0))
 
-        # Second row stats
-        cards_frame2 = tk.Frame(view, bg=self.theme.palette.bg_app)
-        cards_frame2.pack(fill=tk.X, pady=(0, 16))
-        for col in range(4):
-            cards_frame2.grid_columnconfigure(col, weight=1, uniform='stat2')
+            # Second row stats
+            cards_frame2 = tk.Frame(view, bg=self.theme.palette.bg_app)
+            cards_frame2.pack(fill=tk.X, pady=(0, 16))
+            for col in range(4):
+                cards_frame2.grid_columnconfigure(col, weight=1, uniform='stat2')
 
-        card_data2 = [
-            ("Today's Loans", str(stats['today_loans']), self.theme.palette.accent),
-            ('Active Amount', format_currency(stats['active_loan_amount']), self.theme.palette.warning),
-            ('Redeemed', str(stats['total_redeemed']), self.theme.palette.success),
-            ('Total Loans', str(stats['total_loans']), self.theme.palette.info),
-        ]
+            card_data2 = [
+                ("Today's Loans", str(stats['today_loans']), self.theme.palette.accent),
+                ('Active Amount', format_currency(stats['active_loan_amount']), self.theme.palette.warning),
+                ('Redeemed', str(stats['total_redeemed']), self.theme.palette.success),
+                ('Total Loans', str(stats['total_loans']), self.theme.palette.info),
+            ]
 
-        for i, (title, value, color) in enumerate(card_data2):
-            card = self.theme.make_card(cards_frame2, bg=self.theme.palette.bg_surface)
-            card.grid(row=0, column=i, sticky='nsew', padx=(0, 10) if i < 3 else 0)
-            body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-            body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
-            tk.Label(body, text=title, font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w')
-            tk.Label(body, text=value, font=('Segoe UI', 16, 'bold'),
-                     bg=self.theme.palette.bg_surface, fg=color).pack(anchor='w', pady=(4, 0))
+            for i, (title, value, color) in enumerate(card_data2):
+                card = self.theme.make_card(cards_frame2, bg=self.theme.palette.bg_surface)
+                card.grid(row=0, column=i, sticky='nsew', padx=(0, 10) if i < 3 else 0)
+                body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+                body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
+                tk.Label(body, text=title, font=self.theme.fonts.small,
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w')
+                tk.Label(body, text=value, font=('Segoe UI', 16, 'bold'),
+                         bg=self.theme.palette.bg_surface, fg=color).pack(anchor='w', pady=(4, 0))
 
         # Quick actions
         actions_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)

@@ -19,6 +19,7 @@ import base64
 import sys
 import hmac
 from theme import GOLD_THEME
+from backup_manager import get_backup_manager
 
 # Configuration
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
@@ -239,6 +240,16 @@ class GoldLoanSystemApp:
         set_db_file(self.db_file)
         init_database(self.db_file)
 
+        # Initialize backup manager
+        try:
+            db_dir = os.path.dirname(self.db_file)
+            self.backup_manager = get_backup_manager(db_dir)
+            # Create initial backup on app start
+            self.backup_manager.create_backup()
+        except Exception as e:
+            print(f"Warning: Backup manager initialization failed: {e}")
+            self.backup_manager = None
+
         # Keep core company identity fields aligned with signed downloaded config.
         # These values are managed by subscription profile and should not drift locally.
         managed_company_fields = {
@@ -249,6 +260,9 @@ class GoldLoanSystemApp:
         for setting_key, (config_key, encrypted_key) in managed_company_fields.items():
             if encrypted_key in self.config:
                 set_setting(setting_key, self.config.get(config_key, ''), user_id=None, db_path=self.db_file)
+
+        # Register app close handler for backup
+        self.root.protocol('WM_DELETE_WINDOW', self._on_closing)
 
         # Show login
         self._show_login()
@@ -631,10 +645,10 @@ class GoldLoanSystemApp:
             ('🔍 Loans', 'loan_list'),
             ('👥 Customers', 'customers'),
             ('✉️ Letters', 'letters'),
-            (' Reports', 'reports'),
         ]
 
         if self.current_user['role'] == 'admin':
+            nav_items.append((' Reports', 'reports'))
             nav_items.append(('⚙️ Admin Settings', 'admin_settings'))
             # Show pending count badge
             from database import get_pending_approval_requests
@@ -801,6 +815,24 @@ class GoldLoanSystemApp:
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
             self.current_user = None
             self._show_login()
+
+    def _on_closing(self):
+        """Handle app closing - create backup before exit"""
+        try:
+            if self.backup_manager:
+                self.backup_manager.create_backup()
+        except Exception as e:
+            print(f"Warning: Failed to create backup on close: {e}")
+        finally:
+            self.root.destroy()
+
+    def create_backup_after_action(self):
+        """Create a backup after important actions"""
+        try:
+            if self.backup_manager:
+                self.backup_manager.create_backup()
+        except Exception as e:
+            print(f"Warning: Failed to create backup: {e}")
 
     def run(self):
         self.root.mainloop()

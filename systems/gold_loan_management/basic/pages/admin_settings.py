@@ -1,12 +1,13 @@
 """Admin Settings Page for Gold Loan System."""
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from database import (get_all_market_rates, set_market_rate, get_all_duration_rates,
                       set_duration_rate, delete_duration_rate, get_all_users,
                       create_user, update_user, get_setting, set_setting, get_duration_rate,
                       get_article_types, set_article_types)
 from utils import format_currency
+from backup_manager import get_backup_manager, BackupManager
 
 
 class AdminSettingsPage:
@@ -47,6 +48,7 @@ class AdminSettingsPage:
             ('💍 Article Types', self._show_article_types),
             ('👤 User Management', self._show_users),
             ('🏢 Company Settings', self._show_company_settings),
+            ('💾 Backup & Restore', self._show_backup_restore),
         ]
         for text, cmd in tabs:
             btn = self.theme.make_button(tab_frame, text=text, command=cmd, kind='ghost', width=18, pady=8)
@@ -610,3 +612,194 @@ class AdminSettingsPage:
                 continue
             set_setting(key, var.get().strip(), user_id=self.user['id'])
         messagebox.showinfo('Success', 'Company settings saved.')
+
+    # ── Backup & Restore ──
+    def _show_backup_restore(self):
+        self._clear_tab()
+        card = self.theme.make_card(self.tab_content, bg=self.theme.palette.bg_surface)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(card.inner, text='💾 Backup & Restore', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 4))
+        tk.Label(card.inner, text='Backup your database to multiple locations and restore from previous backups.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 12))
+
+        try:
+            from database import DB_FILE
+            import os
+            db_path = os.path.dirname(DB_FILE)
+            self.backup_manager = get_backup_manager(db_path)
+        except Exception as e:
+            messagebox.showerror('Error', f'Failed to initialize backup manager: {e}')
+            return
+
+        # Backup Locations Section
+        loc_card = self.theme.make_card(card.inner, bg=self.theme.palette.bg_surface)
+        loc_card.pack(fill=tk.X, padx=14, pady=(0, 12))
+
+        tk.Label(loc_card.inner, text='Backup Locations', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(8, 8))
+
+        loc1, loc2 = self.backup_manager.get_backup_locations()
+
+        # Location 1
+        loc1_frame = tk.Frame(loc_card.inner, bg=self.theme.palette.bg_surface)
+        loc1_frame.pack(fill=tk.X, padx=12, pady=(0, 8))
+        tk.Label(loc1_frame, text='Location 1:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.loc1_var = tk.StringVar(value=loc1)
+        loc1_entry = self.theme.make_entry(loc1_frame, variable=self.loc1_var)
+        loc1_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 4))
+        self.theme.make_button(loc1_frame, text='🗂️ Browse', 
+                              command=lambda: self._browse_folder(self.loc1_var),
+                              kind='ghost', width=10, pady=6).pack(side=tk.LEFT, padx=(0, 4))
+
+        # Location 2
+        loc2_frame = tk.Frame(loc_card.inner, bg=self.theme.palette.bg_surface)
+        loc2_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
+        tk.Label(loc2_frame, text='Location 2:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.loc2_var = tk.StringVar(value=loc2)
+        loc2_entry = self.theme.make_entry(loc2_frame, variable=self.loc2_var)
+        loc2_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 4))
+        self.theme.make_button(loc2_frame, text='🗂️ Browse',
+                              command=lambda: self._browse_folder(self.loc2_var),
+                              kind='ghost', width=10, pady=6).pack(side=tk.LEFT, padx=(0, 4))
+
+        # Save locations button
+        self.theme.make_button(loc_card.inner, text='💾 Save Backup Locations',
+                              command=self._save_backup_locations,
+                              kind='primary', width=20, pady=8).pack(padx=12, pady=(0, 12))
+
+        # Quick Backup Section
+        quick_card = self.theme.make_card(card.inner, bg=self.theme.palette.bg_surface)
+        quick_card.pack(fill=tk.X, padx=14, pady=(0, 12))
+
+        tk.Label(quick_card.inner, text='Quick Backup', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(8, 4))
+        tk.Label(quick_card.inner, text='Create a backup of your database now.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=12, pady=(0, 8))
+
+        quick_btn_frame = tk.Frame(quick_card.inner, bg=self.theme.palette.bg_surface)
+        quick_btn_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self.theme.make_button(quick_btn_frame, text='🔒 Create Backup Now',
+                              command=self._create_backup_now,
+                              kind='primary', width=20, pady=8).pack(side=tk.LEFT, padx=(0, 6))
+
+        # Restore from Backup Section
+        restore_card = self.theme.make_card(card.inner, bg=self.theme.palette.bg_surface)
+        restore_card.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 0))
+
+        tk.Label(restore_card.inner, text='Recent Backups (Last 20)', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(8, 4))
+        tk.Label(restore_card.inner, text='Select a backup to restore or delete.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=12, pady=(0, 8))
+
+        # Backup list
+        list_frame = tk.Frame(restore_card.inner, bg=self.theme.palette.bg_surface)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        # Header
+        hdr_frame = tk.Frame(list_frame, bg=self.theme.palette.bg_surface_alt)
+        hdr_frame.pack(fill=tk.X)
+        tk.Label(hdr_frame, text='Backup Name', font=self.theme.fonts.body_bold, width=35,
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+        tk.Label(hdr_frame, text='Date', font=self.theme.fonts.body_bold, width=20,
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+        tk.Label(hdr_frame, text='Size', font=self.theme.fonts.body_bold, width=12,
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+        tk.Label(hdr_frame, text='Actions', font=self.theme.fonts.body_bold, width=30,
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+
+        # List of backups
+        backups = self.backup_manager.get_backups(max_count=20)
+        
+        if not backups:
+            tk.Label(list_frame, text='No backups found. Create one now.',
+                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_muted).pack(pady=20)
+        else:
+            for idx, backup in enumerate(backups):
+                row = tk.Frame(list_frame, bg=self.theme.palette.bg_surface if idx % 2 == 0 else self.theme.palette.bg_surface_alt)
+                row.pack(fill=tk.X)
+
+                tk.Label(row, text=backup['name'], font=self.theme.fonts.body, width=35,
+                         bg=row.cget('bg'), fg=self.theme.palette.text_primary, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+                tk.Label(row, text=backup['date'], font=self.theme.fonts.body, width=20,
+                         bg=row.cget('bg'), fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+                tk.Label(row, text=self.backup_manager.get_backup_size_formatted(backup['size']), font=self.theme.fonts.body, width=12,
+                         bg=row.cget('bg'), fg=self.theme.palette.text_muted, anchor='w').pack(side=tk.LEFT, padx=6, pady=6)
+
+                action_frame = tk.Frame(row, bg=row.cget('bg'))
+                action_frame.pack(side=tk.LEFT, padx=6, pady=6, fill=tk.X, expand=True)
+
+                restore_btn = tk.Label(action_frame, text='↩️ Restore', font=self.theme.fonts.small, cursor='hand2',
+                                       bg=row.cget('bg'), fg=self.theme.palette.success)
+                restore_btn.pack(side=tk.LEFT, padx=(0, 8))
+                restore_btn.bind('<Button-1>', lambda e, path=backup['path']: self._restore_backup(path))
+
+                delete_btn = tk.Label(action_frame, text='🗑️ Delete', font=self.theme.fonts.small, cursor='hand2',
+                                      bg=row.cget('bg'), fg=self.theme.palette.danger)
+                delete_btn.pack(side=tk.LEFT)
+                delete_btn.bind('<Button-1>', lambda e, name=backup['name']: self._delete_backup(name))
+
+    def _browse_folder(self, var):
+        """Browse for a folder"""
+        folder = filedialog.askdirectory(title="Select Backup Location")
+        if folder:
+            var.set(folder)
+
+    def _save_backup_locations(self):
+        """Save backup locations"""
+        loc1 = self.loc1_var.get().strip()
+        loc2 = self.loc2_var.get().strip()
+
+        if not loc1 or not loc2:
+            messagebox.showwarning('Validation', 'Both backup locations must be specified.')
+            return
+
+        if self.backup_manager.set_backup_locations(loc1, loc2):
+            messagebox.showinfo('Success', 'Backup locations saved successfully.')
+            self._show_backup_restore()
+        else:
+            messagebox.showerror('Error', 'Failed to save backup locations.')
+
+    def _create_backup_now(self):
+        """Create a backup immediately"""
+        if self.backup_manager.create_backup():
+            messagebox.showinfo('Success', 'Backup created successfully.')
+            self._show_backup_restore()
+        else:
+            messagebox.showerror('Error', 'Failed to create backup.')
+
+    def _restore_backup(self, backup_path):
+        """Restore from a backup"""
+        if not messagebox.askyesno('Confirm Restore',
+            'This will restore your database from the selected backup.\n\n'
+            'A safety backup of your current database will be created.\n\n'
+            'Continue?'):
+            return
+
+        if self.backup_manager.restore_backup(backup_path):
+            messagebox.showinfo('Success',
+                'Database restored successfully.\n\n'
+                'Please restart the application to use the restored database.')
+            self._show_backup_restore()
+        else:
+            messagebox.showerror('Error', 'Failed to restore backup.')
+
+    def _delete_backup(self, backup_name):
+        """Delete a backup"""
+        if not messagebox.askyesno('Delete Backup',
+            f'Permanently delete backup "{backup_name}"?\n\n'
+            'This action cannot be undone.'):
+            return
+
+        if self.backup_manager.delete_backup(backup_name):
+            messagebox.showinfo('Success', 'Backup deleted.')
+            self._show_backup_restore()
+        else:
+            messagebox.showerror('Error', 'Failed to delete backup.')
