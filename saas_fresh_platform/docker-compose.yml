@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: saas_fresh_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: saas_fresh
+      MYSQL_USER: saas_user
+      MYSQL_PASSWORD: saas_password
+      MYSQL_ROOT_PASSWORD: root_password_change_me
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saas_fresh_backend
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    environment:
+      PORT: 4500
+      JWT_SECRET: change_this_long_secret
+      ADMIN_API_KEY: change_this_admin_key
+      BASE_DOWNLOAD_URL: https://downloads.example.com/files
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: saas_user
+      MYSQL_PASSWORD: saas_password
+      MYSQL_DATABASE: saas_fresh
+    ports:
+      - "4500:4500"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: saas_fresh_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:
