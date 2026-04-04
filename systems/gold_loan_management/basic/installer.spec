@@ -10,7 +10,9 @@ a = Analysis(
     ['installer.py'],
     pathex=[],
     binaries=[(dist_app_exe, '.')] if os.path.exists(dist_app_exe) else [],
-    datas=[('README.md', '.')] if os.path.exists('README.md') else [],
+    datas=[
+        ('README.md', '.')
+    ] if os.path.exists('README.md') else [],
     hiddenimports=['tkinter', 'sqlite3', 'subprocess', 'json', 'shutil'],
     hookspath=[],
     hooksconfig={},
@@ -44,5 +46,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='logo.png',
 )

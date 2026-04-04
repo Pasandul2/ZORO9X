@@ -2063,13 +2063,8 @@ exports.downloadSystem = async (req, res) => {
 
     fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
 
-    // Try to use pre-built installer from source system folder first
-    let installerPath = findInstallerExecutable(systemFolder);
-    
-    // If no pre-built installer, try to build one in package dir
-    if (!installerPath) {
-      installerPath = buildInstallerIfMissing(packageDir, false);
-    }
+    // Always rebuild from the packaged source so downloads reflect the latest code/assets.
+    let installerPath = buildInstallerIfMissing(packageDir, true);
     
     let downloadPath = installerPath;
     let deliveryMode = 'exe';
@@ -2440,10 +2435,7 @@ BUSINESS_CONFIG = load_business_config()
         fs.writeFileSync(gymAppPath, gymAppContent);
       }
       
-      let installerPath = findInstallerExecutable(tempDir);
-      if (!installerPath) {
-        installerPath = buildInstallerIfMissing(tempDir);
-      }
+      let installerPath = buildInstallerIfMissing(tempDir, true);
       if (!installerPath) {
         throw new Error('Installer executable not found. Please build installer before download.');
       }

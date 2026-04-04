@@ -37,6 +37,7 @@ import hmac
 APP_EXE_NAME = '${category}_app.exe'
 APP_SCRIPT_NAME = '${category}_app.py'
 CONFIG_FILE_NAME = '${category}_config.json'
+DEFAULT_LOGO_NAME = 'logo.png'
 API_URL = '${publicApiUrl}'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
 CONFIG_SIGNING_SECRET = '${configSigningSecret}'
@@ -159,9 +160,17 @@ class InstallationWizard:
             if os.path.exists(icon_path):
                 try:
                     self.root.iconbitmap(icon_path)
+                    return
                 except Exception:
                     pass
-                break
+
+        logo_path = os.path.join(self.bundle_dir, DEFAULT_LOGO_NAME)
+        if os.path.exists(logo_path):
+            try:
+                self._window_icon_image = tk.PhotoImage(file=logo_path)
+                self.root.iconphoto(True, self._window_icon_image)
+            except Exception:
+                pass
 
     def center_window(self):
         """Center the installer on screen."""
@@ -351,7 +360,7 @@ class InstallationWizard:
             return
 
         subscription = payload.get('subscription') or {}
-        company_name = (subscription.get('company_name') or '').strip()
+        company_name = self._pick_subscription_value(subscription, 'company_name', 'business_name', 'client_name')
         if not company_name:
             self.business_details_loaded = False
             self.loaded_api_key = ''
@@ -362,11 +371,15 @@ class InstallationWizard:
 
         self.validation_payload = payload
         self.company_name_var.set(company_name)
-        self.contact_email_var.set(subscription.get('contact_email', '') or '')
-        self.contact_phone_var.set(subscription.get('contact_phone', '') or '')
-        self.business_address_var.set(subscription.get('business_address', '') or '')
-        self.database_name_var.set(subscription.get('database_name', self.database_name_var.get().strip() or '${category}_database'))
-        self.logo_url = (subscription.get('logo_url', '') or '').strip()
+        self.contact_email_var.set(self._pick_subscription_value(subscription, 'contact_email', 'email'))
+        self.contact_phone_var.set(self._pick_subscription_value(subscription, 'contact_phone', 'phone', 'mobile', 'mobile_number'))
+        self.business_address_var.set(self._pick_subscription_value(subscription, 'business_address', 'address'))
+        self.database_name_var.set(
+            self._pick_subscription_value(subscription, 'database_name', 'db_name')
+            or self.database_name_var.get().strip()
+            or '${category}_database'
+        )
+        self.logo_url = self._pick_subscription_value(subscription, 'logo_url', 'company_logo_url', 'logo')
         self.load_logo_preview(self.logo_url)
 
         self.business_details_loaded = True
@@ -404,6 +417,39 @@ class InstallationWizard:
         except Exception:
             self.logo_preview_label.config(image='', text='Logo available (preview not supported)')
             self.logo_preview_image = None
+
+    def _pick_subscription_value(self, subscription, *keys):
+        for key in keys:
+            value = subscription.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ''
+
+    def apply_subscription_logo(self):
+        if not self.logo_url:
+            return
+
+        full_logo_url = self.logo_url if self.logo_url.startswith('http://') or self.logo_url.startswith('https://') else f'{self.active_api_url}{self.logo_url}'
+        try:
+            with urllib.request.urlopen(full_logo_url, timeout=12) as response:
+                image_bytes = response.read()
+
+            if not image_bytes:
+                return
+
+            logo_path = os.path.join(self.install_path, DEFAULT_LOGO_NAME)
+            with open(logo_path, 'wb') as logo_file:
+                logo_file.write(image_bytes)
+
+            ticket_logo_dir = os.path.join(self.install_path, 'pawn_ticket')
+            os.makedirs(ticket_logo_dir, exist_ok=True)
+            with open(os.path.join(ticket_logo_dir, 'pms_logo.png'), 'wb') as ticket_logo_file:
+                ticket_logo_file.write(image_bytes)
+        except Exception:
+            pass
 
     def welcome_step(self):
         content = self.create_scrollable_step_container()
@@ -720,8 +766,12 @@ By proceeding, you agree to these terms."""
             return
 
         subscription = payload.get('subscription') or {}
-        self.company_name = (subscription.get('company_name') or self.company_name).strip()
-        self.database_name = (subscription.get('database_name') or self.database_name_var.get().strip() or '${category}_database').strip()
+        self.company_name = (self._pick_subscription_value(subscription, 'company_name', 'business_name', 'client_name') or self.company_name).strip()
+        self.contact_email = (self._pick_subscription_value(subscription, 'contact_email', 'email') or self.contact_email_var.get().strip()).strip()
+        self.contact_phone = (self._pick_subscription_value(subscription, 'contact_phone', 'phone', 'mobile', 'mobile_number') or self.contact_phone_var.get().strip()).strip()
+        self.business_address = (self._pick_subscription_value(subscription, 'business_address', 'address') or self.business_address_var.get().strip()).strip()
+        self.database_name = (self._pick_subscription_value(subscription, 'database_name', 'db_name') or self.database_name_var.get().strip() or '${category}_database').strip()
+        self.logo_url = (self._pick_subscription_value(subscription, 'logo_url', 'company_logo_url', 'logo') or self.logo_url).strip()
         self.database_name_var.set(self.database_name)
 
         self.clear_content()
@@ -755,6 +805,7 @@ By proceeding, you agree to these terms."""
             'Creating installation directory...',
             'Copying application files...',
             'Copying branding assets...',
+            'Applying company logo...',
             'Saving configuration...',
             'Creating desktop shortcut...',
         ]
@@ -771,6 +822,9 @@ By proceeding, you agree to these terms."""
 
                 elif step_text == 'Copying branding assets...':
                     self.copy_branding_assets()
+
+                elif step_text == 'Applying company logo...':
+                    self.apply_subscription_logo()
 
                 elif step_text == 'Saving configuration...':
                     self.write_app_config()
@@ -804,11 +858,20 @@ By proceeding, you agree to these terms."""
             shutil.copy2(readme_src, os.path.join(self.install_path, 'README.md'))
 
     def copy_branding_assets(self):
+        copied = False
         for ext in ['png', 'jpg', 'jpeg', 'gif', 'ico']:
             logo_file = os.path.join(self.bundle_dir, f'logo.{ext}')
             if os.path.exists(logo_file):
                 shutil.copy2(logo_file, os.path.join(self.install_path, f'logo.{ext}'))
+                copied = True
                 break
+
+        if copied:
+            ticket_logo_dir = os.path.join(self.install_path, 'pawn_ticket')
+            os.makedirs(ticket_logo_dir, exist_ok=True)
+            src_logo = os.path.join(self.install_path, DEFAULT_LOGO_NAME)
+            if os.path.exists(src_logo):
+                shutil.copy2(src_logo, os.path.join(ticket_logo_dir, 'pms_logo.png'))
 
     def write_app_config(self):
         device_fp = get_device_fingerprint()

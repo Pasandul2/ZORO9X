@@ -25,6 +25,7 @@ from backup_manager import get_backup_manager
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, 'gold_loan_config.json')
 LICENSE_CACHE_FILE = os.path.join(APP_DIR, 'gold_loan_license.json')
+DEFAULT_LOCAL_LOGO_PATH = os.path.join(APP_DIR, 'logo.png')
 DEFAULT_OFFLINE_GRACE_MINUTES = 3
 DEFAULT_OFFLINE_GRACE_DAYS = 7
 API_URL = 'https://www.zoro9x.com'
@@ -217,6 +218,7 @@ class GoldLoanSystemApp:
             title='Gold Loan System - Basic Edition',
             maximize=True,
         )
+        self._set_window_icon()
         self.theme = GOLD_THEME
         self.current_user = None
         self.heartbeat_job = None
@@ -254,19 +256,61 @@ class GoldLoanSystemApp:
         # Keep core company identity fields aligned with signed downloaded config.
         # These values are managed by subscription profile and should not drift locally.
         managed_company_fields = {
-            'company_name': ('company_name', 'company_name_encrypted'),
-            'company_phone': ('contact_phone', 'contact_phone_encrypted'),
-            'company_address': ('business_address', 'business_address_encrypted'),
+            'company_name': 'company_name',
+            'company_phone': 'contact_phone',
+            'company_address': 'business_address',
         }
-        for setting_key, (config_key, encrypted_key) in managed_company_fields.items():
-            if encrypted_key in self.config:
-                set_setting(setting_key, self.config.get(config_key, ''), user_id=None, db_path=self.db_file)
+        for setting_key, config_key in managed_company_fields.items():
+            value = (self.config.get(config_key, '') or '').strip()
+            if value:
+                set_setting(setting_key, value, user_id=None, db_path=self.db_file)
+
+        logo_url = (self.config.get('logo_url', '') or '').strip()
+        if logo_url:
+            set_setting('company_logo_url', logo_url, user_id=None, db_path=self.db_file)
+
+        if os.path.exists(DEFAULT_LOCAL_LOGO_PATH):
+            set_setting('company_logo_path', DEFAULT_LOCAL_LOGO_PATH, user_id=None, db_path=self.db_file)
 
         # Register app close handler for backup
         self.root.protocol('WM_DELETE_WINDOW', self._on_closing)
 
         # Show login
         self._show_login()
+
+    def _set_window_icon(self):
+        bundle_dir = getattr(sys, '_MEIPASS', '') if getattr(sys, 'frozen', False) else ''
+        icon_candidates = [
+            os.path.join(APP_DIR, 'logo.ico'),
+            os.path.join(APP_DIR, 'app.ico'),
+        ]
+        if bundle_dir:
+            icon_candidates.extend([
+                os.path.join(bundle_dir, 'logo.ico'),
+                os.path.join(bundle_dir, 'app.ico'),
+            ])
+        for icon_path in icon_candidates:
+            if os.path.exists(icon_path):
+                try:
+                    self.root.iconbitmap(icon_path)
+                    return
+                except Exception:
+                    pass
+
+        logo_png_candidates = [
+            DEFAULT_LOCAL_LOGO_PATH,
+            os.path.join(APP_DIR, 'pawn_ticket', 'pms_logo.png'),
+        ]
+        if bundle_dir:
+            logo_png_candidates.append(os.path.join(bundle_dir, 'logo.png'))
+        for logo_path in logo_png_candidates:
+            if os.path.exists(logo_path):
+                try:
+                    self._window_icon_image = tk.PhotoImage(file=logo_path)
+                    self.root.iconphoto(True, self._window_icon_image)
+                    return
+                except Exception:
+                    pass
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -617,18 +661,44 @@ class GoldLoanSystemApp:
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
 
+        from database import get_setting
+
         # Logo/Header
         logo_card = self.theme.make_card(sidebar, bg=self.theme.palette.bg_surface, border=self.theme.palette.border)
         logo_card.pack(fill=tk.X, padx=12, pady=(12, 10))
-        logo_frame = tk.Frame(logo_card.inner, bg=self.theme.palette.bg_surface, height=84)
+        logo_frame = tk.Frame(logo_card.inner, bg=self.theme.palette.bg_surface, height=110)
         logo_frame.pack(fill=tk.X)
         logo_frame.pack_propagate(False)
 
+        logo_path_candidates = [
+            DEFAULT_LOCAL_LOGO_PATH,
+            os.path.join(APP_DIR, 'pawn_ticket', 'pms_logo.png'),
+        ]
+        for logo_path in logo_path_candidates:
+            if not os.path.exists(logo_path):
+                continue
+            try:
+                self.sidebar_logo_image = tk.PhotoImage(file=logo_path)
+                max_dimension = max(self.sidebar_logo_image.width(), self.sidebar_logo_image.height())
+                shrink_factor = max(1, int(max_dimension / 36))
+                if shrink_factor > 1:
+                    self.sidebar_logo_image = self.sidebar_logo_image.subsample(shrink_factor, shrink_factor)
+                tk.Label(
+                    logo_frame,
+                    image=self.sidebar_logo_image,
+                    bg=self.theme.palette.bg_surface,
+                ).pack(pady=(8, 2))
+                break
+            except Exception:
+                continue
+
+        company_name = get_setting('company_name', 'Gold Loan System') or 'Gold Loan System'
+
         tk.Label(
-            logo_frame, text='🏦 Gold Loan System',
+            logo_frame, text=company_name,
             font=self.theme.fonts.h3, bg=self.theme.palette.bg_surface,
             fg=self.theme.palette.text_primary, wraplength=230
-        ).pack(pady=(16, 4))
+        ).pack(pady=(4, 2))
 
         tk.Label(
             logo_frame, text=f'{self.current_user["full_name"]} ({self.current_user["role"].upper()})',

@@ -2363,7 +2363,9 @@ class LettersPage:
 
         logo_path = (self.logo_image_var.get() or '').strip() or (get_setting('letters_logo_image', '') or '').strip()
         if not logo_path:
-            default_logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pms_logo.png'))
+            default_logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'logo.png'))
+            if not os.path.exists(default_logo_path):
+                default_logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pms_logo.png'))
             if os.path.exists(default_logo_path):
                 logo_path = default_logo_path
         logo_src = self._normalize_image_src(logo_path)

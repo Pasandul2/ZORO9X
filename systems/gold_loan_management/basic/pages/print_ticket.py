@@ -244,7 +244,9 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             return template_file.read()
 
     def _get_logo_src(self):
-        logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+        logo_path = Path(__file__).resolve().parent.parent / 'logo.png'
+        if not logo_path.exists():
+            logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
         if logo_path.exists():
             return logo_path.as_uri()
         return ''

@@ -56,7 +56,7 @@ class AdminSettingsPage:
             ('💰 Market Rates', self._show_market_rates),
             ('📊 Duration & Interest', self._show_duration_rates),
             ('� Other Charges', self._show_other_charges),
-            ('�💍 Article Types', self._show_article_types),
+            ('💍 Article Types', self._show_article_types),
             ('👤 User Management', self._show_users),
             ('🖨 Printer Settings', self._show_printer_settings),
             ('🏢 Company Settings', self._show_company_settings),
@@ -668,6 +668,56 @@ class AdminSettingsPage:
             anchor='w',
         ).pack(fill=tk.X, pady=(0, 6))
 
+        logo_row = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        logo_row.pack(fill=tk.X, pady=(2, 10))
+        tk.Label(
+            logo_row,
+            text='Logo:',
+            font=self.theme.fonts.body_bold,
+            width=14,
+            anchor='w',
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+        ).pack(side=tk.LEFT)
+
+        logo_path = Path(__file__).resolve().parent.parent / 'logo.png'
+        if not logo_path.exists():
+            logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+
+        logo_preview_wrap = tk.Frame(logo_row, bg=self.theme.palette.bg_surface)
+        logo_preview_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        if logo_path.exists():
+            try:
+                self.company_logo_preview_image = tk.PhotoImage(file=str(logo_path))
+                max_dimension = max(self.company_logo_preview_image.width(), self.company_logo_preview_image.height())
+                shrink_factor = max(1, int(max_dimension / 52))
+                if shrink_factor > 1:
+                    self.company_logo_preview_image = self.company_logo_preview_image.subsample(shrink_factor, shrink_factor)
+                tk.Label(
+                    logo_preview_wrap,
+                    image=self.company_logo_preview_image,
+                    bg=self.theme.palette.bg_surface,
+                ).pack(anchor='w')
+            except Exception:
+                tk.Label(
+                    logo_preview_wrap,
+                    text=str(logo_path),
+                    font=self.theme.fonts.small,
+                    bg=self.theme.palette.bg_surface,
+                    fg=self.theme.palette.text_muted,
+                    anchor='w',
+                ).pack(fill=tk.X)
+        else:
+            tk.Label(
+                logo_preview_wrap,
+                text='No logo found in installation folder',
+                font=self.theme.fonts.small,
+                bg=self.theme.palette.bg_surface,
+                fg=self.theme.palette.text_muted,
+                anchor='w',
+            ).pack(fill=tk.X)
+
         self.theme.make_button(form, text='💾 Save Settings', command=self._save_company_settings,
                                kind='primary', width=18, pady=8).pack(pady=(8, 0))
 
@@ -955,7 +1005,9 @@ class AdminSettingsPage:
 
     def _build_blank_ticket_template_html(self):
         template = self._load_pawn_ticket_template_html()
-        logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+        logo_path = Path(__file__).resolve().parent.parent / 'logo.png'
+        if not logo_path.exists():
+            logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
         logo_src = logo_path.as_uri() if logo_path.exists() else ''
         blank_rows = (
             '<tr class="empty-space-row" style="height: 30mm; font-size: 12px;">'
