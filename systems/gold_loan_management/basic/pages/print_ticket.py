@@ -1,7 +1,16 @@
 """Print Ticket Page for Gold Loan System."""
 
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
 import tkinter as tk
+from datetime import datetime
 from tkinter import messagebox
+import html as html_escape
+import webview
 from database import get_loan, get_loan_items, get_setting, get_loan_renewals
 from utils import format_currency, format_date, get_status_text
 
@@ -50,290 +59,67 @@ class PrintTicketPage:
         # Print options
         opt_frame = tk.Frame(view, bg=self.theme.palette.bg_app)
         opt_frame.pack(fill=tk.X, pady=(0, 10))
-        self.theme.make_button(opt_frame, text='🖨 Print A4', command=lambda: self._do_print('a4'),
-                               kind='primary', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 10))
+        self.theme.make_button(opt_frame, text='🖨 Print A4', command=lambda: self._open_preview_window(print_on_open=True),
+                       kind='primary', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 10))
 
-        # Preview
+        # HTML preview info
         preview_card = self.theme.make_card(view, bg='#ffffff', padding=(6, 6))
         preview_card.pack(fill=tk.BOTH, expand=True)
         preview_card.configure(height=980)
         self.preview_frame = preview_card.inner
-        self._render_preview('a4')
 
-    def _create_scrollable_preview_host(self):
-        host = tk.Frame(self.preview_frame, bg='#ffffff')
-        host.pack(fill=tk.BOTH, expand=True)
-        host.configure(height=920)
-        host.pack_propagate(False)
+        info = tk.Label(
+            self.preview_frame,
+            text='Preview opens in a separate window for full fidelity rendering.',
+            font=self.theme.fonts.body,
+            bg='#ffffff',
+            fg=self.theme.palette.text_muted,
+        )
+        info.pack(anchor='w', padx=12, pady=(12, 6))
 
-        canvas = tk.Canvas(host, bg='#ffffff', highlightthickness=0, bd=0)
-        canvas.configure(height=900)
-        vbar = self.theme.make_scrollbar(host, canvas.yview)
-        canvas.configure(yscrollcommand=vbar.set)
+        btn_row = tk.Frame(self.preview_frame, bg='#ffffff')
+        btn_row.pack(anchor='w', padx=12, pady=(0, 6))
 
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vbar.pack(side=tk.RIGHT, fill=tk.Y)
+        open_btn = self.theme.make_button(
+            btn_row,
+            text='🪟 Open Preview Window',
+            command=self._open_preview_window,
+            kind='secondary',
+            width=22,
+            pady=8,
+        )
+        open_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-        content = tk.Frame(canvas, bg='#ffffff')
-        win = canvas.create_window((0, 0), window=content, anchor='nw')
+        web_btn = self.theme.make_button(
+            btn_row,
+            text='🌐 Open Web Print Preview',
+            command=lambda: self._do_print('a4'),
+            kind='ghost',
+            width=24,
+            pady=8,
+        )
+        web_btn.pack(side=tk.LEFT)
 
-        content.bind('<Configure>', lambda _e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
+        save_btn = self.theme.make_button(
+            btn_row,
+            text='💾 Save as PDF',
+            command=self._save_pdf,
+            kind='secondary',
+            width=16,
+            pady=8,
+        )
+        save_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        # Preview opens on demand.
 
-        canvas.bind('<Enter>', lambda _e: self.container.bind_all('<MouseWheel>', _on_mousewheel))
-        canvas.bind('<Leave>', lambda _e: self.container.unbind_all('<MouseWheel>'))
-        canvas.yview_moveto(0)
-        return content
-
-    def _render_preview(self, format_type='a4'):
-        if self.doc_type == 'cash_credit':
-            self._render_cash_credit_preview(format_type)
-            return
-
-        for w in self.preview_frame.winfo_children():
-            w.destroy()
-
-        content_host = self._create_scrollable_preview_host()
-
-        loan = self.loan
-        items = self.items
-        company = get_setting('company_name', 'Gold Loan Center')
-        phone = get_setting('company_phone', '')
-        address = get_setting('company_address', '')
-
-        bg = '#ffffff'
-        fg = '#1f2937'
-        muted = '#64748b'
-        accent = '#415bd8'
-
-        if format_type == 'receipt':
-            max_w = 380
-        else:
-            current_w = self.preview_frame.winfo_width() or self.container.winfo_width() or 980
-            avail_w = max(500, current_w - 180)
-            max_w = min(620, avail_w)
-
-        container = tk.Frame(content_host, bg=bg, width=max_w)
-        container.pack(anchor='n', padx=10, pady=(2, 8))
-        container.configure(width=max_w)
-
-        # Header
-        tk.Label(container, text=company, font=('Segoe UI', 16 if format_type == 'a4' else 10, 'bold'),
-             bg=bg, fg=fg).pack(pady=(2, 2))
-        if address:
-            tk.Label(container, text=address, font=('Segoe UI', 8), bg=bg, fg=muted,
-                     wraplength=max_w - 40).pack()
-        if phone:
-            tk.Label(container, text=f'Tel: {phone}', font=('Segoe UI', 8), bg=bg, fg=muted).pack()
-
-        tk.Frame(container, bg='#000000', height=2).pack(fill=tk.X, padx=10, pady=8)
-
-        tk.Label(container, text='GOLD LOAN TICKET', font=('Segoe UI', 13 if format_type == 'a4' else 9, 'bold'),
-                 bg=bg, fg=accent).pack()
-
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
-
-        # Ticket details
-        details = [
-            ('Ticket No', loan['ticket_no']),
-            ('Date', format_date(loan['issue_date'])),
-            ('Expire', format_date(loan['expire_date'])),
-            ('Customer', loan['customer_name']),
-            ('NIC', loan['customer_nic']),
-            ('Phone', loan['customer_phone']),
-        ]
-
-        font_size = 10 if format_type == 'a4' else 7
-        for lbl, val in details:
-            r = tk.Frame(container, bg=bg)
-            r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=f'{lbl}:', font=('Segoe UI', font_size, 'bold'), width=10, anchor='w',
-                     bg=bg, fg=muted).pack(side=tk.LEFT)
-            tk.Label(r, text=str(val), font=('Segoe UI', font_size), bg=bg, fg=fg).pack(side=tk.LEFT)
-
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
-
-        # Articles (match system print preview table layout)
-        tk.Label(container, text='Articles', font=('Segoe UI', font_size + 1, 'bold'),
-                 bg=bg, fg=fg).pack(anchor='w', padx=14)
-
-        table = tk.Frame(container, bg=bg)
-        table.pack(fill=tk.X, padx=14, pady=(2, 4))
-        table.columnconfigure(0, weight=3)
-        table.columnconfigure(1, weight=1)
-        table.columnconfigure(2, weight=2)
-        table.columnconfigure(3, weight=2)
-        table.columnconfigure(4, weight=2)
-
-        headers = ['Type', 'Carat', 'Gold Wt', 'Total Wt', 'Value']
-        for ci, head in enumerate(headers):
-            tk.Label(
-                table,
-                text=head,
-                font=('Segoe UI', max(8, font_size - 1), 'bold'),
-                bg=bg,
-                fg=fg,
-                anchor='w' if ci < 4 else 'e'
-            ).grid(row=0, column=ci, sticky='ew', padx=(0, 6), pady=(0, 2))
-
-        tk.Frame(container, bg='#d4d4d4', height=1).pack(fill=tk.X, padx=14, pady=(0, 2))
-
-        for ri, item in enumerate(items, start=1):
-            tk.Label(table, text=item['article_type'], font=('Segoe UI', max(8, font_size - 1)),
-                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=0, sticky='ew', padx=(0, 6), pady=1)
-            tk.Label(table, text=f"{item['carat']}K", font=('Segoe UI', max(8, font_size - 1)),
-                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=1, sticky='ew', padx=(0, 6), pady=1)
-            tk.Label(table, text=f"{item['gold_weight']}g", font=('Segoe UI', max(8, font_size - 1)),
-                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=2, sticky='ew', padx=(0, 6), pady=1)
-            tk.Label(table, text=f"{item['total_weight']}g", font=('Segoe UI', max(8, font_size - 1)),
-                     bg=bg, fg=fg, anchor='w').grid(row=ri, column=3, sticky='ew', padx=(0, 6), pady=1)
-            tk.Label(table, text=format_currency(item['estimated_value']), font=('Segoe UI', max(8, font_size - 1)),
-                     bg=bg, fg=fg, anchor='e').grid(row=ri, column=4, sticky='ew', pady=1)
-
-        tk.Frame(container, bg='#d4d4d4', height=1).pack(fill=tk.X, padx=14, pady=(4, 6))
-
-        # Summary
-        summary = [
-            ('Total Gold Weight', f"{loan['total_gold_weight']}g"),
-            ('Market Value', format_currency(loan['market_value'])),
-            ('Assessed Value', format_currency(loan['assessed_value'])),
-            ('Interest Rate', f"{loan['interest_rate']}%/month"),
-            ('Duration', f"{loan['duration_months']} month(s)"),
-        ]
-        for lbl, val in summary:
-            r = tk.Frame(container, bg=bg)
-            r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=lbl, font=('Segoe UI', font_size), bg=bg, fg=muted, anchor='w').pack(side=tk.LEFT)
-            tk.Label(r, text=val, font=('Segoe UI', font_size, 'bold'), bg=bg, fg=fg).pack(side=tk.RIGHT)
-
-        tk.Frame(container, bg='#000000', height=2).pack(fill=tk.X, padx=10, pady=6)
-
-        # Loan amount
-        r = tk.Frame(container, bg=bg)
-        r.pack(fill=tk.X, padx=14, pady=4)
-        tk.Label(r, text='LOAN AMOUNT', font=('Segoe UI', font_size + 2, 'bold'),
-                 bg=bg, fg=accent).pack(side=tk.LEFT)
-        tk.Label(r, text=format_currency(loan['loan_amount']),
-                 font=('Segoe UI', font_size + 4, 'bold'), bg=bg, fg=accent).pack(side=tk.RIGHT)
-
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
-
-        # Footer
-        if loan.get('purpose'):
-            r = tk.Frame(container, bg=bg)
-            r.pack(fill=tk.X, padx=14, pady=(0, 2))
-            tk.Label(r, text='Purpose:', font=('Segoe UI', max(7, font_size - 1)),
-                     bg=bg, fg=muted).pack(side=tk.LEFT)
-            tk.Label(r, text=loan['purpose'], font=('Segoe UI', max(7, font_size - 1)),
-                     bg=bg, fg=fg).pack(side=tk.RIGHT)
-
-        tk.Label(
-            container,
-            text='Terms: Gold articles held as collateral. Interest charged monthly. Articles forfeited if not redeemed/renewed by expiry.',
-            font=('Segoe UI', max(6, font_size - 3)),
-            bg=bg,
-            fg=muted,
-            wraplength=max_w - 40,
-            justify='left',
-        ).pack(padx=14, pady=(4, 2), anchor='w')
-
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=8)
-
-        # Signatures
-        if format_type == 'a4':
-            sig_frame = tk.Frame(container, bg=bg)
-            sig_frame.pack(fill=tk.X, padx=14, pady=(20, 10))
-            for label in ['Customer Signature', 'Cashier Signature', 'Manager Signature']:
-                sf = tk.Frame(sig_frame, bg=bg)
-                sf.pack(side=tk.LEFT, expand=True)
-                tk.Frame(sf, bg='#999999', height=1, width=120).pack(pady=(20, 4))
-                tk.Label(sf, text=label.split(' ')[0], font=('Segoe UI', 7), bg=bg, fg=fg).pack()
-
-        tk.Label(container, text='Thank you for choosing our services.',
-                 font=('Segoe UI', font_size - 1, 'italic'), bg=bg, fg=muted).pack(pady=(8, 12))
-
-    def _render_cash_credit_preview(self, format_type='a4'):
-        for w in self.preview_frame.winfo_children():
-            w.destroy()
-
-        content_host = self._create_scrollable_preview_host()
-
+    def _build_cash_credit_html(self, format_type='a4', pdf_uri=''):
         loan = self.loan
         ren = self.latest_renewal or {}
         company = get_setting('company_name', 'Gold Loan Center')
         phone = get_setting('company_phone', '')
         address = get_setting('company_address', '')
 
-        bg = '#ffffff'
-        fg = '#1f2937'
-        muted = '#64748b'
-        accent = '#415bd8'
-
-        if format_type == 'receipt':
-            max_w = 380
-        else:
-            current_w = self.preview_frame.winfo_width() or self.container.winfo_width() or 980
-            avail_w = max(500, current_w - 180)
-            max_w = min(620, avail_w)
-
-        container = tk.Frame(content_host, bg=bg, width=max_w)
-        container.pack(anchor='n', padx=10, pady=(2, 8))
-        container.configure(width=max_w)
-
-        tk.Label(container, text=company, font=('Segoe UI', 16 if format_type == 'a4' else 10, 'bold'),
-             bg=bg, fg=fg).pack(pady=(2, 2))
-        if address:
-            tk.Label(container, text=address, font=('Segoe UI', 8), bg=bg, fg=muted,
-                     wraplength=max_w - 40).pack()
-        if phone:
-            tk.Label(container, text=f'Tel: {phone}', font=('Segoe UI', 8), bg=bg, fg=muted).pack()
-
-        tk.Frame(container, bg='#000000', height=2).pack(fill=tk.X, padx=10, pady=8)
-        tk.Label(container, text='CASH CREDIT SLIP', font=('Segoe UI', 13 if format_type == 'a4' else 9, 'bold'),
-                 bg=bg, fg=accent).pack()
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=6)
-
-        details = [
-            ('Ticket No', loan['ticket_no']),
-            ('Customer', loan['customer_name']),
-            ('Renew Date', format_date(ren.get('renewed_at') or loan.get('renew_date') or '')),
-            ('Received Amount', format_currency(ren.get('payment_amount', 0))),
-            ('Interest Settled', format_currency(ren.get('interest_paid', 0))),
-            ('Principal Reduced', format_currency(ren.get('principal_reduction', 0))),
-            ('Balance Loan Amount', format_currency(loan['loan_amount'])),
-        ]
-
-        font_size = 10 if format_type == 'a4' else 7
-        for lbl, val in details:
-            r = tk.Frame(container, bg=bg)
-            r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=f'{lbl}:', font=('Segoe UI', font_size, 'bold'), width=16, anchor='w',
-                     bg=bg, fg=muted).pack(side=tk.LEFT)
-            tk.Label(r, text=str(val), font=('Segoe UI', font_size, 'bold'), bg=bg, fg=fg).pack(side=tk.RIGHT)
-
-        tk.Frame(container, bg='#cccccc', height=1).pack(fill=tk.X, padx=10, pady=10)
-        tk.Label(container, text='Received By: ____________________', font=('Segoe UI', font_size), bg=bg, fg=fg).pack(anchor='w', padx=14)
-        tk.Label(container, text='Customer Signature: ____________________', font=('Segoe UI', font_size), bg=bg, fg=fg).pack(anchor='w', padx=14, pady=(8, 0))
-        tk.Label(container, text='Thank you for your payment.', font=('Segoe UI', font_size - 1, 'italic'), bg=bg, fg=muted).pack(pady=(10, 8))
-
-    def _do_print(self, format_type):
-        """Print using system print dialog."""
-        try:
-            import tempfile
-            import webbrowser
-
-            loan = self.loan
-            items = self.items
-            company = get_setting('company_name', 'Gold Loan Center')
-            phone = get_setting('company_phone', '')
-            address = get_setting('company_address', '')
-
-            if self.doc_type == 'cash_credit':
-                ren = self.latest_renewal or {}
-                html = f'''<!DOCTYPE html>
+        html = f'''<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <title>Cash Credit Slip - {loan['ticket_no']}</title>
 <style>
@@ -344,7 +130,6 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 .row {{ display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dotted #ddd; }}
 .label {{ color: #666; }}
 .value {{ font-weight: 700; }}
-@media print {{ body {{ margin: 0; }} }}
 </style>
 </head><body>
 <div class="header"><h2 style="margin:0">{company}</h2><div>{address}</div><div>Tel: {phone}</div></div>
@@ -359,87 +144,247 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 <div style="margin-top:24px">Received By: ____________________</div>
 <div style="margin-top:12px">Customer Signature: ____________________</div>
 <p style="text-align:center;font-style:italic;color:#999;font-size:8pt;margin-top:18px">Thank you for your payment.</p>
-<script>window.onload=function(){{window.print();}}</script>
 </body></html>'''
 
-                tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
-                tmp.write(html)
-                tmp.close()
-                webbrowser.open('file://' + tmp.name)
-                messagebox.showinfo('Print', 'Windows print preview opened for A4 printing.')
+        return html
+
+    def _write_temp_html(self, html_content):
+        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+        tmp.write(html_content)
+        tmp.close()
+        return tmp.name
+
+    def _get_downloads_dir(self):
+        downloads = Path.home() / 'Downloads'
+        downloads.mkdir(parents=True, exist_ok=True)
+        return downloads
+
+    def _make_pdf_path(self):
+        ticket_no = self.loan.get('ticket_no', 'ticket') if self.loan else 'ticket'
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"pawn_ticket_{ticket_no}_{stamp}.pdf"
+        return str(self._get_downloads_dir() / filename)
+
+    def _get_edge_exe(self):
+        edge_in_path = shutil.which('msedge')
+        if edge_in_path:
+            return edge_in_path
+
+        candidates = [
+            os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            os.path.join(os.environ.get('ProgramFiles', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        ]
+        for cand in candidates:
+            if cand and os.path.exists(cand):
+                return cand
+        return None
+
+    def _generate_pdf(self, html_path, pdf_path):
+        edge_exe = self._get_edge_exe()
+        if not edge_exe:
+            raise RuntimeError('Microsoft Edge not found for PDF export.')
+
+        cmd = [
+            edge_exe,
+            '--headless',
+            '--disable-gpu',
+            f'--print-to-pdf={pdf_path}',
+            Path(html_path).as_uri(),
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return pdf_path
+
+    def _save_pdf(self):
+        try:
+            pdf_path = self._make_pdf_path()
+
+            if self.doc_type == 'cash_credit':
+                html_content = self._build_cash_credit_html('a4', Path(pdf_path).as_uri())
+            else:
+                html_content = self._build_pawn_ticket_html(Path(pdf_path).as_uri())
+
+            html_path = self._write_temp_html(html_content)
+            self._generate_pdf(html_path, pdf_path)
+
+            os.startfile(pdf_path)
+        except Exception as exc:
+            messagebox.showerror('PDF Export', f'Could not save PDF:\n{exc}')
+
+    def _open_preview_window(self, print_on_open=False):
+        try:
+            if self.doc_type == 'cash_credit':
+                html_content = self._build_cash_credit_html('a4', '')
+            else:
+                html_content = self._build_pawn_ticket_html('')
+
+            html_path = self._write_temp_html(html_content)
+            title = f"Print Preview - {self.loan.get('ticket_no', '')}"
+
+            script = (
+                "import pathlib, webview\n"
+                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
+                f"print_on_open = {print_on_open!r}\n"
+                "def on_start():\n"
+                "    if print_on_open:\n"
+                "        try:\n"
+                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
+                "        except Exception:\n"
+                "            pass\n"
+                "webview.start(on_start)\n"
+            )
+            subprocess.Popen([sys.executable, '-c', script])
+        except Exception as exc:
+            messagebox.showerror('Preview Error', f'Could not open preview window:\n{exc}')
+
+    def _load_pawn_ticket_template(self):
+        template_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pawn_ticket_template.html')
+        )
+        with open(template_path, 'r', encoding='utf-8') as template_file:
+            return template_file.read()
+
+    def _get_logo_src(self):
+        logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+        if logo_path.exists():
+            return logo_path.as_uri()
+        return ''
+
+    def _format_issue_time(self, loan):
+        created_at = loan.get('created_at') or ''
+        if not created_at:
+            return ''
+        if isinstance(created_at, str) and ' ' in created_at:
+            time_part = created_at.split(' ', 1)[1]
+            try:
+                dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                return dt.strftime('%H:%M')
+            except ValueError:
+                return time_part[:5]
+        return ''
+
+    def _build_item_rows_html(self, items, include_total=False):
+        rows = []
+        total_weight = 0.0
+        total_gold_weight = 0.0
+        total_value = 0.0
+
+        for item in items:
+            desc = item.get('article_type', '')
+            if item.get('description'):
+                desc = f"{desc} - {item['description']}"
+            total_weight += float(item.get('total_weight') or 0)
+            total_gold_weight += float(item.get('gold_weight') or 0)
+            total_value += float(item.get('estimated_value') or 0)
+
+            rows.append(
+                "<tr>"
+                f"<td>{html_escape.escape(str(desc))}</td>"
+                f"<td class=\"right\">{float(item.get('total_weight') or 0):.2f}</td>"
+                f"<td class=\"right\">{float(item.get('gold_weight') or 0):.2f}</td>"
+                f"<td class=\"center\">{int(item.get('carat') or 0)}K</td>"
+                f"<td class=\"center\">{int(item.get('carat') or 0)}</td>"
+                f"<td class=\"right\">{format_currency(item.get('estimated_value') or 0)}</td>"
+                "</tr>"
+            )
+
+        if not rows:
+            rows.append(
+                "<tr style=\"height: 25mm;\">"
+                "<td></td><td class=\"right\"></td><td class=\"right\"></td>"
+                "<td class=\"center\"></td><td class=\"center\"></td><td class=\"right\"></td>"
+                "</tr>"
+            )
+
+        if include_total:
+            rows.append(
+                "<tr>"
+                "<td class=\"right bold\">එකතුව / මொத்தம் / Total</td>"
+                f"<td class=\"right\">{total_weight:.2f}</td>"
+                f"<td class=\"right\">{total_gold_weight:.2f}</td>"
+                "<td></td><td></td>"
+                f"<td class=\"right\">{format_currency(total_value)}</td>"
+                "</tr>"
+            )
+
+        return ''.join(rows)
+
+    def _build_pawn_ticket_html(self, pdf_uri=''):
+        loan = self.loan
+        items = self.items
+        template = self._load_pawn_ticket_template()
+
+        branch = get_setting('branch_name', 'Kolonna')
+        logo_src = self._get_logo_src()
+        serial_no = loan.get('ticket_no', '')
+        ticket_no = loan.get('ticket_no', '')
+        date_str = format_date(loan.get('issue_date', ''))
+        time_str = self._format_issue_time(loan)
+        pawner_name = loan.get('customer_name', '')
+        pawner_address = loan.get('customer_address', '')
+        nic = loan.get('customer_nic', '')
+        phone = loan.get('customer_phone', '')
+        interest_rate = f"{loan.get('interest_rate', '')}%"
+        market_value = format_currency(loan.get('market_value', 0))
+        assessed_value = format_currency(loan.get('assessed_value', 0))
+        amount_advanced = format_currency(loan.get('advance_amount') or loan.get('loan_amount') or 0)
+        purpose = loan.get('purpose', '')
+        period = f"{loan.get('duration_months', '')} month(s)"
+        redemption_date = format_date(loan.get('expire_date', ''))
+
+        item_rows_top = self._build_item_rows_html(items, include_total=True)
+        item_rows_bottom = self._build_item_rows_html(items, include_total=False)
+
+        replacements = {
+            '{{LOGO_SRC}}': html_escape.escape(str(logo_src)),
+            '{{PDF_URI}}': html_escape.escape(str(pdf_uri)),
+            '{{SERIAL_NO}}': html_escape.escape(str(serial_no)),
+            '{{BRANCH}}': html_escape.escape(str(branch)),
+            '{{PAWN_TICKET_NO}}': html_escape.escape(str(ticket_no)),
+            '{{DATE}}': html_escape.escape(str(date_str)),
+            '{{TIME}}': html_escape.escape(str(time_str)),
+            '{{PAWNER_NAME}}': html_escape.escape(str(pawner_name)),
+            '{{PAWNER_ADDRESS}}': html_escape.escape(str(pawner_address)),
+            '{{INTEREST_RATE}}': html_escape.escape(str(interest_rate)),
+            '{{MARKET_VALUE}}': html_escape.escape(str(market_value)),
+            '{{ASSESSED_VALUE}}': html_escape.escape(str(assessed_value)),
+            '{{AMOUNT_ADVANCED}}': html_escape.escape(str(amount_advanced)),
+            '{{NIC}}': html_escape.escape(str(nic)),
+            '{{PHONE}}': html_escape.escape(str(phone)),
+            '{{ITEM_ROWS_TOP}}': item_rows_top,
+            '{{PURPOSE}}': html_escape.escape(str(purpose)),
+            '{{PERIOD}}': html_escape.escape(str(period)),
+            '{{REDEMPTION_DATE}}': html_escape.escape(str(redemption_date)),
+            '{{CASH_VOUCHER_NO}}': html_escape.escape(str(ticket_no)),
+            '{{CASH_RECEIVED_BY}}': html_escape.escape(str(self.user.get('full_name', ''))),
+            '{{PAWNING_ADVANCE}}': html_escape.escape(str(amount_advanced)),
+            '{{ITEM_ROWS_BOTTOM}}': item_rows_bottom,
+        }
+
+        for key, value in replacements.items():
+            template = template.replace(key, value)
+
+        return template
+
+    def _do_print(self, format_type):
+        """Print using system print dialog."""
+        try:
+            import webbrowser
+
+            loan = self.loan
+            items = self.items
+            company = get_setting('company_name', 'Gold Loan Center')
+            phone = get_setting('company_phone', '')
+            address = get_setting('company_address', '')
+
+            if self.doc_type == 'cash_credit':
+                html = self._build_cash_credit_html('a4', '')
+                html_path = self._write_temp_html(html)
+                webbrowser.open(Path(html_path).as_uri())
                 return
 
-            page_width = '210mm' if format_type == 'a4' else '80mm'
-            page_height = '297mm' if format_type == 'a4' else 'auto'
-
-            items_html = ''
-            for item in items:
-                items_html += f'''<tr>
-                    <td>{item['article_type']}</td>
-                    <td>{item['carat']}K</td>
-                    <td>{item['gold_weight']}g</td>
-                    <td>{item['total_weight']}g</td>
-                    <td style="text-align:right">{format_currency(item['estimated_value'])}</td>
-                </tr>'''
-
-            html = f'''<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<title>Loan Ticket - {loan['ticket_no']}</title>
-<style>
-@page {{ size: {page_width} {page_height}; margin: 10mm; }}
-body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format_type == 'a4' else '8pt'}; color: #333; max-width: {page_width}; margin: 0 auto; }}
-.header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 10px; }}
-.header h1 {{ margin: 0; font-size: {'18pt' if format_type == 'a4' else '12pt'}; }}
-.header p {{ margin: 2px 0; color: #666; font-size: {'9pt' if format_type == 'a4' else '7pt'}; }}
-.title {{ text-align: center; font-size: {'14pt' if format_type == 'a4' else '10pt'}; font-weight: bold; color: #415bd8; margin: 10px 0; }}
-table {{ width: 100%; border-collapse: collapse; margin: 8px 0; }}
-th, td {{ padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd; font-size: {'10pt' if format_type == 'a4' else '7pt'}; }}
-th {{ background: #f5f5f5; font-weight: bold; }}
-.detail-row {{ display: flex; justify-content: space-between; padding: 2px 0; }}
-.detail-label {{ color: #666; }}
-.total-row {{ font-size: {'16pt' if format_type == 'a4' else '11pt'}; font-weight: bold; color: #415bd8; padding: 10px 0; border-top: 2px solid #415bd8; display: flex; justify-content: space-between; }}
-.footer {{ font-size: {'8pt' if format_type == 'a4' else '6pt'}; color: #999; margin-top: 10px; }}
-.signatures {{ display: flex; justify-content: space-around; margin-top: 40px; }}
-.sig-box {{ text-align: center; }}
-.sig-line {{ border-top: 1px solid #999; width: 120px; margin: 0 auto 4px; }}
-@media print {{ body {{ margin: 0; }} }}
-</style>
-</head><body>
-<div class="header">
-    <h1>{company}</h1>
-    <p>{address}</p>
-    <p>Tel: {phone}</p>
-</div>
-<div class="title">GOLD LOAN TICKET</div>
-<div class="detail-row"><span class="detail-label">Ticket No:</span><span><b>{loan['ticket_no']}</b></span></div>
-<div class="detail-row"><span class="detail-label">Date:</span><span>{format_date(loan['issue_date'])}</span></div>
-<div class="detail-row"><span class="detail-label">Expire:</span><span>{format_date(loan['expire_date'])}</span></div>
-<div class="detail-row"><span class="detail-label">Customer:</span><span>{loan['customer_name']}</span></div>
-<div class="detail-row"><span class="detail-label">NIC:</span><span>{loan['customer_nic']}</span></div>
-<div class="detail-row"><span class="detail-label">Phone:</span><span>{loan['customer_phone']}</span></div>
-<h3>Articles</h3>
-<table><thead><tr><th>Type</th><th>Carat</th><th>Gold Wt</th><th>Total Wt</th><th style="text-align:right">Value</th></tr></thead>
-<tbody>{items_html}</tbody></table>
-<div class="detail-row"><span class="detail-label">Total Gold Weight:</span><span>{loan['total_gold_weight']}g</span></div>
-<div class="detail-row"><span class="detail-label">Market Value:</span><span>{format_currency(loan['market_value'])}</span></div>
-<div class="detail-row"><span class="detail-label">Assessed Value:</span><span>{format_currency(loan['assessed_value'])}</span></div>
-<div class="detail-row"><span class="detail-label">Interest Rate:</span><span>{loan['interest_rate']}%/month</span></div>
-<div class="detail-row"><span class="detail-label">Duration:</span><span>{loan['duration_months']} month(s)</span></div>
-{f'<div class="detail-row"><span class="detail-label">Purpose:</span><span>{loan.get("purpose","")}</span></div>' if loan.get('purpose') else ''}
-<div class="total-row"><span>LOAN AMOUNT</span><span>{format_currency(loan['loan_amount'])}</span></div>
-<div class="footer">
-<p>Terms: Gold articles held as collateral. Interest charged monthly. Articles forfeited if not redeemed/renewed by expiry.</p>
-</div>
-{'<div class="signatures"><div class="sig-box"><div class="sig-line"></div>Customer</div><div class="sig-box"><div class="sig-line"></div>Cashier</div><div class="sig-box"><div class="sig-line"></div>Manager</div></div>' if format_type == 'a4' else ''}
-<p style="text-align:center;font-style:italic;color:#999;font-size:8pt">Thank you for choosing our services.</p>
-<script>window.onload=function(){{window.print();}}</script>
-</body></html>'''
-
-            tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
-            tmp.write(html)
-            tmp.close()
-            webbrowser.open('file://' + tmp.name)
-            messagebox.showinfo('Print', 'Windows print preview opened for A4 printing.')
+            html = self._build_pawn_ticket_html('')
+            html_path = self._write_temp_html(html)
+            webbrowser.open(Path(html_path).as_uri())
 
         except Exception as e:
             messagebox.showerror('Print Error', f'Could not open print preview:\n{str(e)}')

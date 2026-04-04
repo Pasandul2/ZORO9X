@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pawn Ticket Template</title>
+  <style>
+    :root {
+      /* Spacing scale */
+      --space-xs: 0.5mm;
+      --space-sm: 1mm;
+      --space-md: 1.5mm;
+      --space-lg: 2mm;
+      --space-xl: 3mm;
+      
+      /* Border radius */
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      
+      /* Colors */
+      --color-border: #ccc;
+      --color-border-dark: #999;
+      --color-bg-light: #f8f9fa;
+      --color-text: #111;
+      --color-text-light: #666;
+      
+      /* Typography */
+      --font-xs: 7.5px;
+      --font-sm: 8.5px;
+      --font-md: 9.5px;
+      --font-lg: 11px;
+    }
+
+    @page {
+      size: A4;
+      margin: 4mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
+      color: #111;
+      background: #bed4fa65;
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      background: #ffffff;
+    }
+
+    .ticket {
+      overflow: hidden;
+      background: #bed4fa65;
+    }
+
+    .ticket-body {
+      border: 4mm  #bed4fa65;
+      overflow: hidden;
+    }
+
+    .top-copy,
+    .bottom-copy {
+      width: 100%;
+    }
+
+    .divider {
+      border-top: 1.5px dashed #666;
+      margin: 2mm 0 5mm 0;
+    }
+
+    .row {
+      display: flex;
+      width: 100%;
+    }
+
+    .col {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .border-r { border-right: 1px solid #c4cad6; }
+    .border-b { border-bottom: 1px solid #c4cad6; }
+    .border-t { border-top: 1px solid #c4cad6; }
+
+    .p-1 { padding: 1.5mm; }
+    .p-2 { padding: 2.2mm; }
+    .p-3 { padding: 3mm; }
+    .py-1 { padding-top: 1.5mm; padding-bottom: 1.5mm; }
+
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: 700; }
+    .semi { font-weight: 600; }
+    .tiny { font-size: 8.5px; }
+    .xs { font-size: 9.5px; }
+    .sm { font-size: 11px; }
+    .md { font-size: 12.8px; }
+    .lg { font-size: 16px; }
+
+    .logo-box {
+      width: 26mm;
+      min-width: 26mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid #c4cad6;
+      padding: 2mm;
+    }
+
+    .logo-mark {
+      width: 19mm;
+      height: 19mm;
+      object-fit: contain;
+    }
+
+    .head-title {
+      line-height: 1.2;
+    }
+
+    .head-title .main {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .head-title .sub,
+    .head-title .meta {
+      font-size: 10px;
+    }
+
+    .rounded-field {
+      border: 1px solid #b9c0cc;
+      border-radius: 9px;
+      min-height: 6.5mm;
+      padding: 1.5mm 2mm;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4mm;
+      font-size: 12px;
+    }
+
+    .serial-stack {
+      width: 52mm;
+      min-width: 42mm;
+      border-left: 1px solid #c4cad6;
+    }
+
+    .field-label {
+      font-size: 9.5px;
+      font-weight: 600;
+      margin-bottom: 2mm;
+      color: #222;
+    }
+
+    .tri-label {
+      line-height: 1.04;
+      margin-bottom: 0.8mm;
+    }
+
+    .tri-label .si,
+    .tri-label .ta,
+    .tri-label .en {
+      display: block;
+    }
+
+    .tri-label .ta,
+    .tri-label .en {
+      font-size: 0.9em;
+      font-weight: 600;
+    }
+
+    .tri-head {
+      line-height: 1.05;
+    }
+
+    .tri-head span {
+      display: block;
+    }
+
+    .tri-head span:nth-child(2),
+    .tri-head span:nth-child(3) {
+      font-size: 0.9em;
+    }
+
+    .value {
+      font-size: 12px;
+      min-height: 8mm;
+      background: #fff;
+    }
+
+    .split-field {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 2mm;
+    }
+
+    .split-stack {
+      position: relative;
+    }
+
+    .split-stack::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 31mm;
+      border-left: 1px solid #9ea9ba;
+      pointer-events: none;
+    }
+
+    .split-field .field-label {
+      flex: 1;
+      margin-bottom: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .split-field .value {
+      min-height: 0;
+      width: 30mm;
+      padding-left: 2mm;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .grid-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .grid-table th,
+    .grid-table td {
+      border: 1px solid #c4cad6;
+      padding: 1mm;
+      vertical-align: top;
+      font-size: 12px;
+      word-wrap: break-word;
+      background: #fff;
+    }
+
+    .grid-table th {
+      font-weight: 700;
+      text-align: center;
+      color: #1a3d78;
+    }
+
+    .grid-table tr.empty-space-row td {
+      border-top: 0;
+    }
+
+    .brand-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.6mm;
+      padding: 1.4mm 1.8mm;
+      border-radius: 9px;
+      background: linear-gradient(125deg, #f5f8fc 0%, #ebeff6 55%, #f7f8fa 100%);
+      border: 1px solid #d6dbe6;
+    }
+
+    .brand-left {
+      display: flex;
+      align-items: center;
+      gap: 2.4mm;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .brand-logo {
+      width: 20mm;
+      height: 20mm;
+      object-fit: contain;
+      background: #fff;
+      border: 1px solid #d2d7e1;
+      border-radius: 6px;
+      padding: 1mm;
+      box-shadow: 0 1px 5px rgba(20, 34, 52, 0.08);
+    }
+
+    .brand-copy {
+      min-width: 0;
+    }
+
+    .brand-copy .si {
+      font-size: 13px;
+      line-height: 1.08;
+      font-weight: 800;
+      color: #dc1f24;
+      letter-spacing: 0.1px;
+      text-shadow: 0 1px 0 #fff;
+    }
+
+    .brand-copy .en {
+      font-size: 13px;
+      line-height: 1.08;
+      font-weight: 800;
+      color: #0f4ea0;
+      margin-top: 0.5mm;
+      letter-spacing: 0.1px;
+    }
+
+    .brand-copy .ta {
+      font-size: 12px;
+      line-height: 1.08;
+      font-weight: 800;
+      color: #0f4ea0;
+      margin-top: 0.4mm;
+      letter-spacing: 0.1px;
+    }
+
+    .brand-copy .reg {
+      font-size: 12px;
+      margin-top: 0.6mm;
+      font-weight: 700;
+      color: #222;
+    }
+
+    .tagline {
+      display: inline-flex;
+      margin-top: 0.5mm;
+      border-radius: 999px;
+      padding: 0.6mm 2.3mm;
+      font-size: 9px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(90deg, #ea1e25 0%, #ff4b3a 100%);
+    }
+
+    .address-lines {
+      margin-top: 0.6mm;
+      font-size: 10px;
+      color: #222;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    .address-lines div {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .contact-strip {
+      margin-top: 0.6mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.8mm;
+      font-size: 10px;
+      line-height: 1.1;
+      padding: 0.45mm 0.8mm;
+      border-radius: 999px;
+      background: #0c0303bd;
+      color: #fff;
+    }
+
+    .contact-strip .phone {
+      background: #fff;
+      color: #d21e21;
+      border-radius: 999px;
+      padding: 0.35mm 1.1mm;
+      font-weight: 800;
+      letter-spacing: 0.1px;
+      white-space: nowrap;
+    }
+
+    .terms {
+      font-size: 9px;
+      line-height: 1.35;
+      text-align: justify;
+    }
+
+    .sign-row {
+      display: grid;
+      grid-template-columns: 0.7fr 0.7fr 1.1fr;
+      gap: 6mm;
+      margin-top: 3mm;
+      align-items: end;
+    }
+
+    .sign {
+      text-align: center;
+      font-size: 8px;
+    }
+
+    .sign-line {
+      border-top: 1px solid #9ea9ba;
+      height: 2mm;
+      margin-top: 5mm;
+      position: relative;
+    }
+
+    .stamp-box {
+      height: 35mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+      font-size: 10px;
+    }
+
+    .mini-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 1mm;
+    }
+
+    .ticket-page-note {
+      font-size: 8px;
+      font-weight: 700;
+      text-align: right;
+      color: #374151;
+      margin-top: 0.8mm;
+    }
+
+    .ticket-page-note:empty {
+      display: none;
+      margin: 0;
+    }
+
+    .duo {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+    }
+
+    .amount-box {
+      height: 16mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .no-print {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      max-width: 210mm;
+      margin: 12px auto;
+      font-size: 13px;
+      color: #555;
+    }
+
+    .pdf-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, #0f4ea0 0%, #1a6dd4 100%);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(15, 78, 160, 0.35);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .pdf-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(15, 78, 160, 0.45);
+    }
+
+    .pdf-btn:active {
+      transform: translateY(0);
+    }
+
+    @media (max-width: 900px) {
+      .brand-copy .si,
+      .brand-copy .en {
+        font-size: 12px;
+      }
+
+      .brand-copy .ta {
+        font-size: 11px;
+      }
+
+      .contact-strip {
+        flex-direction: column;
+        align-items: flex-start;
+        border-radius: 10px;
+      }
+    }
+
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 2mm;
+      }
+
+      body {
+        background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .page {
+        margin: 0;
+        padding: 2mm;
+        width: 100%;
+        min-height: auto;
+      }
+
+      .ticket {
+        padding: 1mm;
+        box-shadow: none;
+        border-color: #999;
+      }
+
+      .ticket-body {
+        border-width: 0.8px;
+      }
+
+      .divider {
+        margin: 1.8mm 0;
+      }
+
+      .p-1 {
+        padding: 1mm;
+      }
+
+      .p-2 {
+        padding: 1.4mm;
+      }
+
+      .value {
+        min-height: 3.2mm;
+      }
+
+      .field-label {
+        font-size: 8px;
+      }
+
+      .tri-label {
+        margin-bottom: 0.4mm;
+      }
+
+      .tri-label .ta,
+      .tri-label .en {
+        font-size: 0.86em;
+      }
+
+      .tri-head span:nth-child(2),
+      .tri-head span:nth-child(3) {
+        font-size: 0.8em;
+      }
+
+      .grid-table th,
+      .grid-table td {
+        font-size: 8.6px;
+      }
+
+      .brand-copy .si,
+      .brand-copy .en,
+      .brand-copy .ta {
+        font-size: 11px;
+      }
+
+      .tagline,
+      .brand-copy .reg,
+      .address-lines,
+      .contact-strip {
+        font-size: 7px;
+      }
+
+      .ticket-page-note {
+        font-size: 7px;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button class="pdf-btn" onclick="window.print()">
+      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+        <path d="M6 9V3h12v6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M6 18h12v3H6z" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M6 14h12" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Print A4
+    </button>
+    <span>Use "Save as PDF" as destination · A4 · Portrait · No margins</span>
+  </div>
+
+  <div class="page">
+    <div class="ticket">
+      <div class="ticket-body">
+      <section class="top-copy">
+        <div class="row border-b">
+          <div class="col p-2">
+            <div class="center bold sm">උකස් පත්‍රිකාව / அடகு சீட்டு / PAWN TICKET</div>
+            <div class="ticket-page-note">{{TICKET_PAGE_INFO}}</div>
+
+            <div class="brand-banner" style="margin-top: 2.5mm;">
+              <div class="brand-left">
+                <img src="{{LOGO_SRC}}" alt="PMS Logo" class="brand-logo" />
+
+                <div class="brand-copy">
+                  <div class="si">PMS රන් ණය මධ්‍යස්ථානය</div>
+                  <div class="en">PMS Gold Loan Center</div>
+                  <div class="tagline">බලයලත් උකස්කරුවෝ / Authorised Pawnbroker / அங்கீகரிக்கப்பட்ட அடகு வியாபாரி</div>
+                  <div class="reg">ලි.ප. අංකය / Reg. No / பதிவு எண் : ර|කො|02488</div>
+                  <div class="address-lines">
+                    <div>අළුත් වත්ත, නව නගරය, කොලොන්න. | 076 761 22 08 / 071 039 30 24</div>
+                  </div>
+                  <!-- <div class="contact-strip">
+                    <span>අළුත් වත්ත, නව නගරය, කොලොන්න. | 076 761 22 08 / 071 039 30 24</span>
+                  </div> -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="serial-stack">
+            <div class="p-2 border-b">
+              <div class="field-label" style="margin-bottom: 5mm;">අනු අංකය / வரிசை எண் / Serial No.</div>
+              <div class="value"></div>
+            </div>
+            <div class="p-2">
+              <div class="field-label">ශාඛාව / கிளை / Branch</div>
+              <div class="rounded-field xs" style="background: #fff;"><span>{{BRANCH}}</span><span></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row border-b">
+          <div class="col border-r p-1" style="flex: 1.25;">
+            <div class="field-label">උකස් ටිකට් අංකය / அடகு சீட்டு எண் / Pawn Ticket No.</div>
+            <div class="value" style="text-align: center;">{{PAWN_TICKET_NO}}</div>
+          </div>
+          <div class="col border-r p-1" style="flex: 0.75;">
+            <div class="field-label">දිනය / தேதி / Date</div>
+            <div class="value center">{{DATE}}</div>
+          </div>
+          <div class="col p-1" style="flex: 0.75;">
+            <div class="field-label">වේලාව / நேரம் / Time</div>
+            <div class="value center">{{TIME}}</div>
+          </div>
+        </div>
+
+        <div class="row border-b">
+          <div class="col border-r p-2" style="flex: 1.35; display: flex; flex-direction: column; justify-content: space-between;">
+            <div >
+              <div class="field-label" style="margin-bottom: 4mm;">නම සහ ලිපිනය / பெயர் மற்றும் முகவரி / Name and Address of Pawner</div>
+              <div class="value">{{PAWNER_NAME}}</div></br>
+              <div class="value">{{PAWNER_ADDRESS}}</div>
+            </div>
+            <div class="row border-t">
+              <div class="col border-r p-1">
+                <div class="field-label">හැඳුනුම්පත් අංකය / அடையாள அட்டை எண் /</br> Passport / NIC No.</div>
+                <div class="value">{{NIC}}</div>
+              </div>
+              <div class="col p-1">
+                <div class="field-label">දුරකථන අංකය / தொலைபேசி எண் /</br> Telephone No.</div>
+                <div class="value">{{PHONE}}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col split-stack" style="flex: 0.9;">
+            <div class="row border-b">
+              <div class="col border-r p-1 split-field">
+                <div class="field-label tri-label"><span class="si">මාසික පොලී / மாதாந்திர வட்டி / Rate of Interest Per Month</span></div>
+                <div class="value right">{{INTEREST_RATE}}</div>
+              </div>
+            </div>
+            <div class="row border-b">
+              <div class="col border-r p-1 split-field">
+                <div class="field-label tri-label"><span class="si">මුළු ප්‍රකාශිත වෙළඳ වටිනාකම / மொத்த அறிவிக்கப்பட்ட சந்தை மதிப்பு / Total Declared Market Value</span></div>
+                <div class="value right">{{MARKET_VALUE}}</div>
+              </div>
+            </div>
+            <div class="row border-b">
+              <div class="col border-r p-1 split-field">
+                <div class="field-label tri-label"><span class="si">මුළු තක්සේරු වටිනාකම / மொத்த மதிப்பீட்டு மதிப்பு / Total Assessed Value</span></div>
+                <div class="value right">{{ASSESSED_VALUE}}</div>
+              </div>
+            </div>
+            <div class="row" style="padding-top: 10px;">
+              <div class="col p-1 split-field">
+                <div class="field-label tri-label"><span class="si">ලබා දුන් මුදල / வழங்கிய முன்பணம் / Amount Advanced</span></div>
+                <div class="value right bold">{{AMOUNT_ADVANCED}}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        
+
+        <div class="border-b p-1 center semi sm">උකස් බඩු විස්තර / அடகு வைத்த பொருட்களின் விபரம் / Description of Items Pawned</div>
+
+        <table class="grid-table">
+          <colgroup>
+            <col style="width: 22%" />
+            <col style="width: 14%" />
+            <col style="width: 16%" />
+            <col style="width: 16%" />
+            <col style="width: 22%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>විස්තර</br>விளக்கம்</br>Description</th>
+              <th>මුළු බර (ග්‍රෑම්)</br>மொத்த எடை (கிராம்)</br>Total Weight (gms)</th>
+              <th>ශුද්ධ රන් බර (ග්‍රෑම්)</br>நிகர தங்க எடை (கிராம்)</br>Net Gold Weight (gms)</th>
+              <th>රන් අන්තර්ගතය (කැරට්)</br>தங்கத்தின் அளவு (கேரட்)</br>Gold Content (Karats)</th>
+              <th>ශුද්ධ රන් වටිනාකම (රු.)</br>நிகர தங்க மதிப்பு (ரூ.)</br>Net Gold Value (Rs.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ITEM_ROWS_TOP}}
+          </tbody>
+        </table>
+
+        <div class="row border-b">
+          <div class="col border-r p-1" style="flex: 1.2;">
+            <div class="field-label">අවශ්‍යතාවය / நோக்கம் / Purpose</div>
+            <div class="rounded-field">{{PURPOSE}}</div>
+          </div>
+          <div class="col border-r p-1" style="flex: 0.8;">
+            <div class="field-label">කාලය / காலம் / Period</div>
+            <div class="rounded-field center">{{PERIOD}}</div>
+          </div>
+          <div class="col p-1" style="flex: 1;">
+            <div class="field-label">බේරාගත යුතු දිනය / மீட்பு தேதி / Redemption Date</div>
+            <div class="rounded-field center">{{REDEMPTION_DATE}}</div>
+          </div>
+        </div>
+
+        <div class="p-2 terms border-b">
+          මම ඉහත විස්තර කර ඇති භාණ්ඩ PMS රන් ණය මධ්‍යස්ථානය වෙත උකස් වශයෙන් භාර දෙමි. ඒවා මගේම හිමිකම යටතේ ඇති බවත්, විශේෂ භාවාත්මක වටිනාකමක් නොමැති බවත් ප්‍රකාශ කරමි. පිටුපස සඳහන් නියම සහ කොන්දේසි මා කියවා තේරුම් ගෙන ඒවාට එකඟ වන අතර, ඒවා මෙම උකස් ගිවිසුමේ අංගයක් වන බව පිළිගනිමි. <br>
+          நான் மேலே விவரிக்கப்பட்ட பொருட்களை PMS தங்கக் கடன் மையங்கள் க்கு அடமாக ஒப்படைக்கிறேன். அவை எனது சொத்து என்பதையும், உணர்ச்சி சார்ந்த சிறப்பு மதிப்பு இல்லை என்பதையும் அறிவிக்கிறேன். பின்புறத்தில் குறிப்பிடப்பட்ட விதிமுறைகள் மற்றும் நிபந்தனைகளை நான் வாசித்து புரிந்து கொண்டுள்ளேன்; அவற்றை ஏற்கிறேன், மேலும் அவை இந்த அடகு ஒப்பந்தத்தின் ஒரு பகுதியாகும். <br>
+          I hereby pawn and hand over to PMS GOLD LOAN CENTER the articles described above. I declare that the articles are owned by me, have no sentimental value, and that I have read and understood the terms and conditions stated overleaf. I agree to them as part of this contract of pawning.
+        </div>
+
+        <div class="p-2">
+          <div class="sign-row">
+            <div class="sign">
+              <div class="sign-line"></div>
+              <div>උකස්කරු / அடகு வைப்பவர் / Pawner</div>
+            </div>
+            <div class="sign">
+              <div class="sign-line"></div>
+              <div>තක්සේරුකරු / மதிப்பீட்டாளர் / Valuer</div>
+            </div>
+            <div class="sign">
+              <div class="sign-line"></div>
+              <div>බලයලත් නිලධාරී / அங்கீகாரம் பெற்ற அதிகாரி / Authorised Officer</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <section class="bottom-copy">
+        <div class="row border-b">
+          <div class="logo-box" style="width: 20mm; min-width: 20mm;">
+            <img src="{{LOGO_SRC}}" alt="PMS Logo" class="logo-mark" style="width: 14mm; height: 14mm;" />
+          </div>
+
+          <div class="col p-2 border-r" style="flex: 0.95;">
+            <div class="head-title">
+              <div class="main" style="font-size: 11px; color: #dc1f24;">PMS රන් ණය මධ්‍යස්ථානය</div>
+              <div class="main" style="font-size: 11px; color: #0f4ea0;">PMS GOLD LOAN CENTER</div>
+              <div class="meta tiny">අළුත් වත්ත, නව නගරය, කොලොන්න.</div>
+              <div class="meta tiny">076 761 22 08 / 071 039 30 24</div>
+            </div>
+          </div>
+
+          <div class="col p-2" style="flex: 1.4;">
+            <div class="mini-title">ලැබිය යුතු උකස් ණය / அடகுக் கடன் / LOANS RECEIVABLE PAWNING</div>
+            <div class="ticket-page-note">{{TICKET_PAGE_INFO}}</div>
+            <div class="row xs" style="gap: 10px;">
+              <div class="col"><span class="bold">මුදල් වව්චරය / பண வவுச்சர் / Cash Voucher</span></div>
+              <div class="col left"><span class="bold">හර <br> பற்று </br> Debit</span> <span></span></div>
+            </div>
+          </div>
+
+          <div class="col p-2 border-l" style="flex: 0.65; border-left: 1px solid #222;">
+            <div class="rounded-field center">{{CASH_VOUCHER_NO}}</div>
+            <div class="xs left" style="margin-top: 1.5mm;">අංකය</br>இலங்கம் </br>No. </div>
+          </div>
+        </div>
+
+        <div class="duo">
+          <div class="border-r">
+            <div class="row border-b">
+              <div class="col border-r p-1">
+                <div class="field-label">ශාඛාව / கிளை / Branch</div>
+                <div class="value">{{BRANCH}}</div>
+              </div>
+              <div class="col p-1">
+                <div class="field-label">අනුක්රමික අංකය / தொடர் இல. / Serial No.</div>
+                <div class="value">{{PAWN_TICKET_NO}}</div>
+              </div>
+            </div>
+
+            <div class="border-b p-2" style="height: 20mm;">
+              <div class="field-label">මුදල් ලබාගන්නාගේ නම / பணம் பெறுபவரின் பெயர் / Payee's name</div>
+              <div class="value">{{PAWNER_NAME}}</div>
+              <div class="value">{{PAWNER_ADDRESS}}</div>
+
+            </div>
+
+            <div class="border-b p-2" style="height: 15mm;">
+              <div class="field-label">ලබා දුන් මුදල / அடகு முன்பணம் / Pawning Advance</div>
+              <div class="value bold md">{{PAWNING_ADVANCE}}</div>
+            </div>
+
+            <div class="row">
+              <div class="col border-r p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end;">
+               
+                <div class="xs">උකස්කරු / அடகு வைப்பவர் / Pawner</div>
+              </div>
+              <div class="col p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end;">
+                
+                <div class="xs">බලයලත් නිලධාරී / அங்கீகாரம் பெற்ற அதிகாரி / Authorised Officer</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="border-b p-1 center semi sm">උකස් කළ භාණ්ඩ විස්තර / அடகு பொருட்களின் விவரம் / Description of Articles Pawned</div>
+            <table class="grid-table" style="border-top: 0;">
+              <colgroup>
+                <col style="width: 40%" />
+                <col style="width: 12%" />
+                <col style="width: 12%" />
+                <col style="width: 15%" />
+                <col style="width: 25%" />
+              </colgroup>
+              <tbody>
+                {{ITEM_ROWS_BOTTOM}}
+              </tbody>
+            </table>
+            <div class="stamp-box">
+              Office Note / Seal Area
+            </div>
+          </div>
+        </div>
+      </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PAGE 2 — BACKSIDE ============ -->
+  <div class="page" style="page-break-before: always;">
+    <div class="ticket">
+      <div class="ticket-body">
+
+        <!-- Terms & Conditions Header -->
+        <div class="border-b p-2 center semi sm" style="background: #f5f7fb;">
+          නියම හා කොන්දේසි / நியமங்களும் நிபந்தனைகளும் / Terms and Conditions
+        </div>
+
+        <!-- Terms & Conditions Body -->
+        <div class="border-b p-2 terms" style="font-size: 9px; line-height: 1.38;">
+
+          <p style="margin: 0 0 1.5mm 0;">
+            උකස් මුදල මෙම ලේඛනයේ සඳහන් කාලය තුළ නිසි පොලිය සමඟ ආපසු ගෙවිය යුතුය.<br>
+            அடகு முன்பணம் இந்த ஆவணத்தில் குறிப்பிடப்பட்ட காலத்திற்குள் உரிய வட்டியுடன் திருப்பிச் செலுத்தப்பட வேண்டும்.<br>
+            Pawning advance is repayable within the period mentioned in this document with due interest.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            මුදාගැනීමේ කාලය තුළ මුදානොගත් / අළුත් නොකළ උකස් භාණ්ඩ විකිණීමේ අයිතිය PMS රන් ණය මධ්‍යස්ථානය සතුය.<br>
+            மீட்கப்படாத / புதுப்பிக்கப்படாத அடகு பொருட்களை விற்கும் உரிமை PMS தங்கக் கடன் மையங்கள் க்கு உண்டு.<br>
+            The PMS GOLD LOAN CENTER has the right of sale of pawned articles which are not redeemed/renewed within the redeemable period.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            උකස් භාණ්ඩ මුදාගැනීමට උකස් ටිකට්පත භාර දිය යුතුය.<br>
+            அடகு பொருட்களை மீட்க அடகு சீட்டை ஒப்படைக்க வேண்டும்.<br>
+            The Pawn ticket must be surrendered to redeem the pawned articles.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            උකස් ටිකට්පත නැතිවූ විට හෝ උකස්කරු මිය ගිය විට භාණ්ඩ මුදාගැනීමට PMS රන් ණය මධ්‍යස්ථානය විසින් අනුමත ආකෘතියක දිවුරුම් ප්‍රකාශයක් සහ ජාතික ලංකා මූල්‍ය සමාගම විසින් නියම කරන ලද අනෙකුත් ලේඛන ඉදිරිපත් කළ යුතුය.<br>
+            சீட்டு தொலைந்தால் அல்லது அடகு வைப்பவர் இறந்தால், PMS தங்கக் கடன் மையங்கள் ஆல் அங்கீகரிக்கப்பட்ட படிவத்தில் சத்தியப் பிரமாணம் மற்றும் நேஷனல் லங்கா ஃபைனான்ஸ் PLC குறிப்பிடும் ஆவணங்கள் சமர்ப்பிக்கப்பட வேண்டும்.<br>
+            An affidavit in a form approved by the PMS GOLD LOAN CENTER and other documents specified by the National Lanka Finance PLC must be submitted to redeem the articles where the ticket is lost or pawner is dead.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            දැනුම්දීම් ඇත්නම් මෙම ලේඛනයේ දක්වා ඇති ලිපිනයට එවනු ලබන බවට උකස්කරු එකඟ වේ.<br>
+            அறிவிப்புகள் ஏதேனும் இருப்பின் இந்த ஆவணத்தில் கொடுக்கப்பட்ட முகவரிக்கு அனுப்பப்படும் என்பதை அடகு வைப்பவர் ஒப்புக்கொள்கிறார்.<br>
+            The Pawner agrees that notice if any will be sent to the address given in this document.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            "PMS රන් ණය මධ්‍යස්ථානය" යන යෙදුම එහි සියලු ශාඛා සහ බලයලත් නියෝජිතයන් ඇතුළත් වේ.<br>
+            "PMS தங்கக் கடன் மையங்கள்" என்ற சொல் அதன் அனைத்து கிளைகள் மற்றும் அங்கீகரிக்கப்பட்ட முகவர்களையும் உள்ளடக்கும்.<br>
+            The term 'PMS GOLD LOAN CENTER' shall include all its branches and Authorized Agents.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            උකස් භාණ්ඩයක් අහිමි වූ විට, අහිමි වූ අවස්ථාවේ රත්‍රන් වටිනාකම පමණක් PMS රන් ණය මධ්‍යස්ථානය විසින් ආපසු ගෙවනු ලැබේ.<br>
+            அடகு பொருள் இழப்பு ஏற்பட்டால், இழப்பின் போதைய தங்கத்தின் மதிப்பு மட்டுமே PMS தங்கக் கடன் மையங்கள் ஆல் திருப்பிச் செலுத்தப்படும்.<br>
+            In the event of a loss of pawned article, only the value of gold at the time of loss will be reimbursed by the PMS GOLD LOAN CENTER.
+          </p>
+
+          <p style="margin: 0 0 1.5mm 0;">
+            ඉහත නියම සහ කොන්දේසි වලින් කිසිවක් එකතු කිරීමට හෝ වෙනස් කිරීමට PMS රන් ණය මධ්‍යස්ථානය හට අයිතිය ඇත.<br>
+            மேற்கண்ட விதிமுறைகள் மற்றும் நிபந்தனைகளில் எதையும் சேர்க்க அல்லது மாற்ற PMS தங்கக் கடன் மையங்கள் க்கு உரிமை உண்டு.<br>
+            The PMS GOLD LOAN CENTER reserves the right to add or alter any of the above terms and conditions.
+          </p>
+
+          <p style="margin: 0;">
+            මුදානුගත් / අළුත් නොකළ භාණ්ඩ සම්බන්ධයෙන් පොලිය වැඩි කිරීමටත් ඕනෑම කොන්දේසියක් බලාත්මක කිරීමටත් PMS රන් ණය මධ්‍යස්ථානය හට අයිතිය ඇත.<br>
+            மீட்கப்படாத / புதுப்பிக்கப்படாத பொருட்கள் தொடர்பாக வட்டியை அதிகரிக்கவும் எந்த நிபந்தனையையும் செயல்படுத்தவும் PMS தங்கக் கடன் மையங்கள் க்கு உரிமை உண்டு.<br>
+            The PMS GOLD LOAN CENTER reserves the rights to enhance interest and attend any conditions with regard to not redeem / renewed articles.
+          </p>
+
+        </div>
+
+        <!-- Redemption Section Header -->
+        <div class="border-b p-2 center semi sm" style="background: #f5f7fb;">
+          උකස් බේරුම් කිරීම / அடகு மீளல் / REDEMPTION OF PAWN ARTICLES
+        </div>
+
+        <!-- Redemption Declaration -->
+        <div class="border-b p-2 terms" style="font-size: 9px; line-height: 1.38;">
+          <p style="margin: 0;">
+            මෙම ලේඛනයේ දක්වා ඇති පරිදි උකස් කරන ලද භාණ්ඩ ලැබී ඇති බැවින්, සියලු වගකීම් සහ බැඳීම් වලින් PMS රන් ණය මධ්‍යස්ථානය නිදහස් කරමි.<br>
+            இந்த ஆவணத்தில் விவரிக்கப்பட்டவாறு அடகு வைக்கப்பட்ட பொருட்கள் பெறப்பட்டுள்ளதால், அனைத்து கடமைகள் மற்றும் பொறுப்புகளிலிருந்தும் PMS தங்கக் கடன் மையங்கள் ஐ விடுவிக்கிறேன்.<br>
+            The articles pawned as per details given in this document having been received, I hereby discharge the PMS GOLD LOAN CENTER from all obligations and liabilities in respect of this pawn.
+          </p>
+        </div>
+
+        <!-- Date & Signature Row -->
+        <div class="row border-b">
+          <div class="col border-r p-2" style="flex: 0.4;">
+            <div class="value" style="min-height: 12mm;"></div>
+            <div class="field-label">දිනය / தேதி / Date</div>
+          </div>
+          <div class="col p-2" style="flex: 1;">
+            <div class="value" style="min-height: 12mm;"></div>
+            <div class="field-label right">උකස්කරුගේ අත්සන / அடகு வைப்பவரின் கையொப்பம் / Signature of Pawner</div>
+          </div>
+        </div>
+
+        <!-- Spacer -->
+        
+
+        
+
+      </div>
+      <div style="height: 45mm;"></div>
+      <!-- Bottom Section: Cash Table + Details -->
+        <div class="row " style="gap: 2mm; align-items: stretch; padding-top: 1.5mm;">
+          <!-- Left: Cash Denomination Table -->
+          <div class="col" style="flex: 0.35; border: 1px solid #c4cad6;">
+            <table class="grid-table" style="border: 1px solid #c4cad6;">
+              <colgroup>
+                <col style="width: 45%;" />
+                <col style="width: 55%;" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th style="text-align: left; font-size: 8.5px;">රු. / ரூ. / Rs.</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">5000/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">1000/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">500/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">200/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">100/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">50/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">20/-</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td class="bold" style="font-size: 9px;">10/-</td>
+                  <td></td>
+                </tr>
+                <tr style="background: #f5f7fb;">
+                  <td class="bold" style="font-size: 9px;">
+                    එකතුව<br>
+                    <span style="font-size: 7.5px;">மொத்தம்</span><br>
+                    <span style="font-weight: 800;">TOTAL</span>
+                  </td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Right: Cash Received & Signature -->
+          <div class="col" style="flex: 0.65; border: 1px solid #c4cad6;">
+            <div class="p-2 border-b">
+              <div class="field-label" style="font-size: 8.5px;">
+                මුදල් ලබාගන්නාගේ නම<br>
+                <span style="font-size: 7.5px;">பணம் பெறுபவரின் பெயர்</span><br>
+                <span style="font-weight: 700;">Cash Received By</span>
+              </div>
+              <div class="value" style="min-height: 8mm;"></div>
+            </div>
+
+            <div class="p-2 border-b">
+              <div class="field-label" style="font-size: 8.5px;">
+                උකස්කරුගේ නම / அடகு வைப்பவரின் பெயர் / Name of Pawner
+              </div>
+              <div class="value" style="min-height: 8mm;"></div>
+            </div>
+
+            <div class="p-2" style="min-height: 30mm; display: flex; flex-direction: column; justify-content: flex-end;">
+              <div style="border-top: 1px solid #9ea9ba; padding-top: 1mm; text-align: center;">
+                <div class="field-label" style="font-size: 8.5px;">
+                  උකස්කරුගේ අත්සන / அடகு வைப்பவரின் கையொப்பம் / Signature of Pawner
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+    </div>
+  </div>
+</body>
+</html>

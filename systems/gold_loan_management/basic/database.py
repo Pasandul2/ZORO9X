@@ -480,6 +480,9 @@ def init_database(db_path=None):
     
     # Run migrations
     ensure_users_updated_at_column(db_path)
+    ensure_duration_rates_other_charges_columns(db_path)
+    ensure_loan_renewals_other_charges_column(db_path)
+    ensure_legacy_renewed_status_compatibility(db_path)
 
 
 def ensure_users_updated_at_column(db_path=None):
@@ -498,6 +501,66 @@ def ensure_users_updated_at_column(db_path=None):
             # Update all existing rows to have the current timestamp
             c.execute("UPDATE users SET updated_at = datetime('now','localtime')")
             conn.commit()
+    except Exception as e:
+        print(f"Migration info: {e}")
+    finally:
+        conn.close()
+
+
+def ensure_duration_rates_other_charges_columns(db_path=None):
+    """Add other_charges columns to duration_rates table (migration)."""
+    conn = get_connection(db_path)
+    c = conn.cursor()
+    
+    try:
+        c.execute("PRAGMA table_info(duration_rates)")
+        columns = [row[1] for row in c.fetchall()]
+        
+        if 'other_charges_renewal' not in columns:
+            c.execute("ALTER TABLE duration_rates ADD COLUMN other_charges_renewal REAL NOT NULL DEFAULT 0")
+        if 'other_charges_redeem' not in columns:
+            c.execute("ALTER TABLE duration_rates ADD COLUMN other_charges_redeem REAL NOT NULL DEFAULT 0")
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Migration info: {e}")
+    finally:
+        conn.close()
+
+
+def ensure_loan_renewals_other_charges_column(db_path=None):
+    """Add other_charges column to loan_renewals table (migration)."""
+    conn = get_connection(db_path)
+    c = conn.cursor()
+    
+    try:
+        c.execute("PRAGMA table_info(loan_renewals)")
+        columns = [row[1] for row in c.fetchall()]
+        
+        if 'other_charges' not in columns:
+            c.execute("ALTER TABLE loan_renewals ADD COLUMN other_charges REAL NOT NULL DEFAULT 0")
+        if 'overdue_penalty_interest' not in columns:
+            c.execute("ALTER TABLE loan_renewals ADD COLUMN overdue_penalty_interest REAL NOT NULL DEFAULT 0")
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Migration info: {e}")
+    finally:
+        conn.close()
+
+
+def ensure_legacy_renewed_status_compatibility(db_path=None):
+    """Normalize old 'renewed' loan status to active so actions remain available."""
+    conn = get_connection(db_path)
+    c = conn.cursor()
+
+    try:
+        c.execute(
+            """UPDATE loans
+               SET status='active', updated_at=datetime('now','localtime')
+               WHERE status='renewed'"""
+        )
+        conn.commit()
     except Exception as e:
         print(f"Migration info: {e}")
     finally:
@@ -773,7 +836,8 @@ def update_loan_status(loan_id, status, db_path=None):
 def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
                new_assessed_value, user_id, remarks='', payment_amount=0,
                normal_interest_due=0, overdue_interest_due=0,
-               principal_reduction=0, new_loan_amount=None, db_path=None):
+               principal_reduction=0, new_loan_amount=None, overdue_penalty_interest=0,
+               other_charges=0, db_path=None):
     conn = get_connection(db_path)
     loan = conn.execute("SELECT * FROM loans WHERE id=?", (loan_id,)).fetchone()
     if not loan:
@@ -788,11 +852,13 @@ def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
     conn.execute('''INSERT INTO loan_renewals 
         (loan_id, old_expire_date, new_expire_date, new_duration_months, interest_paid,
          payment_amount, normal_interest_due, overdue_interest_due, principal_reduction,
-         new_loan_amount, new_interest_rate, new_assessed_value, renewed_by, remarks)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+         new_loan_amount, new_interest_rate, new_assessed_value, renewed_by, remarks, 
+         overdue_penalty_interest, other_charges)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                  (loan_id, old_expire, new_expire, new_duration, interest_paid,
                   payment_amount, normal_interest_due, overdue_interest_due, principal_reduction,
-                  new_loan_amount, new_interest_rate, new_assessed_value, user_id, remarks))
+                  new_loan_amount, new_interest_rate, new_assessed_value, user_id, remarks,
+                  overdue_penalty_interest, other_charges))
 
     conn.execute('''UPDATE loans SET loan_amount=?, interest_principal_amount=?, renew_date=?, expire_date=?, duration_months=?, interest_rate=?,
         status='active', updated_at=datetime('now','localtime') WHERE id=?''',
@@ -811,7 +877,7 @@ def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
     return True, "Loan renewed successfully"
 
 
-def redeem_loan(loan_id, total_paid, user_id, remarks='', db_path=None):
+def redeem_loan(loan_id, total_paid, user_id, remarks='', other_charges=0, db_path=None):
     conn = get_connection(db_path)
     conn.execute('''INSERT INTO loan_payments (loan_id, payment_type, amount, received_by, remarks)
         VALUES (?,?,?,?,?)''', (loan_id, 'redemption', total_paid, user_id, remarks))
@@ -937,13 +1003,13 @@ def get_duration_rate(months, carat=22, db_path=None):
     return dict(row) if row else None
 
 
-def set_duration_rate(months, carat, assessed_pct, interest_rate, overdue_rate, max_interest_months=3, db_path=None):
+def set_duration_rate(months, carat, assessed_pct, interest_rate, overdue_rate, max_interest_months=3, other_charges_renewal=0, other_charges_redeem=0, db_path=None):
     conn = get_connection(db_path)
-    conn.execute('''INSERT INTO duration_rates (carat, duration_months, assessed_percentage, interest_rate, overdue_interest_rate, max_interest_months)
-        VALUES (?,?,?,?,?,?)
-        ON CONFLICT(carat, duration_months) DO UPDATE SET assessed_percentage=?, interest_rate=?, overdue_interest_rate=?, max_interest_months=?,
+    conn.execute('''INSERT INTO duration_rates (carat, duration_months, assessed_percentage, interest_rate, overdue_interest_rate, max_interest_months, other_charges_renewal, other_charges_redeem)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(carat, duration_months) DO UPDATE SET assessed_percentage=?, interest_rate=?, overdue_interest_rate=?, max_interest_months=?, other_charges_renewal=?, other_charges_redeem=?,
         is_active=1, updated_at=datetime('now','localtime')''',
-                 (carat, months, assessed_pct, interest_rate, overdue_rate, max_interest_months, assessed_pct, interest_rate, overdue_rate, max_interest_months))
+                 (carat, months, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem))
     conn.commit()
     conn.close()
 
@@ -951,6 +1017,16 @@ def set_duration_rate(months, carat, assessed_pct, interest_rate, overdue_rate, 
 def delete_duration_rate(months, carat, db_path=None):
     conn = get_connection(db_path)
     conn.execute("UPDATE duration_rates SET is_active=0 WHERE duration_months=? AND carat=?", (months, carat))
+    conn.commit()
+    conn.close()
+
+
+def set_other_charges(months, carat, renewal_charge, redeem_charge, db_path=None):
+    """Update only the other charges without affecting interest rates."""
+    conn = get_connection(db_path)
+    conn.execute('''UPDATE duration_rates SET other_charges_renewal=?, other_charges_redeem=?, updated_at=datetime('now','localtime')
+                    WHERE duration_months=? AND carat=?''',
+                 (renewal_charge, redeem_charge, months, carat))
     conn.commit()
     conn.close()
 
@@ -1013,13 +1089,15 @@ def search_recent_descriptions(prefix):
 
 # ── Loan Approval Request operations ──
 
-def create_approval_request(loan_id, ticket_no, default_val, requested_val, requested_by, requested_by_name, request_type='assessed_pct', db_path=None):
+def create_approval_request(loan_id, ticket_no, default_val, requested_val, requested_by,
+                            requested_by_name, request_type='assessed_pct', review_note='', db_path=None):
     conn = get_connection(db_path)
     c = conn.cursor()
     c.execute('''INSERT INTO loan_approval_requests
-        (loan_id, ticket_no, default_assessed_pct, requested_assessed_pct, requested_by, requested_by_name, request_type, status)
-        VALUES (?,?,?,?,?,?,?,'pending')''',
-        (loan_id, ticket_no, default_val, requested_val, requested_by, requested_by_name, request_type))
+        (loan_id, ticket_no, default_assessed_pct, requested_assessed_pct, requested_by, requested_by_name,
+         request_type, review_note, status)
+        VALUES (?,?,?,?,?,?,?,?,'pending')''',
+        (loan_id, ticket_no, default_val, requested_val, requested_by, requested_by_name, request_type, review_note))
     conn.commit()
     req_id = c.lastrowid
     conn.close()

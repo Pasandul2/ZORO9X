@@ -61,8 +61,16 @@ class DashboardPage:
                 tk.Label(top_row, text=title, font=self.theme.fonts.body,
                          bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(8, 0))
 
-                tk.Label(body, text=value, font=('Segoe UI', 22, 'bold'),
-                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(8, 0))
+                tk.Label(
+                    body,
+                    text=value,
+                    font=('Segoe UI', 16, 'bold'),
+                    bg=self.theme.palette.bg_surface,
+                    fg=self.theme.palette.text_primary,
+                    anchor='w',
+                    justify='left',
+                    wraplength=240,
+                ).pack(anchor='w', fill=tk.X, pady=(8, 0))
 
             # Second row stats
             cards_frame2 = tk.Frame(view, bg=self.theme.palette.bg_app)
@@ -84,8 +92,16 @@ class DashboardPage:
                 body.pack(fill=tk.BOTH, expand=True, padx=14, pady=10)
                 tk.Label(body, text=title, font=self.theme.fonts.small,
                          bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w')
-                tk.Label(body, text=value, font=('Segoe UI', 16, 'bold'),
-                         bg=self.theme.palette.bg_surface, fg=color).pack(anchor='w', pady=(4, 0))
+                tk.Label(
+                    body,
+                    text=value,
+                    font=('Segoe UI', 14, 'bold'),
+                    bg=self.theme.palette.bg_surface,
+                    fg=color,
+                    anchor='w',
+                    justify='left',
+                    wraplength=240,
+                ).pack(anchor='w', fill=tk.X, pady=(4, 0))
 
         # Quick actions
         actions_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
@@ -118,17 +134,22 @@ class DashboardPage:
 
         # Table header
         cols = ['Ticket #', 'Customer', 'Amount', 'Status', 'Issue Date', 'Expire Date']
-        widths = [100, 180, 120, 90, 100, 100]
+        col_widths = [12, 20, 12, 10, 12, 12]  # Character widths
 
         table_frame = tk.Frame(recent_card.inner, bg=self.theme.palette.bg_surface)
         table_frame.pack(fill=tk.X, padx=16, pady=(0, 4))
 
+        # Configure grid columns
+        for i in range(len(cols)):
+            table_frame.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
+
         header_frame = tk.Frame(table_frame, bg=self.theme.palette.bg_surface_alt)
         header_frame.pack(fill=tk.X)
-        for j, (col, w) in enumerate(zip(cols, widths)):
-            tk.Label(header_frame, text=col, font=self.theme.fonts.body_bold, width=w // 8,
+        for i, col in enumerate(cols):
+            header_frame.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
+            tk.Label(header_frame, text=col, font=self.theme.fonts.body_bold,
                      bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted,
-                     anchor='w').pack(side=tk.LEFT, padx=(12 if j == 0 else 4, 4), pady=8)
+                     anchor='w').grid(row=0, column=i, sticky='w', padx=6, pady=8)
 
         loans = search_loans(status='all')[:10]
         from utils import get_status_text, get_status_color, format_date
@@ -140,6 +161,9 @@ class DashboardPage:
             sep = tk.Frame(table_frame, bg=self.theme.palette.border, height=1)
             sep.pack(fill=tk.X)
 
+            for i in range(len(cols)):
+                row_frame.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
+
             vals = [
                 loan['ticket_no'],
                 loan['customer_name'],
@@ -148,13 +172,13 @@ class DashboardPage:
                 format_date(loan['issue_date']),
                 format_date(loan['expire_date']),
             ]
-            for j, (val, w) in enumerate(zip(vals, widths)):
+            for i, val in enumerate(vals):
                 fg = self.theme.palette.text_primary
-                if j == 3:
+                if i == 3:  # Status column
                     fg = get_status_color(loan['status'], loan['expire_date'])
-                lbl = tk.Label(row_frame, text=val, font=self.theme.fonts.body, width=w // 8,
+                lbl = tk.Label(row_frame, text=val, font=self.theme.fonts.body,
                                bg=row_bg, fg=fg, anchor='w', cursor='hand2')
-                lbl.pack(side=tk.LEFT, padx=(12 if j == 0 else 4, 4), pady=6)
+                lbl.grid(row=0, column=i, sticky='w', padx=6, pady=6)
                 lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('loan_detail', lid))
 
         if not loans:

@@ -9,22 +9,26 @@ def format_currency(amount):
     """Format amount as Rs. with commas."""
     try:
         amount = float(amount)
-        if amount == int(amount):
-            return f"Rs. {int(amount):,}"
         return f"Rs. {amount:,.2f}"
     except (ValueError, TypeError):
-        return "Rs. 0"
+        return "Rs. 0.00"
 
 
 def format_date(date_str, fmt='%Y-%m-%d'):
     """Format date string for display."""
     try:
+        if date_str is None:
+            return ''
         if isinstance(date_str, str):
+            if not date_str.strip():
+                return ''
             dt = datetime.strptime(date_str.split(' ')[0], '%Y-%m-%d')
         else:
             dt = date_str
+        if dt is None:
+            return ''
         return dt.strftime(fmt)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return date_str or ''
 
 

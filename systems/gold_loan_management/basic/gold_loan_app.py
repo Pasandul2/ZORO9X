@@ -215,6 +215,7 @@ class GoldLoanSystemApp:
             min_size=(1024, 680),
             size=(1360, 820),
             title='Gold Loan System - Basic Edition',
+            maximize=True,
         )
         self.theme = GOLD_THEME
         self.current_user = None
@@ -644,10 +645,10 @@ class GoldLoanSystemApp:
             ('📝 New Loan', 'new_ticket'),
             ('🔍 Loans', 'loan_list'),
             ('👥 Customers', 'customers'),
-            ('✉️ Letters', 'letters'),
         ]
 
         if self.current_user['role'] == 'admin':
+            nav_items.append(('✉️ Letters', 'letters'))
             nav_items.append((' Reports', 'reports'))
             nav_items.append(('⚙️ Admin Settings', 'admin_settings'))
             # Show pending count badge
@@ -722,8 +723,9 @@ class GoldLoanSystemApp:
         def _on_mousewheel(event):
             self.page_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
 
-        self.page_canvas.bind('<Enter>', lambda _e: self.root.bind_all('<MouseWheel>', _on_mousewheel))
-        self.page_canvas.bind('<Leave>', lambda _e: self.root.unbind_all('<MouseWheel>'))
+        self.root.bind_all('<MouseWheel>', _on_mousewheel)
+        self.root.bind_all('<Button-4>', lambda _e: self.page_canvas.yview_scroll(-1, 'units'))
+        self.root.bind_all('<Button-5>', lambda _e: self.page_canvas.yview_scroll(1, 'units'))
 
     def _sync_page_width(self, event):
         self.page_canvas.itemconfig(self.page_window_id, width=event.width)
@@ -739,7 +741,7 @@ class GoldLoanSystemApp:
             if 'loan_approvals' in self.nav_buttons:
                 self.nav_buttons['loan_approvals'].config(text=f'🔐 Approvals{badge}')
 
-        # Scroll to top
+        # Scroll to top immediately, and again after render/layout settles.
         self.page_canvas.yview_moveto(0)
 
         header_map = {
@@ -793,7 +795,10 @@ class GoldLoanSystemApp:
 
         elif page_name == 'letters':
             from pages.letters import LettersPage
-            LettersPage(self.page_content, self.theme, self.current_user, self.navigate).render()
+            kwargs = {}
+            if param and isinstance(param, dict):
+                kwargs = param
+            LettersPage(self.page_content, self.theme, self.current_user, self.navigate, **kwargs).render()
 
         elif page_name == 'admin_settings':
             from pages.admin_settings import AdminSettingsPage
@@ -810,6 +815,9 @@ class GoldLoanSystemApp:
         elif page_name == 'print_ticket':
             from pages.print_ticket import PrintTicketPage
             PrintTicketPage(self.page_content, self.theme, self.current_user, self.navigate, param).render()
+
+        # Some pages resize async; enforce top position after geometry updates to avoid blank top gaps.
+        self.root.after_idle(lambda: self.page_canvas.yview_moveto(0))
 
     def _logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):

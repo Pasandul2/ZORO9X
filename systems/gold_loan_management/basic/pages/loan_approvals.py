@@ -30,6 +30,21 @@ REQUEST_TYPE_META = {
     },
 }
 
+TYPE_BUCKET_META = {
+    'assessed': {
+        'title': '🔐 Assessed Value Change',
+        'color': '#2563eb',
+    },
+    'overdue': {
+        'title': '💸 Overdue Value Change',
+        'color': '#d97706',
+    },
+    'other': {
+        'title': '🧾 Other Charges Change',
+        'color': '#0f766e',
+    },
+}
+
 
 class LoanApprovalsPage:
     def __init__(self, container, theme, user, navigate_fn):
@@ -37,8 +52,12 @@ class LoanApprovalsPage:
         self.theme = theme
         self.user = user
         self.navigate = navigate_fn
-        self._show_all = False
+        self._status_tab = 'pending'
         self._type_filter = 'all'
+        self._tab_buttons = {}
+        self._stats_labels = {}
+        self._status_tabs_row = None
+        self._type_tabs_row = None
 
     def render(self):
         for w in self.container.winfo_children():
@@ -53,34 +72,67 @@ class LoanApprovalsPage:
         tk.Label(hdr, text='🔐 Assessed % Approval Requests', font=self.theme.fonts.h1,
                  bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
-        # Toggle pending / all
-        self._toggle_var = tk.BooleanVar(value=False)
-        toggle_btn = self.theme.make_button(hdr, text='Show All History',
-                                            command=self._toggle_view, kind='ghost', width=16, pady=6)
-        toggle_btn.pack(side=tk.RIGHT)
+        # Status tabs
+        tabs_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
+        tabs_wrap.pack(fill=tk.X, pady=(0, 8))
+        tabs_card = self.theme.make_card(tabs_wrap, bg=self.theme.palette.bg_surface)
+        tabs_card.pack(fill=tk.X)
 
-        self.type_filter_btn = self.theme.make_button(
-            hdr,
-            text='Type: All',
-            command=self._cycle_type_filter,
-            kind='ghost',
-            width=16,
-            pady=6,
-        )
-        self.type_filter_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        self._status_tabs_row = tk.Frame(tabs_card.inner, bg=self.theme.palette.bg_surface)
+        self._status_tabs_row.pack(fill=tk.X, padx=10, pady=(8, 4))
+
+        self._type_tabs_row = tk.Frame(tabs_card.inner, bg=self.theme.palette.bg_surface)
+        self._type_tabs_row.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+        self._render_status_tabs()
+        self._render_type_tabs()
 
         # Stats bar
-        pending_requests = get_pending_approval_requests()
         stats_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
         stats_card.pack(fill=tk.X, pady=(0, 10))
         sf = tk.Frame(stats_card.inner, bg=self.theme.palette.bg_surface)
         sf.pack(fill=tk.X, padx=14, pady=10)
-        tk.Label(sf, text=f'⏳ Pending Approvals: {len(pending_requests)}',
-                 font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=STATUS_COLORS['pending']).pack(side=tk.LEFT, padx=(0, 20))
-        tk.Label(sf, text='Requests where cashier/admin changed the default assessed percentage during loan creation.',
-                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
-                 fg=self.theme.palette.text_muted, wraplength=640, justify='left').pack(side=tk.LEFT)
+        self._stats_labels['pending'] = tk.Label(
+            sf,
+            text='⏳ Pending: 0',
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=STATUS_COLORS['pending'],
+        )
+        self._stats_labels['pending'].pack(side=tk.LEFT, padx=(0, 20))
+        self._stats_labels['approved'] = tk.Label(
+            sf,
+            text='✅ Approved: 0',
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=STATUS_COLORS['approved'],
+        )
+        self._stats_labels['approved'].pack(side=tk.LEFT, padx=(0, 20))
+        self._stats_labels['declined'] = tk.Label(
+            sf,
+            text='❌ Declined: 0',
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=STATUS_COLORS['declined'],
+        )
+        self._stats_labels['declined'].pack(side=tk.LEFT, padx=(0, 20))
+        self._stats_labels['all'] = tk.Label(
+            sf,
+            text='📚 Total: 0',
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.accent,
+        )
+        self._stats_labels['all'].pack(side=tk.LEFT, padx=(0, 20))
+        tk.Label(
+            sf,
+            text='Requests where cashier/admin changed defaults during loan creation/processing.',
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+            wraplength=520,
+            justify='left',
+        ).pack(side=tk.LEFT)
 
         # Request list
         self.list_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
@@ -88,43 +140,121 @@ class LoanApprovalsPage:
         self.list_frame = self.list_card.inner
         self._load_requests()
 
-    def _toggle_view(self):
-        self._show_all = not self._show_all
+    def _set_status_tab(self, status_key):
+        self._status_tab = status_key
+        self._render_status_tabs()
         self._load_requests()
 
-    def _cycle_type_filter(self):
-        order = ['all', 'assessed_pct', 'overdue_waiver']
-        labels = {
-            'all': 'Type: All',
-            'assessed_pct': 'Type: Assessed',
-            'overdue_waiver': 'Type: Overdue',
-        }
-        idx = order.index(self._type_filter)
-        self._type_filter = order[(idx + 1) % len(order)]
-        self.type_filter_btn.config(text=labels[self._type_filter])
+    def _set_type_filter(self, type_key):
+        self._type_filter = type_key
+        self._render_type_tabs()
         self._load_requests()
+
+    def _render_status_tabs(self):
+        if not self._status_tabs_row:
+            return
+
+        for w in self._status_tabs_row.winfo_children():
+            w.destroy()
+
+        tab_defs = [
+            ('pending', '⏳ Pending'),
+            ('approved', '✅ Approved'),
+            ('declined', '❌ Declined'),
+            ('all', '📚 All'),
+        ]
+        for idx, (key, label) in enumerate(tab_defs):
+            btn = self.theme.make_button(
+                self._status_tabs_row,
+                text=label,
+                command=lambda k=key: self._set_status_tab(k),
+                kind='primary' if key == self._status_tab else 'ghost',
+                width=16,
+                pady=6,
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 8) if idx < len(tab_defs) - 1 else 0)
+
+    def _render_type_tabs(self):
+        if not self._type_tabs_row:
+            return
+
+        for w in self._type_tabs_row.winfo_children():
+            w.destroy()
+
+        type_defs = [
+            ('all', 'Type: All'),
+            ('assessed', 'Assessed'),
+            ('overdue', 'Overdue'),
+            ('other', 'Other Charges'),
+        ]
+        for idx, (key, label) in enumerate(type_defs):
+            btn = self.theme.make_button(
+                self._type_tabs_row,
+                text=label,
+                command=lambda k=key: self._set_type_filter(k),
+                kind='secondary' if key == self._type_filter else 'ghost',
+                width=16,
+                pady=6,
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 8) if idx < len(type_defs) - 1 else 0)
+
+    def _infer_type_bucket(self, req):
+        request_type = (req.get('request_type') or 'assessed_pct').strip().lower()
+        note = (req.get('review_note') or '').strip().lower()
+
+        if request_type == 'assessed_pct':
+            return 'assessed'
+        if request_type == 'overdue_waiver':
+            return 'overdue'
+
+        has_other = ('other charge' in note) or ('other charges' in note)
+        has_overdue = ('overdue' in note) or ('penalty' in note)
+
+        if has_other:
+            return 'other'
+        if has_overdue:
+            return 'overdue'
+
+        if request_type in ('renewal_charges_override', 'redemption_charges_override'):
+            return 'other'
+
+        return 'assessed'
 
     def _load_requests(self):
         for w in self.list_frame.winfo_children():
             w.destroy()
 
-        if self._show_all:
-            requests = get_all_approval_requests()
-            tk.Label(self.list_frame, text='All Requests (history)',
-                     font=self.theme.fonts.body_bold,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(10, 4))
+        all_requests = get_all_approval_requests()
+        pending_count = sum(1 for r in all_requests if r.get('status') == 'pending')
+        approved_count = sum(1 for r in all_requests if r.get('status') == 'approved')
+        declined_count = sum(1 for r in all_requests if r.get('status') == 'declined')
+
+        self._stats_labels['pending'].configure(text=f'⏳ Pending: {pending_count}')
+        self._stats_labels['approved'].configure(text=f'✅ Approved: {approved_count}')
+        self._stats_labels['declined'].configure(text=f'❌ Declined: {declined_count}')
+        self._stats_labels['all'].configure(text=f'📚 Total: {len(all_requests)}')
+
+        if self._status_tab == 'all':
+            requests = all_requests
+            section_title = 'All Requests'
         else:
-            requests = get_pending_approval_requests()
-            tk.Label(self.list_frame, text='Pending Requests',
-                     font=self.theme.fonts.body_bold,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(10, 4))
+            requests = [r for r in all_requests if r.get('status') == self._status_tab]
+            section_title = f"{self._status_tab.title()} Requests"
+
+        tk.Label(
+            self.list_frame,
+            text=section_title,
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+        ).pack(anchor='w', padx=14, pady=(10, 4))
 
         if self._type_filter != 'all':
-            requests = [r for r in requests if r.get('request_type', 'assessed_pct') == self._type_filter]
+            requests = [r for r in requests if self._infer_type_bucket(r) == self._type_filter]
 
         if not requests:
             tk.Label(self.list_frame,
-                     text='✅ No requests found.' if self._show_all else '✅ No pending approval requests.',
+                     text='✅ No requests found for this tab/filter.',
                      font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
                      fg=self.theme.palette.text_muted).pack(pady=40)
             return
@@ -137,7 +267,8 @@ class LoanApprovalsPage:
         color = STATUS_COLORS.get(status, self.theme.palette.text_muted)
         icon  = STATUS_ICONS.get(status, '•')
         request_type = req.get('request_type', 'assessed_pct')
-        type_meta = REQUEST_TYPE_META.get(request_type, REQUEST_TYPE_META['assessed_pct'])
+        type_bucket = self._infer_type_bucket(req)
+        type_meta = TYPE_BUCKET_META.get(type_bucket, TYPE_BUCKET_META['assessed'])
         type_color = type_meta['color']
 
         card = self.theme.make_card(self.list_frame, bg=self.theme.palette.bg_surface_alt)
@@ -163,7 +294,13 @@ class LoanApprovalsPage:
         mid = tk.Frame(inner, bg=self.theme.palette.bg_surface_alt)
         mid.pack(fill=tk.X, padx=10, pady=2)
 
-        if request_type == 'overdue_waiver':
+        if type_bucket == 'assessed':
+            type_title = type_meta['title']
+            default_lbl = "Default %"
+            requested_lbl = "Requested %"
+            default_val = f"{req['default_assessed_pct']:.1f}%"
+            requested_val = f"{req['requested_assessed_pct']:.1f}%"
+        elif type_bucket == 'overdue':
             type_title = type_meta['title']
             default_lbl = "Default Overdue"
             requested_lbl = "Requested Overdue"
@@ -171,10 +308,10 @@ class LoanApprovalsPage:
             requested_val = format_currency(req['requested_assessed_pct'])
         else:
             type_title = type_meta['title']
-            default_lbl = "Default %"
-            requested_lbl = "Requested %"
-            default_val = f"{req['default_assessed_pct']:.1f}%"
-            requested_val = f"{req['requested_assessed_pct']:.1f}%"
+            default_lbl = "Default Charges"
+            requested_lbl = "Requested Charges"
+            default_val = format_currency(req['default_assessed_pct'])
+            requested_val = format_currency(req['requested_assessed_pct'])
 
         tk.Label(top, text=f'({type_title})', font=self.theme.fonts.small,
                  bg=self.theme.palette.bg_surface_alt, fg=type_color).pack(side=tk.LEFT, padx=10)
@@ -188,7 +325,7 @@ class LoanApprovalsPage:
             ('Loan Amount',  format_currency(req.get('loan_amount', 0))),
         ]
         
-        if request_type == 'assessed_pct':
+        if type_bucket == 'assessed':
             details.append(('Market Value', format_currency(req.get('market_value', 0))))
             details.append(('Assessed Val', format_currency(req.get('assessed_value', 0))))
 
@@ -202,9 +339,7 @@ class LoanApprovalsPage:
             fg = self.theme.palette.text_primary
             if lbl == requested_lbl:
                 diff = req['requested_assessed_pct'] - req['default_assessed_pct']
-                # for overdue waiver, lower is "approved"/green for the customer but "declined"/red for business?
-                # Usually we use green for the requested change being better for the customer.
-                if request_type == 'overdue_waiver':
+                if type_bucket in ('overdue', 'other'):
                     fg = STATUS_COLORS['approved'] if diff < 0 else STATUS_COLORS['declined']
                 else:
                     fg = STATUS_COLORS['approved'] if diff > 0 else STATUS_COLORS['declined']

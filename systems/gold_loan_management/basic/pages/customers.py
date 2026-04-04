@@ -97,43 +97,78 @@ class CustomersPage:
         tbl.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
 
         cols = ['NIC', 'Name', 'Phone', 'Birthday', 'Address', 'Actions']
-        widths = [14, 16, 12, 12, 16, 14]
+        col_widths = [14, 18, 12, 12, 20, 28]  # Character widths
+
+        def _clip_text(text, max_chars):
+            text = str(text or '')
+            if len(text) <= max_chars:
+                return text
+            return text[: max(0, max_chars - 3)] + '...'
+
+        # Configure grid columns for the table
+        for i in range(len(cols)):
+            tbl.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
 
         hdr = tk.Frame(tbl, bg=self.theme.palette.bg_surface_alt)
         hdr.pack(fill=tk.X)
-        for col, w in zip(cols, widths):
-            tk.Label(hdr, text=col, font=self.theme.fonts.body_bold, width=w, anchor='w',
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=3, pady=6)
+        for i, col in enumerate(cols):
+            hdr.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
+            tk.Label(hdr, text=col, font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted,
+                     anchor='w').grid(row=0, column=i, sticky='w', padx=6, pady=6)
 
         for cust in customers:
             row = tk.Frame(tbl, bg=self.theme.palette.bg_surface)
             row.pack(fill=tk.X)
             tk.Frame(tbl, bg=self.theme.palette.border, height=1).pack(fill=tk.X)
 
+            for i in range(len(cols)):
+                row.grid_columnconfigure(i, minsize=col_widths[i] * 8, weight=0)
+
             vals = [
                 cust['nic'],
                 cust['name'],
                 cust['phone'],
                 cust.get('birthday', '') or '-',
-                cust.get('address', '') or '-',
+                _clip_text(cust.get('address', '') or '-', col_widths[4]),
             ]
-            for val, w in zip(vals, widths[:-1]):
-                tk.Label(row, text=val, font=self.theme.fonts.body, width=w, anchor='w',
-                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT, padx=3, pady=5)
+            for i, val in enumerate(vals):
+                tk.Label(row, text=val, font=self.theme.fonts.body,
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
+                         anchor='w', width=col_widths[i]).grid(row=0, column=i, sticky='w', padx=6, pady=5)
 
-            af = tk.Frame(row, bg=self.theme.palette.bg_surface)
-            af.pack(side=tk.LEFT)
-            view_lbl = tk.Label(af, text='👁 View', font=self.theme.fonts.small, cursor='hand2',
-                                bg=self.theme.palette.bg_surface, fg=self.theme.palette.info)
-            view_lbl.pack(side=tk.LEFT, padx=(0, 8))
+            # Actions column
+            af = tk.Frame(row, bg=self.theme.palette.bg_surface, width=(col_widths[5] * 8) - 12, height=28)
+            af.grid(row=0, column=5, sticky='nsew', padx=6, pady=4)
+            af.grid_propagate(False)
+            af.grid_columnconfigure(0, weight=1, uniform='customer-actions')
+            af.grid_columnconfigure(1, weight=1, uniform='customer-actions')
+            af.grid_columnconfigure(2, weight=1, uniform='customer-actions')
+
+            def _make_action_badge(parent, text, bg_color):
+                return tk.Label(
+                    parent,
+                    text=text,
+                    font=self.theme.fonts.small,
+                    cursor='hand2',
+                    bg=bg_color,
+                    fg=self.theme.palette.text_inverse,
+                    padx=4,
+                    pady=2,
+                    anchor='center',
+                    width=9,
+                )
+
+            view_lbl = _make_action_badge(af, '👁 View', self.theme.palette.accent)
+            view_lbl.grid(row=0, column=0, sticky='ew', padx=(0, 4))
             view_lbl.bind('<Button-1>', lambda e, c=cust: self._show_customer_details(c))
-            edit_lbl = tk.Label(af, text='✏️ Edit', font=self.theme.fonts.small, cursor='hand2',
-                                bg=self.theme.palette.bg_surface, fg=self.theme.palette.accent)
-            edit_lbl.pack(side=tk.LEFT, padx=(0, 8))
+
+            edit_lbl = _make_action_badge(af, '✏️ Edit', self.theme.palette.info)
+            edit_lbl.grid(row=0, column=1, sticky='ew', padx=(0, 4))
             edit_lbl.bind('<Button-1>', lambda e, c=cust: self._show_edit_form(c))
-            loans_lbl = tk.Label(af, text='📋 Loans', font=self.theme.fonts.small, cursor='hand2',
-                                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.info)
-            loans_lbl.pack(side=tk.LEFT)
+
+            loans_lbl = _make_action_badge(af, '📋 Loans', self.theme.palette.success)
+            loans_lbl.grid(row=0, column=2, sticky='ew')
             loans_lbl.bind('<Button-1>', lambda e, c=cust: self._show_customer_loans(c))
 
         if not customers:
@@ -419,10 +454,33 @@ class CustomersPage:
         canvas.bind('<Configure>', lambda e: canvas.itemconfig(inner_window, width=e.width))
 
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+            if not win.winfo_exists() or not canvas.winfo_exists():
+                return
+            try:
+                delta = int(-1 * (event.delta / 120)) if getattr(event, 'delta', 0) else 0
+                if delta:
+                    canvas.yview_scroll(delta, 'units')
+            except tk.TclError:
+                pass
 
-        canvas.bind('<Enter>', lambda _e: win.bind_all('<MouseWheel>', _on_mousewheel))
-        canvas.bind('<Leave>', lambda _e: win.unbind_all('<MouseWheel>'))
+        def _on_mousewheel_up(_event):
+            if win.winfo_exists() and canvas.winfo_exists():
+                try:
+                    canvas.yview_scroll(-1, 'units')
+                except tk.TclError:
+                    pass
+
+        def _on_mousewheel_down(_event):
+            if win.winfo_exists() and canvas.winfo_exists():
+                try:
+                    canvas.yview_scroll(1, 'units')
+                except tk.TclError:
+                    pass
+
+        # Bind wheel events only to this popup to avoid breaking app-level scroll bindings.
+        win.bind('<MouseWheel>', _on_mousewheel)
+        win.bind('<Button-4>', _on_mousewheel_up)
+        win.bind('<Button-5>', _on_mousewheel_down)
 
         for loan in loans:
             lf = tk.Frame(scroll_inner, bg=self.theme.palette.bg_surface, highlightthickness=1,

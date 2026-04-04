@@ -1,8 +1,11 @@
 """Comprehensive admin reports page for Gold Loan System."""
 
+import csv
 import tkinter as tk
 import tkinter.font as tkfont
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 from database import get_connection, get_dashboard_stats
 from utils import format_currency, format_date, get_status_text
@@ -14,6 +17,13 @@ class ReportsPage:
         self.theme = theme
         self.user = user
         self.navigate = navigate_fn
+        self._export_columns = []
+        self._export_rows = []
+        self._report_title = 'report'
+        self._active_report_handler = None
+        today = datetime.now().date()
+        self._date_to_var = tk.StringVar(value=today.strftime('%Y-%m-%d'))
+        self._date_from_var = tk.StringVar(value=(today - timedelta(days=90)).strftime('%Y-%m-%d'))
 
     def render(self):
         for w in self.container.winfo_children():
@@ -44,18 +54,72 @@ class ReportsPage:
             fg=self.theme.palette.text_muted,
         ).pack(side=tk.RIGHT)
 
+        filter_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
+        filter_wrap.pack(fill=tk.X, pady=(0, 6))
+        filter_card = self.theme.make_card(filter_wrap, bg=self.theme.palette.bg_surface)
+        filter_card.pack(fill=tk.X)
+
+        filters = tk.Frame(filter_card.inner, bg=self.theme.palette.bg_surface)
+        filters.pack(fill=tk.X, padx=12, pady=8)
+
+        tk.Label(filters, text='From:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.theme.make_entry(filters, variable=self._date_from_var, width=12).pack(side=tk.LEFT, padx=(6, 10))
+        tk.Label(filters, text='To:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.theme.make_entry(filters, variable=self._date_to_var, width=12).pack(side=tk.LEFT, padx=(6, 10))
+        tk.Label(filters, text='Format: YYYY-MM-DD', font=self.theme.fonts.small,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(0, 12))
+
+        self.theme.make_button(
+            filters,
+            text='Apply Range',
+            command=self._refresh_active_report,
+            kind='primary',
+            width=12,
+            pady=6,
+        ).pack(side=tk.LEFT)
+        self.theme.make_button(
+            filters,
+            text='Reset 90D',
+            command=self._reset_date_range,
+            kind='ghost',
+            width=12,
+            pady=6,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        export_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
+        export_wrap.pack(fill=tk.X, pady=(0, 6))
+        self.theme.make_button(
+            export_wrap,
+            text='📤 Export CSV',
+            command=self._export_csv,
+            kind='secondary',
+            width=14,
+            pady=6,
+        ).pack(side=tk.RIGHT)
+        self.theme.make_button(
+            export_wrap,
+            text='📊 Export Excel',
+            command=self._export_excel,
+            kind='ghost',
+            width=14,
+            pady=6,
+        ).pack(side=tk.RIGHT, padx=(0, 8))
+
         btn_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
         btn_wrap.pack(fill=tk.X, pady=(0, 10))
 
         reports = [
-            ('System Summary', self._show_summary),
-            ('Loan Ledger', self._show_loan_ledger),
-            ('Overdue Analysis', self._show_overdue),
-            ('Renewal Report', self._show_renewals),
-            ('Payment Report', self._show_payments),
-            ('Customer Report', self._show_customers),
-            ('Gold Inventory', self._show_gold_inventory),
-            ('Operations', self._show_operations),
+            ('Analytics Dashboard', lambda: self._set_active_report(self._show_analytics)),
+            ('System Summary', lambda: self._set_active_report(self._show_summary)),
+            ('Loan Ledger', lambda: self._set_active_report(self._show_loan_ledger)),
+            ('Overdue Analysis', lambda: self._set_active_report(self._show_overdue)),
+            ('Renewal Report', lambda: self._set_active_report(self._show_renewals)),
+            ('Payment Report', lambda: self._set_active_report(self._show_payments)),
+            ('Customer Report', lambda: self._set_active_report(self._show_customers)),
+            ('Gold Inventory', lambda: self._set_active_report(self._show_gold_inventory)),
+            ('Operations', lambda: self._set_active_report(self._show_operations)),
         ]
         for idx, (label, command) in enumerate(reports):
             btn = self.theme.make_button(btn_wrap, text=label, command=command, kind='ghost', width=16, pady=7)
@@ -63,7 +127,43 @@ class ReportsPage:
 
         self.report_content = tk.Frame(view, bg=self.theme.palette.bg_app)
         self.report_content.pack(fill=tk.BOTH, expand=True)
-        self._show_summary()
+        self._set_active_report(self._show_analytics)
+
+    def _set_active_report(self, handler):
+        self._active_report_handler = handler
+        handler()
+
+    def _reset_date_range(self):
+        today = datetime.now().date()
+        self._date_to_var.set(today.strftime('%Y-%m-%d'))
+        self._date_from_var.set((today - timedelta(days=90)).strftime('%Y-%m-%d'))
+        self._refresh_active_report()
+
+    def _get_date_range(self, show_error=True):
+        raw_from = (self._date_from_var.get() or '').strip()
+        raw_to = (self._date_to_var.get() or '').strip()
+        try:
+            date_from = datetime.strptime(raw_from, '%Y-%m-%d').date()
+            date_to = datetime.strptime(raw_to, '%Y-%m-%d').date()
+        except ValueError:
+            if show_error:
+                messagebox.showwarning('Date Range', 'Enter valid dates in YYYY-MM-DD format.')
+            return None, None
+
+        if date_from > date_to:
+            if show_error:
+                messagebox.showwarning('Date Range', 'From date must be before or equal to To date.')
+            return None, None
+
+        return date_from.strftime('%Y-%m-%d'), date_to.strftime('%Y-%m-%d')
+
+    def _refresh_active_report(self):
+        if not self._active_report_handler:
+            return
+        date_from, date_to = self._get_date_range(show_error=True)
+        if not date_from or not date_to:
+            return
+        self._active_report_handler()
 
     def _render_access_denied(self):
         tk.Label(
@@ -96,6 +196,7 @@ class ReportsPage:
             return default
 
     def _make_card(self, title):
+        self._report_title = title
         card = self.theme.make_card(self.report_content, bg=self.theme.palette.bg_surface)
         card.pack(fill=tk.BOTH, expand=True)
         tk.Label(
@@ -244,6 +345,330 @@ class ReportsPage:
                 fg=self.theme.palette.warning,
             ).pack(anchor='e', pady=(6, 0))
 
+        # Keep latest table dataset available for exports.
+        self._export_columns = [c[0] for c in columns]
+        self._export_rows = [list(r) for r in rows]
+
+    def _render_bar_chart(self, parent, title, data_pairs, color):
+        card = tk.Frame(
+            parent,
+            bg=self.theme.palette.bg_surface_alt,
+            highlightbackground=self.theme.palette.border,
+            highlightthickness=1,
+        )
+        card.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        tk.Label(
+            card,
+            text=title,
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface_alt,
+            fg=self.theme.palette.text_primary,
+        ).pack(anchor='w', padx=10, pady=(8, 4))
+
+        if not data_pairs:
+            tk.Label(
+                card,
+                text='No data for selected filters.',
+                font=self.theme.fonts.small,
+                bg=self.theme.palette.bg_surface_alt,
+                fg=self.theme.palette.text_muted,
+            ).pack(padx=10, pady=(4, 10), anchor='w')
+            return
+
+        canvas = tk.Canvas(card, bg=self.theme.palette.bg_surface_alt, highlightthickness=0, height=220)
+        canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        max_val = max(float(v) for _, v in data_pairs) or 1.0
+        pad_left = 40
+        pad_right = 14
+        pad_top = 10
+        pad_bottom = 45
+
+        width = 520
+        height = 220
+        n = len(data_pairs)
+        gap = 12
+        usable_w = max(1, width - pad_left - pad_right)
+        bar_w = max(16, int((usable_w - gap * (n - 1)) / max(1, n)))
+        chart_h = max(1, height - pad_top - pad_bottom)
+
+        for idx, (name, raw_value) in enumerate(data_pairs):
+            value = float(raw_value)
+            x1 = pad_left + idx * (bar_w + gap)
+            x2 = x1 + bar_w
+            bar_h = int((value / max_val) * chart_h)
+            y2 = height - pad_bottom
+            y1 = y2 - bar_h
+
+            canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='')
+            canvas.create_text((x1 + x2) / 2, y1 - 8, text=f"{int(value) if value.is_integer() else value:.0f}",
+                               font=('Segoe UI', 8), fill=self.theme.palette.text_muted)
+            short_name = str(name)
+            if len(short_name) > 11:
+                short_name = short_name[:10] + '…'
+            canvas.create_text((x1 + x2) / 2, y2 + 14, text=short_name,
+                               font=('Segoe UI', 8), fill=self.theme.palette.text_primary)
+
+    def _export_csv(self):
+        if not self._export_columns or not self._export_rows:
+            messagebox.showinfo('Export CSV', 'No table data available to export in this report view.')
+            return
+
+        filename = f"{self._report_title.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        path = filedialog.asksaveasfilename(
+            title='Export Report as CSV',
+            initialfile=filename,
+            defaultextension='.csv',
+            filetypes=[('CSV files', '*.csv')],
+        )
+        if not path:
+            return
+
+        with open(path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(self._export_columns)
+            writer.writerows(self._export_rows)
+
+        messagebox.showinfo('Export CSV', f'Report exported successfully:\n{path}')
+
+    def _export_excel(self):
+        if not self._export_columns or not self._export_rows:
+            messagebox.showinfo('Export Excel', 'No table data available to export in this report view.')
+            return
+
+        try:
+            from openpyxl import Workbook
+        except Exception:
+            messagebox.showwarning(
+                'Export Excel',
+                'Excel export requires openpyxl.\nInstall with: pip install openpyxl\n\nUsing CSV export instead.'
+            )
+            self._export_csv()
+            return
+
+        filename = f"{self._report_title.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        path = filedialog.asksaveasfilename(
+            title='Export Report as Excel',
+            initialfile=filename,
+            defaultextension='.xlsx',
+            filetypes=[('Excel Workbook', '*.xlsx')],
+        )
+        if not path:
+            return
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Report'
+        ws.append(self._export_columns)
+        for row in self._export_rows:
+            ws.append(row)
+        wb.save(path)
+
+        messagebox.showinfo('Export Excel', f'Report exported successfully:\n{path}')
+
+    def _show_analytics(self):
+        self._clear()
+
+        card = self._make_card('Analytics Dashboard')
+
+        controls = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        controls.pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        period_var = tk.StringVar(value='90d')
+        status_var = tk.StringVar(value='all')
+        min_amount_var = tk.StringVar(value='0')
+
+        tk.Label(controls, text='Period:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        period_combo = tk.OptionMenu(controls, period_var, '7d', '30d', '90d', '365d', 'all')
+        period_combo.configure(bg=self.theme.palette.bg_surface_alt, relief='flat', highlightthickness=0)
+        period_combo.pack(side=tk.LEFT, padx=(6, 12))
+
+        tk.Label(controls, text='Status:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        status_combo = tk.OptionMenu(controls, status_var, 'all', 'active', 'redeemed', 'forfeited')
+        status_combo.configure(bg=self.theme.palette.bg_surface_alt, relief='flat', highlightthickness=0)
+        status_combo.pack(side=tk.LEFT, padx=(6, 12))
+
+        tk.Label(controls, text='Min Amount:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.theme.make_entry(controls, variable=min_amount_var, width=10).pack(side=tk.LEFT, padx=(6, 12))
+
+        content = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        def refresh_dashboard():
+            for w in content.winfo_children():
+                w.destroy()
+
+            date_from, date_to = self._get_date_range(show_error=False)
+            if not date_from or not date_to:
+                date_to = datetime.now().strftime('%Y-%m-%d')
+                date_from = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+
+            rows = self._query(
+                '''SELECT l.ticket_no, c.name AS customer_name, l.loan_amount, l.status,
+                          l.issue_date, l.expire_date, l.duration_months, l.interest_rate
+                   FROM loans l
+                   JOIN customers c ON l.customer_id=c.id
+                   WHERE date(l.issue_date) BETWEEN ? AND ?
+                   ORDER BY l.id DESC'''
+                     ,
+                (date_from, date_to),
+            )
+
+            now = datetime.now().date()
+            period_days = {
+                '7d': 7,
+                '30d': 30,
+                '90d': 90,
+                '365d': 365,
+                'all': None,
+            }.get(period_var.get(), 90)
+
+            filtered = []
+            try:
+                min_amount = float(min_amount_var.get() or 0)
+            except ValueError:
+                min_amount = 0
+
+            for r in rows:
+                issue_raw = (r.get('issue_date') or '')[:10]
+                try:
+                    issue_dt = datetime.strptime(issue_raw, '%Y-%m-%d').date()
+                except ValueError:
+                    issue_dt = now
+
+                if period_days is not None and (now - issue_dt).days > period_days:
+                    continue
+                if status_var.get() != 'all' and (r.get('status') or '') != status_var.get():
+                    continue
+                if float(r.get('loan_amount') or 0) < min_amount:
+                    continue
+                filtered.append(r)
+
+            total_issued = sum(float(r.get('loan_amount') or 0) for r in filtered)
+            active_count = sum(1 for r in filtered if r.get('status') == 'active')
+            redeemed_count = sum(1 for r in filtered if r.get('status') == 'redeemed')
+            forfeited_count = sum(1 for r in filtered if r.get('status') == 'forfeited')
+            avg_ticket = (total_issued / len(filtered)) if filtered else 0
+
+            self._render_kpis(
+                content,
+                [
+                    ('Filtered Loans', str(len(filtered)), self.theme.palette.text_primary),
+                    ('Total Issued', format_currency(total_issued), self.theme.palette.accent),
+                    ('Average Ticket', format_currency(avg_ticket), self.theme.palette.info),
+                    ('Active', str(active_count), self.theme.palette.success),
+                    ('Redeemed', str(redeemed_count), self.theme.palette.warning),
+                    ('Forfeited', str(forfeited_count), self.theme.palette.danger),
+                ],
+                columns=3,
+            )
+
+            charts_row = tk.Frame(content, bg=self.theme.palette.bg_surface)
+            charts_row.pack(fill=tk.X, padx=10, pady=(0, 8))
+
+            status_chart = [
+                ('Active', active_count),
+                ('Redeemed', redeemed_count),
+                ('Forfeited', forfeited_count),
+            ]
+            self._render_bar_chart(charts_row, 'Status Distribution', status_chart, self.theme.palette.accent)
+
+            month_map = {}
+            for r in filtered:
+                issue_raw = (r.get('issue_date') or '')[:10]
+                key = issue_raw[:7] if len(issue_raw) >= 7 else issue_raw
+                if not key:
+                    continue
+                month_map[key] = month_map.get(key, 0) + 1
+            month_pairs = sorted(month_map.items())[-6:]
+            self._render_bar_chart(charts_row, 'Loan Issuance Trend (Monthly)', month_pairs, self.theme.palette.success)
+
+            suggestion_card = tk.Frame(
+                content,
+                bg=self.theme.palette.bg_surface_alt,
+                highlightbackground=self.theme.palette.border,
+                highlightthickness=1,
+            )
+            suggestion_card.pack(fill=tk.X, padx=14, pady=(0, 8))
+            tk.Label(
+                suggestion_card,
+                text='Suggestions & Insights',
+                font=self.theme.fonts.body_bold,
+                bg=self.theme.palette.bg_surface_alt,
+                fg=self.theme.palette.text_primary,
+            ).pack(anchor='w', padx=10, pady=(8, 6))
+
+            insights = []
+            if len(filtered) == 0:
+                insights.append('No records match current filters. Widen period or reduce minimum amount.')
+            if forfeited_count > 0:
+                insights.append('Forfeited loans detected. Review recovery workflow and customer reminders.')
+            if active_count > redeemed_count and active_count > 10:
+                insights.append('Active loans are high relative to redemptions. Consider targeted renewal/redeem campaigns.')
+            if avg_ticket > 250000:
+                insights.append('Average ticket size is high. Monitor concentration risk and overdue exposure carefully.')
+            if not insights:
+                insights.append('Portfolio mix looks balanced for current filters. Keep tracking overdue and forfeited trends weekly.')
+
+            for item in insights:
+                tk.Label(
+                    suggestion_card,
+                    text=f'• {item}',
+                    font=self.theme.fonts.body,
+                    bg=self.theme.palette.bg_surface_alt,
+                    fg=self.theme.palette.text_primary,
+                    wraplength=980,
+                    justify='left',
+                ).pack(anchor='w', padx=10, pady=(0, 4))
+
+            columns = [
+                ('Ticket', 10),
+                ('Customer', 16),
+                ('Amount', 11),
+                ('Status', 10),
+                ('Issue', 10),
+                ('Expire', 10),
+                ('Duration', 8),
+                ('Rate%', 8),
+            ]
+            table_rows = [
+                [
+                    r.get('ticket_no', '-'),
+                    r.get('customer_name', '-'),
+                    format_currency(r.get('loan_amount', 0)),
+                    get_status_text(r.get('status', 'active'), r.get('expire_date', '')),
+                    format_date(r.get('issue_date', '')),
+                    format_date(r.get('expire_date', '')),
+                    str(r.get('duration_months', '-')),
+                    f"{float(r.get('interest_rate') or 0):.2f}",
+                ]
+                for r in filtered
+            ]
+            self._render_table(content, columns, table_rows, ticket_col=0)
+
+        self.theme.make_button(
+            controls,
+            text='Apply Filters',
+            command=refresh_dashboard,
+            kind='primary',
+            width=12,
+            pady=6,
+        ).pack(side=tk.LEFT)
+        self.theme.make_button(
+            controls,
+            text='Reset',
+            command=lambda: (period_var.set('90d'), status_var.set('all'), min_amount_var.set('0'), refresh_dashboard()),
+            kind='ghost',
+            width=10,
+            pady=6,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        refresh_dashboard()
+
     def _open_ticket(self, ticket_no):
         row = self._query('SELECT id FROM loans WHERE ticket_no=?', (ticket_no,))
         if row:
@@ -251,37 +676,93 @@ class ReportsPage:
 
     def _show_summary(self):
         self._clear()
-        stats = get_dashboard_stats()
+        date_from, date_to = self._get_date_range(show_error=False)
+        if not date_from or not date_to:
+            date_to = datetime.now().strftime('%Y-%m-%d')
+            date_from = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
 
-        total_payments = self._scalar('SELECT COALESCE(SUM(amount), 0) FROM loan_payments')
-        total_renewals = self._scalar('SELECT COUNT(*) FROM loan_renewals')
-        total_renewal_collections = self._scalar('SELECT COALESCE(SUM(payment_amount), 0) FROM loan_renewals')
-        total_principal_reduction = self._scalar('SELECT COALESCE(SUM(principal_reduction), 0) FROM loan_renewals')
-        pending_approvals = self._scalar("SELECT COUNT(*) FROM loan_approval_requests WHERE status='pending'")
-        letters_created = self._scalar('SELECT COUNT(*) FROM customer_letters')
+        total_loans = self._scalar(
+            "SELECT COUNT(*) FROM loans WHERE date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        total_active = self._scalar(
+            "SELECT COUNT(*) FROM loans WHERE status='active' AND date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        total_redeemed = self._scalar(
+            "SELECT COUNT(*) FROM loans WHERE status='redeemed' AND date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        overdue_count = self._scalar(
+            "SELECT COUNT(*) FROM loans WHERE status='active' AND expire_date < ? AND date(created_at) BETWEEN ? AND ?",
+            (date_to, date_from, date_to),
+        )
+        total_customers = self._scalar(
+            "SELECT COUNT(*) FROM customers WHERE date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        active_loan_amount = self._scalar(
+            "SELECT COALESCE(SUM(loan_amount),0) FROM loans WHERE status='active' AND date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        today_loans = self._scalar(
+            "SELECT COUNT(*) FROM loans WHERE date(created_at)=?",
+            (date_to,),
+        )
+        today_revenue = self._scalar(
+            "SELECT COALESCE(SUM(amount),0) FROM loan_payments WHERE date(payment_date)=?",
+            (date_to,),
+        )
+
+        total_payments = self._scalar(
+            'SELECT COALESCE(SUM(amount), 0) FROM loan_payments WHERE date(payment_date) BETWEEN ? AND ?',
+            (date_from, date_to),
+        )
+        total_renewals = self._scalar(
+            'SELECT COUNT(*) FROM loan_renewals WHERE date(renewed_at) BETWEEN ? AND ?',
+            (date_from, date_to),
+        )
+        total_renewal_collections = self._scalar(
+            'SELECT COALESCE(SUM(payment_amount), 0) FROM loan_renewals WHERE date(renewed_at) BETWEEN ? AND ?',
+            (date_from, date_to),
+        )
+        total_principal_reduction = self._scalar(
+            'SELECT COALESCE(SUM(principal_reduction), 0) FROM loan_renewals WHERE date(renewed_at) BETWEEN ? AND ?',
+            (date_from, date_to),
+        )
+        pending_approvals = self._scalar(
+            "SELECT COUNT(*) FROM loan_approval_requests WHERE status='pending' AND date(created_at) BETWEEN ? AND ?",
+            (date_from, date_to),
+        )
+        letters_created = self._scalar(
+            'SELECT COUNT(*) FROM customer_letters WHERE date(created_at) BETWEEN ? AND ?',
+            (date_from, date_to),
+        )
         active_items = self._scalar(
             """SELECT COUNT(*) FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active'"""
+               WHERE l.status='active' AND date(l.created_at) BETWEEN ? AND ?""",
+            (date_from, date_to),
         )
         active_gold_weight = self._scalar(
             """SELECT COALESCE(SUM(li.gold_weight),0) FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active'"""
+               WHERE l.status='active' AND date(l.created_at) BETWEEN ? AND ?""",
+            (date_from, date_to),
         )
 
         card = self._make_card('System Summary Report')
         self._render_kpis(
             card.inner,
             [
-                ('Total Loans', str(stats['total_loans']), self.theme.palette.text_primary),
-                ('Active Loans', str(stats['total_active']), self.theme.palette.accent),
-                ('Redeemed Loans', str(stats['total_redeemed']), self.theme.palette.success),
-                ('Overdue Loans', str(stats['overdue_count']), self.theme.palette.danger),
-                ('Total Customers', str(stats['total_customers']), self.theme.palette.info),
-                ('Active Portfolio', format_currency(stats['active_loan_amount']), self.theme.palette.warning),
-                ('Today Revenue', format_currency(stats['today_revenue']), self.theme.palette.success),
-                ('Today Loans', str(stats['today_loans']), self.theme.palette.accent),
+                ('Total Loans', str(total_loans), self.theme.palette.text_primary),
+                ('Active Loans', str(total_active), self.theme.palette.accent),
+                ('Redeemed Loans', str(total_redeemed), self.theme.palette.success),
+                ('Overdue Loans', str(overdue_count), self.theme.palette.danger),
+                ('Total Customers', str(total_customers), self.theme.palette.info),
+                ('Active Portfolio', format_currency(active_loan_amount), self.theme.palette.warning),
+                ('Today Revenue', format_currency(today_revenue), self.theme.palette.success),
+                ('Today Loans', str(today_loans), self.theme.palette.accent),
                 ('Total Payments Collected', format_currency(total_payments), self.theme.palette.success),
                 ('Total Renewals', str(total_renewals), self.theme.palette.info),
                 ('Renewal Collections', format_currency(total_renewal_collections), self.theme.palette.warning),
@@ -294,8 +775,31 @@ class ReportsPage:
             columns=4,
         )
 
+        self._export_columns = ['Metric', 'Value']
+        self._export_rows = [
+            ['From', date_from],
+            ['To', date_to],
+            ['Total Loans', str(total_loans)],
+            ['Active Loans', str(total_active)],
+            ['Redeemed Loans', str(total_redeemed)],
+            ['Overdue Loans', str(overdue_count)],
+            ['Total Customers', str(total_customers)],
+            ['Active Portfolio', format_currency(active_loan_amount)],
+            ['Today Revenue', format_currency(today_revenue)],
+            ['Today Loans', str(today_loans)],
+            ['Total Payments Collected', format_currency(total_payments)],
+            ['Total Renewals', str(total_renewals)],
+            ['Renewal Collections', format_currency(total_renewal_collections)],
+            ['Principal Reduction', format_currency(total_principal_reduction)],
+            ['Pending Approvals', str(pending_approvals)],
+            ['Letters Generated', str(letters_created)],
+            ['Active Gold Items', str(active_items)],
+            ['Active Gold Weight (g)', f'{float(active_gold_weight):.3f}'],
+        ]
+
     def _show_loan_ledger(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
         loans = self._query(
             '''SELECT l.id, l.ticket_no, c.name AS customer_name, l.loan_amount,
                       l.assessed_value, l.market_value, l.interest_rate,
@@ -304,7 +808,9 @@ class ReportsPage:
                       l.total_item_weight
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
-               ORDER BY l.id DESC'''
+               WHERE date(l.issue_date) BETWEEN ? AND ?
+               ORDER BY l.id DESC''',
+            (date_from, date_to),
         )
 
         total_issued = sum(float(r['loan_amount'] or 0) for r in loans)
@@ -354,7 +860,7 @@ class ReportsPage:
 
     def _show_overdue(self):
         self._clear()
-        today = datetime.now().strftime('%Y-%m-%d')
+        date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
             '''SELECT l.id, l.ticket_no, c.name AS customer_name, c.phone,
                       l.loan_amount, l.expire_date, l.interest_rate,
@@ -362,8 +868,9 @@ class ReportsPage:
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
                WHERE l.status='active' AND l.expire_date < ?
+                 AND date(l.expire_date) BETWEEN ? AND ?
                ORDER BY l.expire_date ASC''',
-            (today,),
+            (date_to, date_from, date_to),
         )
 
         total_principal = sum(float(r['loan_amount'] or 0) for r in rows)
@@ -412,6 +919,7 @@ class ReportsPage:
 
     def _show_renewals(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
             '''SELECT lr.renewed_at, l.ticket_no, c.name AS customer_name,
                       lr.old_expire_date, lr.new_expire_date, lr.new_duration_months,
@@ -422,7 +930,9 @@ class ReportsPage:
                JOIN loans l ON lr.loan_id=l.id
                JOIN customers c ON l.customer_id=c.id
                LEFT JOIN users u ON lr.renewed_by=u.id
+               WHERE date(lr.renewed_at) BETWEEN ? AND ?
                ORDER BY lr.id DESC'''
+            ,(date_from, date_to),
         )
 
         total_payment = sum(float(r['payment_amount'] or 0) for r in rows)
@@ -475,6 +985,7 @@ class ReportsPage:
 
     def _show_payments(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
             '''SELECT lp.payment_date, l.ticket_no, c.name AS customer_name,
                       lp.payment_type, lp.amount, u.full_name AS received_by_name,
@@ -483,7 +994,9 @@ class ReportsPage:
                JOIN loans l ON lp.loan_id=l.id
                JOIN customers c ON l.customer_id=c.id
                LEFT JOIN users u ON lp.received_by=u.id
+               WHERE date(lp.payment_date) BETWEEN ? AND ?
                ORDER BY lp.id DESC'''
+            ,(date_from, date_to),
         )
 
         totals = {'interest': 0.0, 'redemption': 0.0, 'partial': 0.0, 'penalty': 0.0}
@@ -534,6 +1047,7 @@ class ReportsPage:
 
     def _show_customers(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
             '''SELECT c.id, c.name, c.nic, c.phone, c.job,
                       COUNT(l.id) AS total_loans,
@@ -543,9 +1057,10 @@ class ReportsPage:
                       COALESCE(SUM(CASE WHEN l.status='active' THEN l.loan_amount ELSE 0 END),0) AS active_exposure,
                       MAX(l.issue_date) AS last_loan_date
                FROM customers c
-               LEFT JOIN loans l ON c.id=l.customer_id
+                             LEFT JOIN loans l ON c.id=l.customer_id AND date(l.issue_date) BETWEEN ? AND ?
                GROUP BY c.id
                ORDER BY active_exposure DESC, total_borrowed DESC'''
+                        ,(date_from, date_to),
         )
 
         total_customers = len(rows)
@@ -595,6 +1110,7 @@ class ReportsPage:
 
     def _show_gold_inventory(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
 
         active_items = self._query(
             '''SELECT li.article_type, COUNT(*) AS item_count,
@@ -606,8 +1122,10 @@ class ReportsPage:
                FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
                WHERE l.status='active'
+               AND date(l.issue_date) BETWEEN ? AND ?
                GROUP BY li.article_type
                ORDER BY total_gold_weight DESC'''
+             ,(date_from, date_to),
         )
 
         item_details = self._query(
@@ -618,7 +1136,9 @@ class ReportsPage:
                JOIN loans l ON li.loan_id=l.id
                JOIN customers c ON l.customer_id=c.id
                WHERE l.status='active'
+               AND date(l.issue_date) BETWEEN ? AND ?
                ORDER BY li.id DESC'''
+             ,(date_from, date_to),
         )
 
         total_items = sum(int(r['item_count'] or 0) for r in active_items)
@@ -702,23 +1222,30 @@ class ReportsPage:
 
     def _show_operations(self):
         self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
 
         approvals = self._query(
             '''SELECT status, COUNT(*) AS count
                FROM loan_approval_requests
+                    WHERE date(created_at) BETWEEN ? AND ?
                GROUP BY status'''
+                ,(date_from, date_to),
         )
         letters = self._query(
             '''SELECT status, COUNT(*) AS count
                FROM customer_letters
+                    WHERE date(created_at) BETWEEN ? AND ?
                GROUP BY status'''
+                ,(date_from, date_to),
         )
         audits = self._query(
             '''SELECT a.created_at, u.full_name AS user_name, a.action,
                       a.entity_type, a.entity_id
                FROM audit_log a
                LEFT JOIN users u ON a.user_id=u.id
+                    WHERE date(a.created_at) BETWEEN ? AND ?
                ORDER BY a.id DESC'''
+                ,(date_from, date_to),
         )
 
         approval_map = {r['status']: int(r['count'] or 0) for r in approvals}
