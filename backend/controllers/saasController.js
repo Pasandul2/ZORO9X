@@ -80,9 +80,15 @@ function findInstallerExecutable(systemFolder) {
       continue;
     }
 
-    const installer = fs
-      .readdirSync(root)
-      .find((name) => name.toLowerCase().endsWith('_installer.exe'));
+    const files = fs.readdirSync(root).filter((name) => name.toLowerCase().endsWith('.exe'));
+    const prioritized = [
+      files.find((name) => /_installer\.exe$/i.test(name)),
+      files.find((name) => /installer\.exe$/i.test(name)),
+      files.find((name) => /setup.*\.exe$/i.test(name)),
+      files.find((name) => /install.*\.exe$/i.test(name)),
+      files.find((name) => /app\.exe$/i.test(name) === false),
+    ].filter(Boolean);
+    const installer = prioritized[0] || null;
 
     if (installer) {
       return path.join(root, installer);
