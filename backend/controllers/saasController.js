@@ -133,6 +133,37 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   return findInstallerExecutable(systemFolder);
 }
 
+function writeFileIfChanged(filePath, nextContent) {
+  if (fs.existsSync(filePath)) {
+    const currentContent = fs.readFileSync(filePath, 'utf8');
+    if (currentContent === nextContent) {
+      return false;
+    }
+  }
+
+  fs.writeFileSync(filePath, nextContent, 'utf8');
+  return true;
+}
+
+function shouldAffectInstallerFreshness(filePath) {
+  const fileName = path.basename(filePath).toLowerCase();
+
+  // Runtime artifacts should not force installer rebuild checks.
+  if (
+    fileName.endsWith('.db') ||
+    fileName.endsWith('.sqlite') ||
+    fileName.endsWith('.sqlite3') ||
+    fileName.endsWith('.pyc') ||
+    fileName.endsWith('.log') ||
+    fileName.endsWith('_config.json') ||
+    fileName.endsWith('_license.json')
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function isInstallerOutdated(systemFolder, installerPath) {
   if (!installerPath || !fs.existsSync(installerPath)) {
     return true;
@@ -157,6 +188,10 @@ function isInstallerOutdated(systemFolder, installerPath) {
       fs.readdirSync(currentPath).forEach((child) => {
         stack.push(path.join(currentPath, child));
       });
+      continue;
+    }
+
+    if (!shouldAffectInstallerFreshness(currentPath)) {
       continue;
     }
 
@@ -2102,7 +2137,7 @@ exports.downloadSystem = async (req, res) => {
     });
 
 
-    fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
+    writeFileIfChanged(path.join(packageDir, 'installer.py'), installerSource);
 
     // Force rebuild only on Windows where BUILD.bat can produce a Windows EXE.
     // On Linux servers, reuse an existing prebuilt installer if available.
