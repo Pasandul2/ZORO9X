@@ -210,8 +210,11 @@ exports.generateSystem = async (req, res) => {
       console.warn(`⚠️ Default generated logo not found: ${DEFAULT_GENERATED_LOGO_SOURCE}`);
     }
     
-    // 5. Create requirements.txt (build-time dependencies)
-    const requirements = `pyinstaller
+    // 5. Create requirements.txt (runtime + build dependencies)
+    const requirements = `requests
+  Pillow
+  pywebview
+  pyinstaller
   pywin32
   `;
     

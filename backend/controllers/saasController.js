@@ -133,6 +133,41 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   return findInstallerExecutable(systemFolder);
 }
 
+function isInstallerOutdated(systemFolder, installerPath) {
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    return true;
+  }
+
+  const installerMtime = fs.statSync(installerPath).mtimeMs;
+  const stack = [systemFolder];
+
+  while (stack.length > 0) {
+    const currentPath = stack.pop();
+    if (!currentPath || !fs.existsSync(currentPath)) {
+      continue;
+    }
+
+    const stat = fs.statSync(currentPath);
+    if (stat.isDirectory()) {
+      const dirName = path.basename(currentPath).toLowerCase();
+      if (dirName === 'dist' || dirName === '__pycache__') {
+        continue;
+      }
+
+      fs.readdirSync(currentPath).forEach((child) => {
+        stack.push(path.join(currentPath, child));
+      });
+      continue;
+    }
+
+    if (stat.mtimeMs > installerMtime) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function createZipArchive(sourceDir, outFilePath) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outFilePath);
@@ -2073,6 +2108,14 @@ exports.downloadSystem = async (req, res) => {
     // On Linux servers, reuse an existing prebuilt installer if available.
     const shouldForceRebuild = process.platform === 'win32';
     let installerPath = buildInstallerIfMissing(packageDir, shouldForceRebuild);
+
+    if (installerPath && isInstallerOutdated(packageDir, installerPath)) {
+      if (process.platform === 'win32') {
+        installerPath = buildInstallerIfMissing(packageDir, true);
+      } else {
+        installerPath = null;
+      }
+    }
     
     if (!installerPath) {
       try {
@@ -2083,7 +2126,7 @@ exports.downloadSystem = async (req, res) => {
 
       return res.status(500).json({
         success: false,
-        message: 'Installer EXE is not available for this system right now. Please try again shortly or contact support.'
+        message: 'Server installer EXE is outdated or missing. Please rebuild the latest Windows installer and deploy it to the server.'
       });
     }
 

@@ -1,3 +1,5 @@
+requests
+Pillow
+pywebview
 pyinstaller
 pywin32
-pywebview
