@@ -2066,19 +2066,24 @@ exports.downloadSystem = async (req, res) => {
     // Always rebuild from the packaged source so downloads reflect the latest code/assets.
     let installerPath = buildInstallerIfMissing(packageDir, true);
     
+    if (!installerPath) {
+      try {
+        fs.rmSync(packageDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.error('Failed to clean package directory after missing installer:', cleanupError);
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Installer EXE is not available for this system right now. Please try again shortly or contact support.'
+      });
+    }
+
     let downloadPath = installerPath;
-    let deliveryMode = 'exe';
+    const deliveryMode = 'exe';
     const cleanupPaths = [packageDir];
 
-    if (!installerPath) {
-      const zipName = `${safeSystemName}_${tier}_system.zip`;
-      const zipPath = path.join(tempRoot, `download_${subscription.id}_${Date.now()}.zip`);
-      await createZipArchive(packageDir, zipPath);
-      downloadPath = zipPath;
-      downloadName = zipName;
-      deliveryMode = 'zip';
-      cleanupPaths.push(zipPath);
-    } else if (!installerPath.startsWith(packageDir)) {
+    if (!installerPath.startsWith(packageDir)) {
       // If using source installer, copy it to package dir for cleanup.
       const destPath = path.join(packageDir, path.basename(installerPath));
       fs.copyFileSync(installerPath, destPath);
