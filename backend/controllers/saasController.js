@@ -2063,8 +2063,10 @@ exports.downloadSystem = async (req, res) => {
 
     fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
 
-    // Always rebuild from the packaged source so downloads reflect the latest code/assets.
-    let installerPath = buildInstallerIfMissing(packageDir, true);
+    // Force rebuild only on Windows where BUILD.bat can produce a Windows EXE.
+    // On Linux servers, reuse an existing prebuilt installer if available.
+    const shouldForceRebuild = process.platform === 'win32';
+    let installerPath = buildInstallerIfMissing(packageDir, shouldForceRebuild);
     
     if (!installerPath) {
       try {
@@ -2440,7 +2442,8 @@ BUSINESS_CONFIG = load_business_config()
         fs.writeFileSync(gymAppPath, gymAppContent);
       }
       
-      let installerPath = buildInstallerIfMissing(tempDir, true);
+      const shouldForceRebuild = process.platform === 'win32';
+      let installerPath = buildInstallerIfMissing(tempDir, shouldForceRebuild);
       if (!installerPath) {
         throw new Error('Installer executable not found. Please build installer before download.');
       }
