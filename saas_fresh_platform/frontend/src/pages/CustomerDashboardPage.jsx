@@ -113,7 +113,10 @@ function CustomerDashboardPage() {
   return (
     <section className="panel">
       <h1>Customer Dashboard</h1>
-      <p>Step flow: create account, login, buy project, view licenses, then download verified software.</p>
+      <p>
+        Step flow: create account {'>'} login {'>'} buy project {'>'} view licenses {'>'} download verified
+        software.
+      </p>
 
       {!customer && (
         <>
