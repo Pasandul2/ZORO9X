@@ -13,12 +13,11 @@
 // ============================================
 
 // API Security Key (change this to something secure)
-// TEMPORARILY DISABLED FOR TESTING
 define('API_KEY', 'zoro9x-mail-gateway-2024');
-define('REQUIRE_API_KEY', false); // Set to false for testing
+define('REQUIRE_API_KEY', true); // Re-enable for security
 
-// Mail Method: 'php' (built-in) or 'smtp' (using SwiftMailer)
-define('MAIL_METHOD', 'php');
+// Mail Method: 'php' (built-in) or 'smtp' (direct Gmail SMTP)
+define('MAIL_METHOD', 'smtp');  // CHANGED: Use SMTP instead of php mail()
 
 // For PHP mail() - Configure in php.ini or use these settings
 define('SENDMAIL_FROM', 'zoro9x.tm@gmail.com');
@@ -182,6 +181,100 @@ try {
     }
 
     // ============================================
+    // METHOD 2: SMTP via Gmail (Direct)
+    // ============================================
+    elseif (MAIL_METHOD === 'smtp') {
+        error_log("📧 Attempting to send email via Gmail SMTP...");
+        
+        // Create socket connection to Gmail SMTP
+        $smtp_server = SMTP_HOST;
+        $smtp_port = SMTP_PORT;
+        
+        // Try to connect
+        $socket = @fsockopen($smtp_server, $smtp_port, $errno, $errstr, 30);
+        
+        if (!$socket) {
+            error_log("❌ SMTP Connection failed: $errstr ($errno)");
+            $result = false;
+        } else {
+            error_log("✅ SMTP Connected to $smtp_server:$smtp_port");
+            
+            // Read server response
+            $response = fgets($socket);
+            error_log("SMTP Response: " . trim($response));
+            
+            // Send EHLO
+            fputs($socket, "EHLO localhost\r\n");
+            $response = fgets($socket);
+            error_log("EHLO Response: " . trim($response));
+            
+            // Send STARTTLS
+            fputs($socket, "STARTTLS\r\n");
+            $response = fgets($socket);
+            error_log("STARTTLS Response: " . trim($response));
+            
+            // Enable SSL/TLS
+            stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            
+            // Send AUTH LOGIN
+            fputs($socket, "AUTH LOGIN\r\n");
+            $response = fgets($socket);
+            error_log("AUTH Response: " . trim($response));
+            
+            // Send username (base64 encoded)
+            $username = base64_encode(SMTP_USER);
+            fputs($socket, $username . "\r\n");
+            $response = fgets($socket);
+            error_log("Username Response: " . trim($response));
+            
+            // Send password (base64 encoded)
+            $password = base64_encode(SMTP_PASSWORD);
+            fputs($socket, $password . "\r\n");
+            $response = fgets($socket);
+            error_log("Password Response: " . trim($response));
+            
+            // Send MAIL FROM
+            fputs($socket, "MAIL FROM: <" . $from . ">\r\n");
+            $response = fgets($socket);
+            error_log("MAIL FROM Response: " . trim($response));
+            
+            // Send RCPT TO
+            fputs($socket, "RCPT TO: <" . $to . ">\r\n");
+            $response = fgets($socket);
+            error_log("RCPT TO Response: " . trim($response));
+            
+            // Send DATA
+            fputs($socket, "DATA\r\n");
+            $response = fgets($socket);
+            error_log("DATA Response: " . trim($response));
+            
+            // Build email headers and body
+            $email_content = "From: " . $from . "\r\n";
+            $email_content .= "To: " . $to . "\r\n";
+            if ($cc) {
+                $email_content .= "Cc: " . $cc . "\r\n";
+            }
+            $email_content .= "Subject: " . $subject . "\r\n";
+            $email_content .= "MIME-Version: 1.0\r\n";
+            $email_content .= "Content-Type: text/html; charset=UTF-8\r\n";
+            $email_content .= "\r\n";
+            $email_content .= $html . "\r\n";
+            
+            // Send email content
+            fputs($socket, $email_content . "\r\n.\r\n");
+            $response = fgets($socket);
+            error_log("Send Response: " . trim($response));
+            
+            // Send QUIT
+            fputs($socket, "QUIT\r\n");
+            $response = fgets($socket);
+            
+            fclose($socket);
+            $result = true;
+        }
+    }
+
+    // ============================================
     // RESPONSE
     // ============================================
 
@@ -200,142 +293,6 @@ try {
         echo json_encode([
             'success' => false,
             'message' => 'Failed to send email via mail()'
-        ]);
-        
-        error_log("❌ Failed to send email to: $to");
-    }
-
-} catch (Exception $e) {
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'message' => 'Error: ' . $e->getMessage()
-    ]);
-    
-    error_log("❌ Exception in mail gateway: " . $e->getMessage());
-}
-?>
-
-// ============================================
-// GET JSON INPUT
-// ============================================
-
-$input = json_decode(file_get_contents('php://input'), true);
-
-// Validate required fields
-if (!isset($input['to']) || !isset($input['subject']) || !isset($input['html'])) {
-    http_response_code(400);
-    exit(json_encode([
-        'success' => false,
-        'message' => 'Missing required fields: to, subject, html'
-    ]));
-}
-
-// Validate email format
-if (!filter_var($input['to'], FILTER_VALIDATE_EMAIL)) {
-    http_response_code(400);
-    exit(json_encode([
-        'success' => false,
-        'message' => 'Invalid email address'
-    ]));
-}
-
-// Validate sender email (optional but recommended)
-$from = $input['from'] ?? SENDMAIL_FROM;
-if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
-    http_response_code(400);
-    exit(json_encode([
-        'success' => false,
-        'message' => 'Invalid sender email address'
-    ]));
-}
-
-// ============================================
-// PREPARE EMAIL DATA
-// ============================================
-
-$to = $input['to'];
-$subject = $input['subject'];
-$html = $input['html'];
-$cc = $input['cc'] ?? null;
-$bcc = $input['bcc'] ?? null;
-
-try {
-    $result = false;
-
-    // ============================================
-    // METHOD 1: PHP Built-in mail()
-    // ============================================
-    if (MAIL_METHOD === 'php') {
-        $headers = "MIME-Version: 1.0\r\n";
-        $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
-        $headers .= "From: " . $from . "\r\n";
-        $headers .= "Reply-To: " . $from . "\r\n";
-        
-        if ($cc) {
-            $headers .= "Cc: " . $cc . "\r\n";
-        }
-        if ($bcc) {
-            $headers .= "Bcc: " . $bcc . "\r\n";
-        }
-        
-        $headers .= "X-Mailer: Zoro9x Mail Gateway\r\n";
-        $headers .= "X-Priority: 3\r\n";
-
-        // Send email
-        $result = mail($to, $subject, $html, $headers);
-    }
-
-    // ============================================
-    // METHOD 2: SMTP via Swift Mailer
-    // ============================================
-    elseif (MAIL_METHOD === 'smtp') {
-        require_once 'vendor/autoload.php';
-
-        // Create SMTP transport
-        $transport = (new \Swift_SmtpTransport(SMTP_HOST, SMTP_PORT, SMTP_ENCRYPTION))
-            ->setUsername(SMTP_USER)
-            ->setPassword(SMTP_PASSWORD);
-
-        // Create mailer
-        $mailer = new \Swift_Mailer($transport);
-
-        // Create message
-        $message = (new \Swift_Message($subject))
-            ->setFrom([$from])
-            ->setTo($to)
-            ->setBody($html, 'text/html');
-
-        if ($cc) {
-            $message->setCc($cc);
-        }
-        if ($bcc) {
-            $message->setBcc($bcc);
-        }
-
-        // Send
-        $result = $mailer->send($message) > 0;
-    }
-
-    // ============================================
-    // RESPONSE
-    // ============================================
-
-    if ($result) {
-        http_response_code(200);
-        echo json_encode([
-            'success' => true,
-            'message' => 'Email sent successfully',
-            'recipient' => $to,
-            'method' => MAIL_METHOD
-        ]);
-        
-        error_log("✅ Email sent to: $to, Subject: $subject, From: $from");
-    } else {
-        http_response_code(500);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Failed to send email'
         ]);
         
         error_log("❌ Failed to send email to: $to");
