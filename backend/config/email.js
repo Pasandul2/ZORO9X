@@ -13,26 +13,7 @@ const execFileAsync = promisify(execFile);
 const PHP_MAIL_SERVICE_URL = process.env.PHP_MAIL_SERVICE_URL;
 const PHP_MAIL_API_KEY = process.env.PHP_MAIL_API_KEY || 'your-secret-key';
 
-const escapeHtml = (value = '') => value
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
-
-// LiteSpeed/WAF can reject large styled HTML templates. Convert to a safe body.
-const toGatewaySafeHtml = (html = '') => {
-  const withoutScripts = String(html)
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const clipped = withoutScripts.slice(0, 8000);
-  const safeText = escapeHtml(clipped || 'Message content unavailable.');
-  return `<p style="font-family: Arial, sans-serif; line-height: 1.5;">${safeText}</p>`;
-};
+const toBase64 = (value = '') => Buffer.from(String(value), 'utf8').toString('base64');
 
 /**
  * Send email through the PHP gateway.
@@ -55,7 +36,10 @@ const sendEmail = async (mailOptions) => {
     to: mailOptions.to,
     from: mailOptions.from || process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER || 'noreply@zoro9x.com',
     subject: mailOptions.subject,
-    html: toGatewaySafeHtml(mailOptions.html),
+    // Keep a small fallback body, and send the full designed template as base64.
+    html: '<p>Please view this message in an HTML capable email client.</p>',
+    html_b64: toBase64(mailOptions.html || ''),
+    html_encoding: 'base64',
     cc: mailOptions.cc || null,
     bcc: mailOptions.bcc || null
   };
@@ -63,7 +47,7 @@ const sendEmail = async (mailOptions) => {
   try {
     console.log(`📧 Sending via PHP gateway to: ${requestData.to}`);
     console.log(`🔗 URL: ${PHP_MAIL_SERVICE_URL}`);
-    console.log(`📝 Gateway payload size: ${requestData.html.length} chars`);
+    console.log(`📝 Gateway payload size: ${requestData.html_b64.length} chars (base64)`);
 
     const curlArgs = [
       '-sS',
