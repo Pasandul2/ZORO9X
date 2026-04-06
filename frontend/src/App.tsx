@@ -23,10 +23,12 @@ import AdminManager from './pages/AdminManager';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import SaaSDashboard from './pages/SaaSDashboard';
+import AdminSubscriptionDashboard from './pages/AdminSubscriptionDashboard';
 import SystemGenerator from './pages/SystemGenerator';
 import SystemsMarketplace from './pages/SystemsMarketplace';
 import SystemPlansPage from './pages/SystemPlansPage';
 import ClientDashboard from './pages/ClientDashboard';
+import ClientRenewalPage from './pages/ClientRenewalPage';
 import SecurityDashboard from './pages/SecurityDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
@@ -104,6 +106,7 @@ function AppContent() {
                 <Route path="/admin/users" element={<UserManagement />} />
                 <Route path="/admin/admins" element={<AdminManager darkMode={adminDarkMode} />} />
                 <Route path="/admin/saas" element={<SaaSDashboard darkMode={adminDarkMode} />} />
+                <Route path="/admin/saas/subscriptions/:subscriptionId" element={<AdminSubscriptionDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/portfolio" element={<PortfolioManagement darkMode={adminDarkMode} />} />
                 <Route path="/admin/clients" element={<ClientManagement />} />
                 <Route path="/admin/quotations" element={<QuotationGenerator />} />
@@ -131,6 +134,7 @@ function AppContent() {
                 <Route path="/marketplace" element={<SystemsMarketplace darkMode={darkMode} />} />
                 <Route path="/marketplace/system/:systemId/plans" element={<SystemPlansPage darkMode={darkMode} />} />
                 <Route path="/client-dashboard" element={<ClientDashboard darkMode={darkMode} />} />
+                <Route path="/client-dashboard/renewal/:subscriptionId" element={<ClientRenewalPage darkMode={darkMode} />} />
                 <Route path="/services/:serviceId" element={<ServiceDetail />} />
                 <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />
                 <Route path="/work" element={<WorkSection darkMode={darkMode} />} />

@@ -16,6 +16,7 @@ const { generateInstaller } = require('../templates/installerTemplate');
 
 let businessInfoSchemaReady = false;
 let renewalSchemaReady = false;
+let deviceRuntimeSchemaReady = false;
 
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
@@ -339,6 +340,25 @@ async function ensureRenewalSchema() {
   renewalSchemaReady = true;
 }
 
+async function ensureDeviceRuntimeSchema() {
+  if (deviceRuntimeSchemaReady) {
+    return;
+  }
+
+  try {
+    await pool.execute(`
+      ALTER TABLE device_activations
+      ADD COLUMN app_state ENUM('running', 'offline') DEFAULT 'offline'
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add app_state column on device_activations:', err.message);
+    }
+  }
+
+  deviceRuntimeSchemaReady = true;
+}
+
 function addBillingCycle(baseDateValue, billingCycle) {
   const baseDate = new Date(baseDateValue);
   if (Number.isNaN(baseDate.getTime())) {
@@ -401,10 +421,22 @@ function boolFromValue(value) {
   return value === true || value === 'true' || value === '1' || value === 1;
 }
 
+function getOfflineGraceDays() {
+  const days = parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10);
+  return Math.max(1, Number.isFinite(days) ? days : 7);
+}
+
+function getOfflineGraceMinutes() {
+  const fallbackMinutes = getOfflineGraceDays() * 24 * 60;
+  const minutes = parseInt(process.env.OFFLINE_GRACE_MINUTES || String(fallbackMinutes), 10);
+  return Math.max(1, Number.isFinite(minutes) ? minutes : fallbackMinutes);
+}
+
 // Export security controller methods
 exports.activateDevice = securityController.activateDevice;
 exports.validateApiKey = securityController.validateApiKey;
 exports.heartbeat = securityController.heartbeat;
+exports.shutdown = securityController.shutdown;
 exports.getSecurityAlerts = securityController.getSecurityAlerts;
 exports.getPendingDevices = securityController.getPendingDevices;
 exports.approveDevice = securityController.approveDevice;
@@ -912,15 +944,20 @@ exports.getMySubscriptions = async (req, res) => {
       const daysRemaining = endDate
         ? Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
         : null;
+      const countdownDays =
+        typeof daysRemaining === 'number' && daysRemaining > 0 && daysRemaining <= 3
+          ? daysRemaining
+          : null;
 
       const needsRenewal =
         subscription.status === 'expired' ||
         subscription.status === 'cancelled' ||
-        (typeof daysRemaining === 'number' && daysRemaining <= 7);
+        (typeof daysRemaining === 'number' && daysRemaining <= 3);
 
       return {
         ...subscription,
         days_remaining: daysRemaining,
+        renewal_countdown_days: countdownDays,
         renewal_recommended: needsRenewal,
         renewal_message: needsRenewal
           ? (
@@ -1462,12 +1499,9 @@ exports.getSecurityInfo = async (req, res) => {
     const effectivePaymentStatus = isCurrentlyActive && paymentStatus !== 'completed' ? 'completed' : paymentStatus;
     const heartbeatWindowMinutes = Math.max(
       1,
-      parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || process.env.OFFLINE_GRACE_MINUTES || '3', 10)
+      parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || '3', 10)
     );
-    const gracePeriodMinutes = Math.max(
-      1,
-      parseInt(process.env.OFFLINE_GRACE_MINUTES || '3', 10)
-    );
+    const gracePeriodMinutes = getOfflineGraceMinutes();
     const gracePeriodDays = Math.max(1, Math.ceil(gracePeriodMinutes / (60 * 24)));
 
     let onlineStatus = false;
@@ -1479,6 +1513,15 @@ exports.getSecurityInfo = async (req, res) => {
       offlineMinutes = Math.max(diffMinutes, 0);
       onlineStatus = diffMinutes <= heartbeatWindowMinutes;
     }
+
+    const daysRemaining = subscriptionEndIso
+      ? Math.ceil((new Date(subscriptionEndIso).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      : null;
+    const isLifetime = !!(subscriptionEndIso && new Date(subscriptionEndIso).getUTCFullYear() >= 2099);
+    const isExpired = !isLifetime && !!subscriptionEndIso && subscriptionEndIso < todayIso;
+    const requiresOnlineRevalidation = offlineMinutes !== null && offlineMinutes > gracePeriodMinutes;
+    const canRenewNow = isExpired || subscription.status === 'expired' || subscription.status === 'cancelled';
+    const canRequestEarlyRenewal = !isLifetime && !canRenewNow;
 
     res.json({
       success: true,
@@ -1494,8 +1537,13 @@ exports.getSecurityInfo = async (req, res) => {
         heartbeat_window_minutes: heartbeatWindowMinutes,
         grace_period_minutes: gracePeriodMinutes,
         grace_period_days: gracePeriodDays,
+        days_remaining: daysRemaining,
         subscription_status: subscription.status,
         payment_status: effectivePaymentStatus,
+        is_expired: isExpired,
+        requires_online_revalidation: requiresOnlineRevalidation,
+        can_renew_now: canRenewNow,
+        can_request_early_renewal: canRequestEarlyRenewal,
       }
     });
   } catch (error) {
@@ -1927,6 +1975,477 @@ exports.setSubscriptionStatusAdmin = async (req, res) => {
   } catch (error) {
     console.error('Error setting subscription status:', error);
     return res.status(500).json({ success: false, message: 'Failed to update subscription status' });
+  }
+};
+
+/**
+ * Admin: manage subscription lifecycle with API-key-linked actions
+ */
+exports.manageSubscriptionAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { api_key, action, days, end_date, note, activated } = req.body || {};
+    const adminId = req.user?.id || null;
+
+    if (!api_key || !action) {
+      return res.status(400).json({ success: false, message: 'api_key and action are required' });
+    }
+
+    const allowedActions = [
+      'activate',
+      'deactivate',
+      'expire',
+      'extend_days',
+      'set_end_date',
+      'lifetime',
+      'set_activation',
+    ];
+
+    if (!allowedActions.includes(action)) {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
+    }
+
+    const [subs] = await pool.execute(
+      `SELECT cs.id, cs.client_id, cs.api_key, cs.status, cs.end_date, cs.next_billing_date, cs.auto_renew,
+              cs.is_activated, sp.billing_cycle
+       FROM client_subscriptions cs
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE cs.id = ?
+       LIMIT 1`,
+      [id]
+    );
+
+    if (subs.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const subscription = subs[0];
+    if (String(subscription.api_key) !== String(api_key)) {
+      return res.status(403).json({ success: false, message: 'API key does not match this subscription' });
+    }
+
+    const todayIso = new Date().toISOString().slice(0, 10);
+    let message = 'Subscription updated';
+    let eventType = `admin_subscription_${action}`;
+    const details = { action, note: note || null };
+
+    if (action === 'activate') {
+      let nextEndDate = subscription.end_date;
+      if (!nextEndDate || String(nextEndDate).slice(0, 10) < todayIso) {
+        nextEndDate = addBillingCycle(todayIso, subscription.billing_cycle);
+      }
+
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = 'active',
+             end_date = ?,
+             next_billing_date = ?,
+             updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [nextEndDate, nextEndDate, id, api_key]
+      );
+      message = 'Subscription activated';
+    }
+
+    if (action === 'deactivate') {
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = 'cancelled', updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [id, api_key]
+      );
+      message = 'Subscription deactivated';
+    }
+
+    if (action === 'expire') {
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = 'expired', end_date = ?, next_billing_date = ?, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [todayIso, todayIso, id, api_key]
+      );
+      message = 'Subscription marked as expired';
+    }
+
+    if (action === 'extend_days') {
+      const extendDays = parseInt(days, 10);
+      if (!Number.isFinite(extendDays) || extendDays <= 0 || extendDays > 3650) {
+        return res.status(400).json({ success: false, message: 'days must be a number between 1 and 3650' });
+      }
+
+      const currentEnd = subscription.end_date ? new Date(subscription.end_date).toISOString().slice(0, 10) : todayIso;
+      const base = currentEnd >= todayIso ? currentEnd : todayIso;
+      const newEndDate = addDays(base, extendDays);
+
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = 'active', end_date = ?, next_billing_date = ?, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [newEndDate, newEndDate, id, api_key]
+      );
+      message = `Subscription extended by ${extendDays} days`;
+      details.days = extendDays;
+      details.new_end_date = newEndDate;
+    }
+
+    if (action === 'set_end_date') {
+      if (!end_date || Number.isNaN(new Date(end_date).getTime())) {
+        return res.status(400).json({ success: false, message: 'Valid end_date is required' });
+      }
+
+      const nextEndDate = new Date(end_date).toISOString().slice(0, 10);
+      const nextStatus = nextEndDate < todayIso ? 'expired' : 'active';
+
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = ?, end_date = ?, next_billing_date = ?, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [nextStatus, nextEndDate, nextEndDate, id, api_key]
+      );
+      message = `Subscription end date set to ${nextEndDate}`;
+      details.new_end_date = nextEndDate;
+    }
+
+    if (action === 'lifetime') {
+      const lifetimeDate = '2099-12-31';
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = 'active', end_date = ?, next_billing_date = NULL, auto_renew = false, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [lifetimeDate, id, api_key]
+      );
+      message = 'Subscription set to lifetime purchase';
+      details.new_end_date = lifetimeDate;
+      details.lifetime = true;
+    }
+
+    if (action === 'set_activation') {
+      const nextActivated = activated === true || activated === 'true' || activated === 1 || activated === '1';
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET is_activated = ?, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [nextActivated ? 1 : 0, id, api_key]
+      );
+      message = nextActivated ? 'System activation enabled' : 'System activation disabled';
+      details.is_activated = nextActivated;
+    }
+
+    await pool.execute(
+      `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, eventType, String(adminId || 'admin'), JSON.stringify(details), req.ip]
+    );
+
+    await pool.execute(
+      `INSERT INTO system_notifications (client_id, subscription_id, title, message, type)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        subscription.client_id,
+        id,
+        'Subscription Updated by Admin',
+        note || message,
+        action === 'deactivate' || action === 'expire' ? 'warning' : 'success',
+      ]
+    );
+
+    return res.json({ success: true, message });
+  } catch (error) {
+    console.error('Error managing subscription:', error);
+    return res.status(500).json({ success: false, message: 'Failed to manage subscription' });
+  }
+};
+
+/**
+ * Admin: get full dashboard payload for a subscription
+ */
+exports.getSubscriptionDashboardAdmin = async (req, res) => {
+  try {
+    await ensureDeviceRuntimeSchema();
+    const { id } = req.params;
+
+    const [subscriptionRows] = await pool.execute(
+      `SELECT cs.*, 
+              c.company_name,
+              COALESCE(c.contact_email, c.email) AS contact_email,
+              c.phone AS contact_phone,
+              c.address AS business_address,
+              c.website,
+              c.tax_id,
+              c.logo_url,
+              c.status AS client_status,
+              u.email AS user_email,
+              u.fullName AS user_name,
+              s.name AS system_name,
+              s.description AS system_description,
+              s.category,
+              s.features AS system_features,
+              s.version AS system_version,
+              s.icon_url,
+              sp.name AS plan_name,
+              sp.description AS plan_description,
+              sp.price,
+              sp.billing_cycle,
+              sp.features AS plan_features,
+              sp.support_level,
+              (
+                SELECT COUNT(*)
+                FROM api_usage_logs aul
+                WHERE aul.subscription_id = cs.id
+                  AND aul.endpoint = '/download'
+              ) AS download_count,
+              (
+                SELECT MAX(aul.request_timestamp)
+                FROM api_usage_logs aul
+                WHERE aul.subscription_id = cs.id
+                  AND aul.endpoint = '/download'
+              ) AS last_download_at
+       FROM client_subscriptions cs
+       JOIN clients c ON c.id = cs.client_id
+       LEFT JOIN users u ON u.id = c.user_id
+       JOIN systems s ON s.id = cs.system_id
+       JOIN subscription_plans sp ON sp.id = cs.plan_id
+       WHERE cs.id = ?
+       LIMIT 1`,
+      [id]
+    );
+
+    if (subscriptionRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+
+    const subscription = subscriptionRows[0];
+
+    const [usageStatsRows] = await pool.execute(
+      `SELECT COUNT(*) AS total_requests,
+              COUNT(DISTINCT ip_address) AS unique_ips,
+              COUNT(DISTINCT DATE(request_timestamp)) AS active_days,
+              MAX(request_timestamp) AS last_request,
+              SUM(CASE WHEN endpoint = '/download' THEN 1 ELSE 0 END) AS download_requests
+       FROM api_usage_logs
+       WHERE subscription_id = ?`,
+      [id]
+    );
+
+    let deviceRows = [];
+    try {
+      const [rows] = await pool.execute(
+        `SELECT id,
+                device_name,
+                NULL AS device_id,
+                device_fingerprint,
+                NULL AS mac_address,
+                ip_address,
+                NULL AS last_ip_address,
+                status,
+                app_state,
+                first_activated AS created_at,
+                last_seen
+         FROM device_activations
+         WHERE subscription_id = ?
+         ORDER BY first_activated DESC
+         LIMIT 100`,
+        [id]
+      );
+      deviceRows = rows;
+    } catch (deviceError) {
+      if (!(deviceError && deviceError.code === 'ER_BAD_FIELD_ERROR')) {
+        throw deviceError;
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT id,
+                device_name,
+                NULL AS device_id,
+                device_fingerprint,
+                NULL AS mac_address,
+                ip_address,
+                NULL AS last_ip_address,
+                status,
+                'offline' AS app_state,
+                first_activated AS created_at,
+                last_seen
+         FROM device_activations
+         WHERE subscription_id = ?
+         ORDER BY first_activated DESC
+         LIMIT 100`,
+        [id]
+      );
+      deviceRows = rows;
+    }
+
+    const [paymentRows] = await pool.execute(
+      `SELECT id, amount, currency, payment_method, transaction_id, status, payment_date, notes
+       FROM payments
+       WHERE subscription_id = ?
+       ORDER BY payment_date DESC, id DESC
+       LIMIT 50`,
+      [id]
+    );
+
+    const [paymentSummaryRows] = await pool.execute(
+      `SELECT COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS completed_total,
+              SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count,
+              SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+              MAX(CASE WHEN status = 'completed' THEN payment_date END) AS last_completed_payment
+       FROM payments
+       WHERE subscription_id = ?`,
+      [id]
+    );
+
+    let renewalRows = [];
+    try {
+      const [rows] = await pool.execute(
+        `SELECT id, amount, payment_method, transaction_reference, receipt_url, status,
+                admin_note, payment_period_start, payment_period_end, created_at, reviewed_at
+         FROM renewal_payment_requests
+         WHERE subscription_id = ?
+         ORDER BY created_at DESC
+         LIMIT 30`,
+        [id]
+      );
+      renewalRows = rows;
+    } catch (renewalError) {
+      // Keep dashboard functional for environments that do not have the renewal table yet.
+      if (!(renewalError && renewalError.code === 'ER_NO_SUCH_TABLE')) {
+        throw renewalError;
+      }
+      renewalRows = [];
+    }
+
+    const [recentActivityRows] = await pool.execute(
+      `SELECT id, event_type, actor, details, ip_address, created_at
+       FROM audit_logs
+       WHERE subscription_id = ?
+       ORDER BY created_at DESC
+       LIMIT 40`,
+      [id]
+    );
+
+    const usageStats = usageStatsRows[0] || {};
+    const paymentSummary = paymentSummaryRows[0] || {};
+    const activeDevices = deviceRows.filter((device) => device.status === 'active').length;
+    const maxDownloads = Number(subscription.max_activations || 0);
+    const usedDownloads = Number(subscription.activation_count || 0);
+    const now = new Date();
+    const nowMs = now.getTime();
+    const heartbeatWindowMinutes = Math.max(
+      1,
+      parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || '3', 10)
+    );
+    const graceMinutes = getOfflineGraceMinutes();
+    const graceMs = graceMinutes * 60 * 1000;
+
+    let latestSeenMs = 0;
+    const latestStateByFingerprint = new Map();
+    deviceRows.forEach((device) => {
+      if (!device.last_seen) return;
+      const seenMs = new Date(device.last_seen).getTime();
+      if (Number.isNaN(seenMs)) return;
+
+      if (seenMs > latestSeenMs) {
+        latestSeenMs = seenMs;
+      }
+
+      const key = String(device.device_fingerprint || device.id);
+      const current = latestStateByFingerprint.get(key);
+      if (!current || seenMs > current.seenMs) {
+        latestStateByFingerprint.set(key, {
+          seenMs,
+          appState: device.app_state,
+          status: device.status,
+        });
+      }
+    });
+
+    const isLive = Array.from(latestStateByFingerprint.values()).some((state) => {
+      if (state.status !== 'active') return false;
+      if (state.appState !== 'running') return false;
+      return (nowMs - state.seenMs) <= heartbeatWindowMinutes * 60 * 1000;
+    });
+    const offlineMinutes = latestSeenMs > 0 ? Math.max(Math.floor((nowMs - latestSeenMs) / (1000 * 60)), 0) : null;
+
+    const endDateValue = subscription.end_date ? new Date(subscription.end_date) : null;
+    const endMs = endDateValue && !Number.isNaN(endDateValue.getTime()) ? endDateValue.getTime() : null;
+    const isLifetime = !!(endDateValue && endDateValue.getUTCFullYear() >= 2099);
+    const renewalCountdownSeconds = endMs ? Math.max(Math.floor((endMs - nowMs) / 1000), 0) : null;
+    const expired = !isLifetime && endMs !== null && endMs < nowMs;
+    const inGrace = expired && endMs !== null && (nowMs - endMs) <= graceMs;
+    const graceExpired = expired && endMs !== null && (nowMs - endMs) > graceMs;
+
+    let effectiveStatus = 'active';
+    if (isLifetime) {
+      effectiveStatus = 'lifetime';
+    } else if (String(subscription.status) === 'cancelled') {
+      effectiveStatus = 'cancelled';
+    } else if (String(subscription.status) === 'expired' || graceExpired) {
+      effectiveStatus = 'expired';
+    } else if (inGrace) {
+      effectiveStatus = 'grace_period';
+    } else if (!isLive) {
+      effectiveStatus = 'offline';
+    }
+
+    return res.json({
+      success: true,
+      dashboard: {
+        subscription: {
+          ...subscription,
+          system_features: parseJsonObject(subscription.system_features, []),
+          plan_features: parseJsonObject(subscription.plan_features, []),
+        },
+        usage: {
+          total_requests: Number(usageStats.total_requests || 0),
+          unique_ips: Number(usageStats.unique_ips || 0),
+          active_days: Number(usageStats.active_days || 0),
+          last_request: usageStats.last_request || null,
+          download_requests: Number(usageStats.download_requests || 0),
+        },
+        downloads: {
+          total_downloads: Number(subscription.download_count || 0),
+          last_download_at: subscription.last_download_at || null,
+          max_downloads: maxDownloads,
+          used_downloads: usedDownloads,
+          remaining_downloads: Math.max(maxDownloads - usedDownloads, 0),
+        },
+        payments: {
+          summary: {
+            completed_total: Number(paymentSummary.completed_total || 0),
+            completed_count: Number(paymentSummary.completed_count || 0),
+            pending_count: Number(paymentSummary.pending_count || 0),
+            failed_count: Number(paymentSummary.failed_count || 0),
+            last_completed_payment: paymentSummary.last_completed_payment || null,
+          },
+          history: paymentRows,
+        },
+        devices: {
+          active_count: activeDevices,
+          total_count: deviceRows.length,
+          max_devices: Number(subscription.max_devices || subscription.max_activations || 0),
+          max_activations: Number(subscription.max_activations || 0),
+          activation_count: Number(subscription.activation_count || 0),
+          list: deviceRows,
+        },
+        runtime: {
+          application_live: isLive,
+          offline_minutes: offlineMinutes,
+          heartbeat_window_minutes: heartbeatWindowMinutes,
+          renewal_countdown_seconds: renewalCountdownSeconds,
+          in_grace_period: inGrace,
+          grace_period_expired: graceExpired,
+          effective_status: effectiveStatus,
+          expired,
+          is_lifetime: isLifetime,
+          now: now.toISOString(),
+        },
+        renewals: renewalRows,
+        recent_activity: recentActivityRows,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching admin subscription dashboard:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch subscription dashboard' });
   }
 };
 

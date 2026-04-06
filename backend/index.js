@@ -9,6 +9,7 @@ const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 const path = require('path');
+const net = require('net');
 require('dotenv').config();
 const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
@@ -33,6 +34,26 @@ const DEFAULT_FRONTEND_ORIGINS = ['https://www.zoro9x.com', 'https://zoro9x.com'
 const FRONTEND_ORIGINS = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
   : DEFAULT_FRONTEND_ORIGINS;
+
+async function ensurePortIsAvailable(port) {
+  return new Promise((resolve, reject) => {
+    const tester = net
+      .createServer()
+      .once('error', (error) => {
+        if (error && error.code === 'EADDRINUSE') {
+          reject(new Error(`Port ${port} is already in use`));
+          return;
+        }
+
+        reject(error);
+      })
+      .once('listening', () => {
+        tester.close(() => resolve(true));
+      });
+
+    tester.listen(port);
+  });
+}
 
 // ============================================
 // SESSION MIDDLEWARE
@@ -163,6 +184,9 @@ async function startServer() {
   try {
     console.log('🔄 Initializing ZORO9X Backend...');
 
+    // Step 0: Fail fast if another backend instance is already running.
+    await ensurePortIsAvailable(PORT);
+
     // Step 1: Connect to database
     const dbConnected = await initializeDatabase();
     if (!dbConnected) {
@@ -193,8 +217,8 @@ async function startServer() {
     await seedInitialSystems();
     await seedInitialPlans();
 
-    // Step 5: Start the Express server
-    app.listen(PORT, () => {
+    // Step 7: Start the Express server
+    const server = app.listen(PORT, () => {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`🚀 ZORO9X Backend Server Started`);
       console.log(`${'='.repeat(50)}`);
@@ -204,7 +228,24 @@ async function startServer() {
       console.log(`📊 Database: ${process.env.DB_NAME}`);
       console.log(`${'='.repeat(50)}\n`);
     });
+
+    server.on('error', (error) => {
+      if (error && error.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use. Stop the existing backend process and try again.`);
+        process.exit(1);
+        return;
+      }
+
+      console.error('❌ Server failed to start:', error);
+      process.exit(1);
+    });
   } catch (error) {
+    if (error?.message?.includes('already in use')) {
+      console.error(`❌ ${error.message}. Another backend instance is already running.`);
+      process.exit(1);
+      return;
+    }
+
     console.error('❌ Failed to start server:', error);
     process.exit(1);
   }

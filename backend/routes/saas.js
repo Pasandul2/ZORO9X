@@ -235,6 +235,7 @@ router.post('/activate-device', saasController.activateDevice);
  */
 router.post('/validate-key', saasController.validateApiKey);
 router.post('/heartbeat', saasController.heartbeat);
+router.post('/shutdown', saasController.shutdown);
 
 // ============================================
 // ADMIN ROUTES - System Management
@@ -254,6 +255,8 @@ router.get('/admin/dashboard', authenticateToken, authenticateAdmin, saasControl
  */
 router.get('/admin/clients', authenticateToken, authenticateAdmin, saasController.getAllClientsAndSubscriptions);
 router.get('/admin/subscriptions', authenticateToken, authenticateAdmin, saasController.getAllSubscriptionsAdmin);
+router.get('/admin/subscriptions/:id/dashboard', authenticateToken, authenticateAdmin, saasController.getSubscriptionDashboardAdmin);
+router.post('/admin/subscriptions/:id/manage', authenticateToken, authenticateAdmin, saasController.manageSubscriptionAdmin);
 router.patch('/admin/subscriptions/:id/status', authenticateToken, authenticateAdmin, saasController.setSubscriptionStatusAdmin);
 router.get('/admin/renewal-requests', authenticateToken, authenticateAdmin, saasController.getRenewalRequestsAdmin);
 router.post('/admin/renewal-requests/:requestId/review', authenticateToken, authenticateAdmin, saasController.reviewRenewalRequestAdmin);

@@ -18,6 +18,8 @@ from datetime import datetime
 import base64
 import sys
 import hmac
+import urllib3
+import threading
 from theme import GOLD_THEME
 from backup_manager import get_backup_manager
 
@@ -25,21 +27,83 @@ from backup_manager import get_backup_manager
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, 'gold_loan_config.json')
 LICENSE_CACHE_FILE = os.path.join(APP_DIR, 'gold_loan_license.json')
+SERVER_API_URL_FILE = os.path.join(APP_DIR, 'server_api_url.txt')
 DEFAULT_LOCAL_LOGO_PATH = os.path.join(APP_DIR, 'logo.png')
-DEFAULT_OFFLINE_GRACE_MINUTES = 3
-DEFAULT_OFFLINE_GRACE_DAYS = 7
+DEFAULT_OFFLINE_GRACE_DAYS = max(1, int(os.getenv('ZORO9X_OFFLINE_GRACE_DAYS', '7')))
+DEFAULT_OFFLINE_GRACE_MINUTES = max(
+    1,
+    int(os.getenv('ZORO9X_OFFLINE_GRACE_MINUTES', str(DEFAULT_OFFLINE_GRACE_DAYS * 24 * 60)))
+)
 API_URL = 'https://www.zoro9x.com'
 PAYMENT_PORTAL_URL = f'{API_URL}/client-dashboard'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
 ACTIVATE_ENDPOINT = '/api/saas/activate-device'
 HEARTBEAT_ENDPOINT = '/api/saas/heartbeat'
+SHUTDOWN_ENDPOINT = '/api/saas/shutdown'
 TOKEN_VERIFY_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
 DEV_BYPASS_ENV = 'ZORO9X_DEV_BYPASS_LICENSE'
+VALIDATION_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_VALIDATE_TIMEOUT_SECONDS', '4'))
+ACTIVATION_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_ACTIVATE_TIMEOUT_SECONDS', '4'))
+HEARTBEAT_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_HEARTBEAT_TIMEOUT_SECONDS', '1.5'))
+SHUTDOWN_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_SHUTDOWN_TIMEOUT_SECONDS', '0.8'))
+MAX_FALLBACK_API_URLS = max(1, int(os.getenv('ZORO9X_MAX_API_FALLBACKS', '2')))
 
 
 def get_effective_api_url():
+    env_url = os.getenv('ZORO9X_PUBLIC_API_URL', '').strip()
+    if is_remote_api_url(env_url):
+        return env_url.rstrip('/')
+
+    if os.path.exists(SERVER_API_URL_FILE):
+        try:
+            with open(SERVER_API_URL_FILE, 'r', encoding='utf-8') as f:
+                file_url = (f.read() or '').strip()
+            if is_remote_api_url(file_url):
+                return file_url.rstrip('/')
+        except Exception:
+            pass
+
     return API_URL.rstrip('/')
+
+
+def build_api_url_candidates():
+    ordered = []
+
+    def _add(url):
+        normalized = (url or '').strip().rstrip('/')
+        if is_remote_api_url(normalized) and normalized not in ordered:
+            ordered.append(normalized)
+
+    _add(os.getenv('ZORO9X_PUBLIC_API_URL', ''))
+
+    if os.path.exists(SERVER_API_URL_FILE):
+        try:
+            with open(SERVER_API_URL_FILE, 'r', encoding='utf-8') as f:
+                _add(f.read())
+        except Exception:
+            pass
+
+    _add(API_URL)
+    _add('http://127.0.0.1:5001')
+    _add('http://localhost:5001')
+
+    for base in list(ordered):
+        if base.startswith('https://www.'):
+            _add('https://' + base[len('https://www.'):])
+        elif base.startswith('https://'):
+            _add('https://www.' + base[len('https://'):])
+
+    return ordered
+
+
+def post_with_tls_fallback(url, payload, timeout=10):
+    try:
+        return requests.post(url, json=payload, timeout=timeout)
+    except requests.exceptions.SSLError:
+        # Some environments perform TLS interception; retry once without strict verification.
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        return requests.post(url, json=payload, timeout=timeout, verify=False)
 
 
 def is_license_bypass_enabled():
@@ -436,8 +500,8 @@ class GoldLoanSystemApp:
             )
             return False
 
-        api_url = get_effective_api_url()
-        if not is_remote_api_url(api_url):
+        api_urls = build_api_url_candidates()[:MAX_FALLBACK_API_URLS]
+        if not api_urls:
             messagebox.showerror(
                 'Remote Verification Required',
                 'Remote HTTPS license API is not configured.\nPlease set ZORO9X_PUBLIC_API_URL.'
@@ -451,87 +515,117 @@ class GoldLoanSystemApp:
             'machine': platform.machine(),
             'mac_address': get_mac_address(),
         }
-        try:
-            resp = requests.post(
-                f'{api_url}{VALIDATE_ENDPOINT}',
-                json={'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
-                timeout=10,
-            )
-            data = resp.json()
-            if resp.status_code == 200 and data.get('valid'):
-                grace_period_minutes = resolve_grace_period_minutes(data)
-                cache_data = {
-                    'valid': True,
-                    'last_check': datetime.now().isoformat(),
-                    'token': data.get('token', ''),
-                    'subscription_id': data.get('subscription', {}).get('id'),
-                    'device_fingerprint': device_fp,
-                    'grace_period_minutes': grace_period_minutes,
-                    'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
-                }
-                cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
-                save_license_cache(cache_data)
-                self._send_heartbeat(device_fp)
-                self._schedule_heartbeat(device_fp)
-                return True
-            if resp.status_code == 403 and 'not activated' in data.get('message', '').lower():
-                return self._activate_device(api_key, device_fp, device_info)
-            license_message = data.get('message', 'License validation failed. Please contact support.')
-            if self._is_payment_required_error(license_message, resp.status_code):
-                self._show_payment_required_popup(license_message)
-                return False
-            messagebox.showerror(
-                'License Error',
-                license_message
-            )
-            return False
-        except requests.exceptions.ConnectionError:
-            return self._check_offline_grace()
-        except Exception:
+        had_network_exception = False
+        last_exception = None
+
+        for api_url in api_urls:
+            try:
+                resp = post_with_tls_fallback(
+                    f'{api_url}{VALIDATE_ENDPOINT}',
+                    {'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
+                    timeout=VALIDATION_TIMEOUT_SECONDS,
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get('valid'):
+                    grace_period_minutes = resolve_grace_period_minutes(data)
+                    cache_data = {
+                        'valid': True,
+                        'last_check': datetime.now().isoformat(),
+                        'token': data.get('token', ''),
+                        'subscription_id': data.get('subscription', {}).get('id'),
+                        'device_fingerprint': device_fp,
+                        'grace_period_minutes': grace_period_minutes,
+                        'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
+                    }
+                    cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
+                    save_license_cache(cache_data)
+                    self._send_heartbeat(device_fp)
+                    self._schedule_heartbeat(device_fp)
+                    return True
+
+                if resp.status_code == 403 and 'not activated' in data.get('message', '').lower():
+                    return self._activate_device(api_key, device_fp, device_info)
+
+                license_message = data.get('message', 'License validation failed. Please contact support.')
+                if self._is_payment_required_error(license_message, resp.status_code):
+                    self._show_payment_required_popup(license_message)
+                    return False
+
+                if resp.status_code < 500:
+                    messagebox.showerror('License Error', license_message)
+                    return False
+
+                had_network_exception = True
+            except requests.exceptions.ConnectionError as exc:
+                had_network_exception = True
+                last_exception = exc
+            except Exception as exc:
+                had_network_exception = True
+                last_exception = exc
+
+        if had_network_exception:
             return self._check_offline_grace()
 
+        if last_exception:
+            messagebox.showerror('License Error', f'Unable to validate license: {last_exception}')
+        return False
+
     def _activate_device(self, api_key, device_fp, device_info):
-        api_url = get_effective_api_url()
-        if not is_remote_api_url(api_url):
+        api_urls = build_api_url_candidates()[:MAX_FALLBACK_API_URLS]
+        if not api_urls:
             return False
-        try:
-            resp = requests.post(
-                f'{api_url}{ACTIVATE_ENDPOINT}',
-                json={'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
-                timeout=10,
-            )
-            data = resp.json()
-            if resp.status_code == 200 and data.get('success'):
-                grace_period_minutes = resolve_grace_period_minutes(data)
-                cache_data = {
-                    'valid': True,
-                    'last_check': datetime.now().isoformat(),
-                    'token': data.get('token', ''),
-                    'subscription_id': data.get('subscription', {}).get('id'),
-                    'device_fingerprint': device_fp,
-                    'grace_period_minutes': grace_period_minutes,
-                    'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
-                }
-                cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
-                save_license_cache(cache_data)
-                self._send_heartbeat(device_fp)
-                self._schedule_heartbeat(device_fp)
-                return True
-            if resp.status_code == 202:
-                messagebox.showinfo(
-                    'Activation Pending',
-                    'This device is awaiting administrator approval.\n'
-                    'You will be able to use the application once approved.\n'
-                    'Contact support if this takes more than 24 hours.'
+        had_network_exception = False
+        last_exception = None
+
+        for api_url in api_urls:
+            try:
+                resp = post_with_tls_fallback(
+                    f'{api_url}{ACTIVATE_ENDPOINT}',
+                    {'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
+                    timeout=ACTIVATION_TIMEOUT_SECONDS,
                 )
-                return False
-            messagebox.showerror(
-                'Activation Failed',
-                data.get('message', 'Device activation failed. Please contact support.')
-            )
-            return False
-        except Exception:
+                data = resp.json()
+                if resp.status_code == 200 and data.get('success'):
+                    grace_period_minutes = resolve_grace_period_minutes(data)
+                    cache_data = {
+                        'valid': True,
+                        'last_check': datetime.now().isoformat(),
+                        'token': data.get('token', ''),
+                        'subscription_id': data.get('subscription', {}).get('id'),
+                        'device_fingerprint': device_fp,
+                        'grace_period_minutes': grace_period_minutes,
+                        'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
+                    }
+                    cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
+                    save_license_cache(cache_data)
+                    self._send_heartbeat(device_fp)
+                    self._schedule_heartbeat(device_fp)
+                    return True
+                if resp.status_code == 202:
+                    messagebox.showinfo(
+                        'Activation Pending',
+                        'This device is awaiting administrator approval.\n'
+                        'You will be able to use the application once approved.\n'
+                        'Contact support if this takes more than 24 hours.'
+                    )
+                    return False
+                if resp.status_code < 500:
+                    messagebox.showerror(
+                        'Activation Failed',
+                        data.get('message', 'Device activation failed. Please contact support.')
+                    )
+                    return False
+                had_network_exception = True
+            except Exception as exc:
+                had_network_exception = True
+                last_exception = exc
+
+        if had_network_exception:
             return self._check_offline_grace()
+
+        if last_exception:
+            messagebox.showerror('Activation Failed', f'Unable to activate device: {last_exception}')
+        return False
 
     def _check_offline_grace(self):
         cache = load_license_cache()
@@ -579,19 +673,65 @@ class GoldLoanSystemApp:
                                  'Offline cache timestamp is invalid.\nPlease reconnect to refresh your license.')
             return False
         offline_minutes = int((datetime.now() - last_check).total_seconds() // 60)
-        if offline_minutes > grace_period_minutes:
+
+        # Keep minute mode for explicit QA overrides, otherwise enforce day-based production rules.
+        if grace_period_minutes < 1440:
+            if offline_minutes > grace_period_minutes:
+                self._show_payment_required_popup(
+                    f'No server contact for {offline_minutes} minute(s) '
+                    f'(limit: {grace_period_minutes}). Please reconnect and renew if your plan has expired.'
+                )
+                return False
+
+            remaining_minutes = grace_period_minutes - offline_minutes
+            if remaining_minutes <= 1:
+                messagebox.showwarning(
+                    'Offline Mode',
+                    f'Running in offline mode. Internet required within {remaining_minutes} minute(s).'
+                )
+            return True
+
+        grace_period_days = max(1, int((grace_period_minutes + 1439) // 1440))
+        offline_days = max(0, int((datetime.now() - last_check).total_seconds() // (60 * 60 * 24)))
+
+        if offline_days > grace_period_days:
             self._show_payment_required_popup(
-                f'No server contact for {offline_minutes} minute(s) '
-                f'(limit: {grace_period_minutes}). Please reconnect and renew if your plan has expired.'
+                f'No server contact for {offline_days} day(s) '
+                f'(limit: {grace_period_days}). Please reconnect and renew if your plan has expired.'
             )
             return False
-        remaining = grace_period_minutes - offline_minutes
-        if remaining <= 1:
-            messagebox.showwarning('Offline Mode',
-                                   f'Running in offline mode. Internet required within {remaining} minute(s).')
+
+        remaining_days = grace_period_days - offline_days
+        if remaining_days <= 2:
+            messagebox.showwarning(
+                'Offline Mode',
+                f'Running in offline mode. Internet required within {remaining_days} day(s).'
+            )
         return True
 
     def _send_heartbeat(self, device_fp=None):
+        api_key = self.config.get('api_key', '')
+        if not api_key:
+            return
+
+        api_urls = build_api_url_candidates()[:MAX_FALLBACK_API_URLS]
+        if not api_urls:
+            return
+
+        payload = {
+            'api_key': api_key,
+            'device_fingerprint': device_fp or get_device_fingerprint(),
+        }
+
+        for api_url in api_urls:
+            try:
+                resp = post_with_tls_fallback(f'{api_url}{HEARTBEAT_ENDPOINT}', payload, timeout=HEARTBEAT_TIMEOUT_SECONDS)
+                if resp.status_code == 200:
+                    return
+            except Exception:
+                continue
+
+    def _send_shutdown(self, device_fp=None):
         api_key = self.config.get('api_key', '')
         if not api_key:
             return
@@ -606,7 +746,7 @@ class GoldLoanSystemApp:
         }
 
         try:
-            requests.post(f'{api_url}{HEARTBEAT_ENDPOINT}', json=payload, timeout=5)
+            post_with_tls_fallback(f'{api_url}{SHUTDOWN_ENDPOINT}', payload, timeout=SHUTDOWN_TIMEOUT_SECONDS)
         except Exception:
             pass
 
@@ -895,12 +1035,11 @@ class GoldLoanSystemApp:
             self._show_login()
 
     def _on_closing(self):
-        """Handle app closing - create backup before exit"""
+        """Handle app closing quickly without blocking UI on network calls."""
         try:
-            if self.backup_manager:
-                self.backup_manager.create_backup()
+            threading.Thread(target=self._send_shutdown, daemon=True).start()
         except Exception as e:
-            print(f"Warning: Failed to create backup on close: {e}")
+            print(f"Warning: Failed to start shutdown notifier: {e}")
         finally:
             self.root.destroy()
 

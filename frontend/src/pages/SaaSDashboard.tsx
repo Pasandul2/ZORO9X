@@ -108,7 +108,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [systems, setSystems] = useState<System[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients' | 'security' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'systems' | 'clients' | 'requests' | 'security' | 'audit'>('overview');
   const [showAddSystem, setShowAddSystem] = useState(false);
   const [showEditSystem, setShowEditSystem] = useState(false);
   const [showManagePlans, setShowManagePlans] = useState(false);
@@ -573,7 +573,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-8">
-          {['overview', 'systems', 'clients', 'security', 'audit'].map((tab) => (
+          {['overview', 'systems', 'clients', 'requests', 'security', 'audit'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab as any)}
@@ -593,9 +593,9 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   {pendingDevices.length}
                 </span>
               )}
-              {tab === 'clients' && businessInfoRequestCounts.pending > 0 && (
+              {tab === 'requests' && (businessInfoRequestCounts.pending > 0 || renewalRequests.filter((r) => r.status === 'pending').length > 0) && (
                 <span className="bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full">
-                  {businessInfoRequestCounts.pending}
+                  {businessInfoRequestCounts.pending + renewalRequests.filter((r) => r.status === 'pending').length}
                 </span>
               )}
             </button>
@@ -761,16 +761,11 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
           </motion.div>
         )}
 
-        {/* Clients Tab */}
-        {activeTab === 'clients' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
+        {/* Requests Tab */}
+        {activeTab === 'requests' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <div className={`rounded-2xl p-6 border mb-6 ${
-              darkMode
-                ? 'bg-gray-800/50 border-purple-500/20'
-                : 'bg-white/80 border-purple-200'
+              darkMode ? 'bg-gray-800/50 border-purple-500/20' : 'bg-white/80 border-purple-200'
             }`}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Renewal Requests (Bank Transfer)</h2>
@@ -786,115 +781,52 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   </div>
                 )}
 
-                {renewalRequests
-                  .filter((r) => r.status === 'pending')
-                  .map((request) => (
-                    <div
-                      key={request.id}
-                      className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 text-sm">
-                          <p className="font-semibold">{request.company_name} ({request.system_name})</p>
-                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{request.user_email}</p>
-                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Amount: LKR {Number(request.amount || 0).toFixed(2)}</p>
-                          {request.transaction_reference && (
-                            <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Ref: {request.transaction_reference}</p>
-                          )}
-                          {request.payment_period_start && request.payment_period_end && (
-                            <p className={darkMode ? 'text-cyan-300' : 'text-cyan-700'}>
-                              Coverage: {new Date(request.payment_period_start).toLocaleDateString()} - {new Date(request.payment_period_end).toLocaleDateString()}
-                            </p>
-                          )}
-                          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Submitted: {new Date(request.created_at).toLocaleString()}
-                          </p>
-                          {request.receipt_url && (
-                            <a
-                              href={`${import.meta.env.VITE_API_URL}${request.receipt_url}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex text-cyan-400 hover:text-cyan-300 text-xs"
-                            >
-                              View Receipt
-                            </a>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => reviewRenewalRequest(request.id, 'approve')}
-                            className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => reviewRenewalRequest(request.id, 'reject')}
-                            className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-
-            <div className={`rounded-2xl p-6 border mb-6 ${
-              darkMode
-                ? 'bg-gray-800/50 border-purple-500/20'
-                : 'bg-white/80 border-purple-200'
-            }`}>
-              <h2 className="text-xl font-bold mb-4">Subscription Lifecycle Controls</h2>
-              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-                {adminSubscriptions.map((subscription) => (
+                {renewalRequests.filter((r) => r.status === 'pending').map((request) => (
                   <div
-                    key={subscription.id}
+                    key={request.id}
                     className={`p-4 rounded-lg border ${darkMode ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'}`}
                   >
                     <div className="flex items-start justify-between gap-4">
-                      <div className="text-sm">
-                        <p className="font-semibold">{subscription.company_name} ({subscription.system_name})</p>
-                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{subscription.user_email}</p>
-                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                          Plan: {subscription.plan_name} ({subscription.billing_cycle})
+                      <div className="space-y-1 text-sm">
+                        <p className="font-semibold">{request.company_name} ({request.system_name})</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{request.user_email}</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Amount: LKR {Number(request.amount || 0).toFixed(2)}</p>
+                        {request.transaction_reference && (
+                          <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Ref: {request.transaction_reference}</p>
+                        )}
+                        {request.payment_period_start && request.payment_period_end && (
+                          <p className={darkMode ? 'text-cyan-300' : 'text-cyan-700'}>
+                            Coverage: {new Date(request.payment_period_start).toLocaleDateString()} - {new Date(request.payment_period_end).toLocaleDateString()}
+                          </p>
+                        )}
+                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Submitted: {new Date(request.created_at).toLocaleString()}
                         </p>
-                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
-                          Ends: {new Date(subscription.end_date).toLocaleDateString()} | Activations: {subscription.activation_count}/{subscription.max_activations}
-                        </p>
+                        {request.receipt_url && (
+                          <a
+                            href={`${import.meta.env.VITE_API_URL}${request.receipt_url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex text-cyan-400 hover:text-cyan-300 text-xs"
+                          >
+                            View Receipt
+                          </a>
+                        )}
                       </div>
 
-                      <div className="flex flex-col gap-2 items-end">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
-                          subscription.status === 'active'
-                            ? 'bg-green-500/20 text-green-400'
-                            : subscription.status === 'expired'
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-yellow-500/20 text-yellow-400'
-                        }`}>
-                          {subscription.status}
-                        </span>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => updateSubscriptionStatus(subscription.id, 'active')}
-                            className="px-3 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs"
-                          >
-                            Activate
-                          </button>
-                          <button
-                            onClick={() => updateSubscriptionStatus(subscription.id, 'cancelled')}
-                            className="px-3 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs"
-                          >
-                            Deactivate
-                          </button>
-                          <button
-                            onClick={() => updateSubscriptionStatus(subscription.id, 'expired')}
-                            className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs"
-                          >
-                            Mark Expired
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => reviewRenewalRequest(request.id, 'approve')}
+                          className="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => reviewRenewalRequest(request.id, 'reject')}
+                          className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm"
+                        >
+                          Reject
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -903,9 +835,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
             </div>
 
             <div className={`rounded-2xl p-6 border ${
-              darkMode 
-                ? 'bg-gray-800/50 border-purple-500/20' 
-                : 'bg-white/80 border-purple-200'
+              darkMode ? 'bg-gray-800/50 border-purple-500/20' : 'bg-white/80 border-purple-200'
             }`}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Business Information Change Requests</h2>
@@ -920,7 +850,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                 These details are injected into installer and system application. Approve only accurate business information.
               </p>
 
-              <div className="space-y-3 mb-8">
+              <div className="space-y-3">
                 {businessInfoRequests.filter((request) => request.status === 'pending').length === 0 && (
                   <div className={`p-4 rounded-lg ${darkMode ? 'bg-gray-700/40 text-gray-400' : 'bg-gray-100 text-gray-600'}`}>
                     No pending business information change requests.
@@ -962,15 +892,105 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                     </div>
                   ))}
               </div>
+            </div>
+          </motion.div>
+        )}
 
+        {/* Clients Tab */}
+        {activeTab === 'clients' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <div className={`rounded-2xl p-6 border mb-6 ${
+              darkMode ? 'bg-gray-800/50 border-purple-500/20' : 'bg-white/80 border-purple-200'
+            }`}>
+              <div className="mb-4">
+                <h2 className="text-xl font-bold">Subscribed Systems with Clients</h2>
+                <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Click any subscription to open the full subscription dashboard with system, downloads, payments, devices, and activity details.
+                </p>
+              </div>
+              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                {adminSubscriptions.map((subscription) => (
+                  <div
+                    key={subscription.id}
+                    onClick={() => navigate(`/admin/saas/subscriptions/${subscription.id}`)}
+                    className={`p-4 rounded-lg border cursor-pointer transition-colors ${darkMode ? 'bg-gray-700/50 border-gray-600 hover:bg-gray-700' : 'bg-gray-50 border-gray-200 hover:bg-white'}`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="text-sm">
+                        <p className="font-semibold">{subscription.company_name} ({subscription.system_name})</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>{subscription.user_email}</p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
+                          Plan: {subscription.plan_name} ({subscription.billing_cycle})
+                        </p>
+                        <p className={darkMode ? 'text-gray-300' : 'text-gray-700'}>
+                          Ends: {new Date(subscription.end_date).toLocaleDateString()} | Activations: {subscription.activation_count}/{subscription.max_activations}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2 items-end">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold capitalize ${
+                          subscription.status === 'active'
+                            ? 'bg-green-500/20 text-green-400'
+                            : subscription.status === 'expired'
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {subscription.status}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              updateSubscriptionStatus(subscription.id, 'active');
+                            }}
+                            className="px-3 py-1 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs"
+                          >
+                            Activate
+                          </button>
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              updateSubscriptionStatus(subscription.id, 'cancelled');
+                            }}
+                            className="px-3 py-1 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs"
+                          >
+                            Deactivate
+                          </button>
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              updateSubscriptionStatus(subscription.id, 'expired');
+                            }}
+                            className="px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs"
+                          >
+                            Mark Expired
+                          </button>
+                        </div>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigate(`/admin/saas/subscriptions/${subscription.id}`);
+                          }}
+                          className="px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs"
+                        >
+                          Open Dashboard
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-6 border ${
+              darkMode ? 'bg-gray-800/50 border-purple-500/20' : 'bg-white/80 border-purple-200'
+            }`}>
               <h3 className="text-lg font-semibold mb-4">Clients</h3>
               <div className="space-y-4">
                 {clients.map((client) => (
                   <div
                     key={client.id}
-                    className={`p-4 rounded-lg ${
-                      darkMode ? 'bg-gray-700/50' : 'bg-gray-50'
-                    }`}
+                    className={`p-4 rounded-lg ${darkMode ? 'bg-gray-700/50' : 'bg-gray-50'}`}
                   >
                     <div className="flex justify-between items-start">
                       <div>
