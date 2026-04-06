@@ -5,9 +5,11 @@
  * kgrexport.com. This keeps one stable path and avoids SMTP timeouts.
  */
 
-const axios = require('axios');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 require('dotenv').config();
 
+const execFileAsync = promisify(execFile);
 const PHP_MAIL_SERVICE_URL = process.env.PHP_MAIL_SERVICE_URL;
 const PHP_MAIL_API_KEY = process.env.PHP_MAIL_API_KEY || 'your-secret-key';
 
@@ -41,16 +43,36 @@ const sendEmail = async (mailOptions) => {
     console.log(`📧 Sending via PHP gateway to: ${requestData.to}`);
     console.log(`🔗 URL: ${PHP_MAIL_SERVICE_URL}`);
 
-    const response = await axios.post(PHP_MAIL_SERVICE_URL, requestData, {
+    const curlArgs = [
+      '-sS',
+      '-X', 'POST',
+      PHP_MAIL_SERVICE_URL,
+      '-H', 'Content-Type: application/json',
+      '-H', `X-API-Key: ${PHP_MAIL_API_KEY}`,
+      '--data-raw', JSON.stringify(requestData)
+    ];
+
+    const { stdout, stderr } = await execFileAsync('curl', curlArgs, {
       timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': PHP_MAIL_API_KEY
-      }
+      maxBuffer: 1024 * 1024
     });
 
-    if (!response.data || response.data.success !== true) {
-      throw new Error(response.data?.message || 'PHP gateway error');
+    if (stderr) {
+      const trimmedStderr = stderr.trim();
+      if (trimmedStderr) {
+        console.log(`curl stderr: ${trimmedStderr}`);
+      }
+    }
+
+    let responseData;
+    try {
+      responseData = JSON.parse((stdout || '').trim() || '{}');
+    } catch (parseError) {
+      throw new Error(`Invalid gateway response: ${(stdout || '').trim() || 'empty response'}`);
+    }
+
+    if (!responseData || responseData.success !== true) {
+      throw new Error(responseData?.message || 'PHP gateway error');
     }
 
     console.log(`✅ Email sent via PHP gateway to: ${requestData.to}`);
