@@ -105,9 +105,9 @@ interface ActivityItem {
 
 interface RuntimeStatus {
   application_live: boolean;
-  offline_minutes: number | null;
+  offline_days: number | null;
   heartbeat_window_minutes: number;
-  renewal_countdown_seconds: number | null;
+  renewal_countdown_days: number | null;
   in_grace_period: boolean;
   grace_period_expired: boolean;
   effective_status: string;
@@ -149,14 +149,10 @@ const formatDate = (value?: string | null) => {
   return parsed.toLocaleString();
 };
 
-const formatCountdown = (seconds: number | null) => {
-  if (seconds === null) return '-';
-  if (seconds <= 0) return 'Expired';
-
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  return `${days}d ${hours}h ${mins}m`;
+const formatCountdownDays = (days: number | null) => {
+  if (days === null) return '-';
+  if (days <= 0) return 'Expired';
+  return `${days} day(s)`;
 };
 
 const statusBadgeClass = (status: string) => {
@@ -497,8 +493,8 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
             <Panel darkMode={darkMode} title="Real-Time Runtime Status">
               <DetailRow label="Application Live" value={runtime.application_live ? 'Live' : 'Offline'} />
               <DetailRow label="Effective Status" value={runtime.effective_status.replace(/_/g, ' ')} />
-              <DetailRow label="Offline Minutes" value={runtime.offline_minutes !== null ? String(runtime.offline_minutes) : '-'} />
-              <DetailRow label="Renewal Countdown" value={formatCountdown(runtime.renewal_countdown_seconds)} />
+              <DetailRow label="Offline Days" value={runtime.offline_days !== null ? String(runtime.offline_days) : '-'} />
+              <DetailRow label="Renewal Countdown" value={formatCountdownDays(runtime.renewal_countdown_days)} />
               <DetailRow label="In Grace Period" value={runtime.in_grace_period ? 'Yes' : 'No'} />
               <DetailRow label="Grace Period Expired" value={runtime.grace_period_expired ? 'Yes' : 'No'} />
               <DetailRow label="Expired" value={runtime.expired ? 'Yes' : 'No'} />

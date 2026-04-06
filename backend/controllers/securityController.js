@@ -10,13 +10,9 @@ const DEFAULT_OFFLINE_GRACE_DAYS = Math.max(
   1,
   parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10)
 );
-const DEFAULT_OFFLINE_GRACE_MINUTES = Math.max(
-  1,
-  parseInt(process.env.OFFLINE_GRACE_MINUTES || String(DEFAULT_OFFLINE_GRACE_DAYS * 24 * 60), 10)
-);
-const LICENSE_TOKEN_TTL_MINUTES = Math.max(
-  DEFAULT_OFFLINE_GRACE_MINUTES,
-  parseInt(process.env.OFFLINE_TOKEN_TTL_MINUTES || String(7 * 24 * 60), 10)
+const LICENSE_TOKEN_TTL_DAYS = Math.max(
+  DEFAULT_OFFLINE_GRACE_DAYS,
+  parseInt(process.env.OFFLINE_TOKEN_TTL_DAYS || String(DEFAULT_OFFLINE_GRACE_DAYS), 10)
 );
 let deviceApprovalColumnsReady = false;
 let deviceRuntimeColumnsReady = false;
@@ -98,7 +94,7 @@ function generateLicenseToken(subscriptionId, deviceFingerprint) {
     sub_id: subscriptionId,
     device: deviceFingerprint,
     issued: Date.now(),
-    expires: Date.now() + (LICENSE_TOKEN_TTL_MINUTES * 60 * 1000)
+    expires: Date.now() + (LICENSE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000)
   };
   
   const secret = process.env.OFFLINE_TOKEN_SECRET || process.env.JWT_SECRET || 'your-secret-key';
@@ -161,15 +157,14 @@ exports.activateDevice = async (req, res) => {
         await pool.execute(
           `INSERT INTO license_tokens 
            (subscription_id, device_fingerprint, token, expires_at) 
-           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
-          [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
+           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+          [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
         );
         
         return res.json({
           success: true,
           message: 'Device already activated',
           token,
-          grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
           grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
           subscription: {
             id: subscription.id,
@@ -256,8 +251,8 @@ exports.activateDevice = async (req, res) => {
       await pool.execute(
         `INSERT INTO license_tokens 
          (subscription_id, device_fingerprint, token, expires_at) 
-         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
-        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
+         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
       );
 
       await logAuditEvent({
@@ -273,7 +268,6 @@ exports.activateDevice = async (req, res) => {
         success: true,
         message: 'Device activated successfully',
         token,
-        grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
         grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
         subscription: {
           id: subscription.id,
@@ -636,8 +630,8 @@ exports.validateApiKey = async (req, res) => {
       await pool.execute(
         `INSERT INTO license_tokens 
          (subscription_id, device_fingerprint, token, expires_at) 
-         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
-        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_MINUTES]
+         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
       );
     }
 
@@ -656,7 +650,6 @@ exports.validateApiKey = async (req, res) => {
       success: true,
       valid: true,
       token,
-      grace_period_minutes: DEFAULT_OFFLINE_GRACE_MINUTES,
       grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
       subscription_status: subscription.status,
       payment_status: paymentStatus,

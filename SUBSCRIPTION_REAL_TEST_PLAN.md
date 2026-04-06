@@ -5,7 +5,6 @@ This plan validates:
 - 3-day renewal countdown in dashboard
 - expired -> renew popup flow
 - immediate activation after web renewal approval
-- fast QA mode (5 minutes) without changing production logic
 
 ## 1. Production Defaults
 
@@ -16,37 +15,19 @@ Backend defaults (if no env overrides):
 Desktop app defaults (if no local overrides):
 - Offline grace: 7 days
 
-## 2. Fast QA Mode (5-Minute Simulation)
-
-Use this only in staging/local.
-
-### Backend env
-Set:
-- OFFLINE_GRACE_MINUTES=5
-- OFFLINE_TOKEN_TTL_MINUTES=5
-- ONLINE_HEARTBEAT_WINDOW_MINUTES=1
-
-Leave OFFLINE_GRACE_DAYS unset during fast QA.
-
-### Desktop app env (same machine where app runs)
-Set:
-- ZORO9X_OFFLINE_GRACE_MINUTES=5
-
-Leave ZORO9X_OFFLINE_GRACE_DAYS unset during fast QA.
-
 ## 3. Core Test Cases
 
 ### A) Offline grace works (allowed for grace window)
 1. Start app online and login once (creates fresh signed cache/token).
 2. Disconnect internet.
-3. Reopen app within 5 minutes (QA mode) or within 7 days (production).
+3. Reopen app within 7 days.
 4. Expected:
    - App opens.
    - Offline mode warning appears.
    - No forced lock yet.
 
 ### B) Offline grace expiry lock
-1. Keep app offline beyond grace window (5+ minutes in QA mode).
+1. Keep app offline beyond the 7-day grace window.
 2. Reopen app.
 3. Expected:
    - Access blocked.
@@ -90,12 +71,12 @@ Expected on validate success:
 - subscription_status=active
 - token refreshed
 
-## 5. Rollback to Production
+## 5. Production Configuration
 
-After QA:
-1. Remove OFFLINE_GRACE_MINUTES and OFFLINE_TOKEN_TTL_MINUTES test overrides.
-2. Ensure OFFLINE_GRACE_DAYS is 7 (or desired production value).
-3. Remove ZORO9X_OFFLINE_GRACE_MINUTES on client machines.
+Ensure:
+1. OFFLINE_GRACE_DAYS is set to 7 (or your chosen production value).
+2. OFFLINE_TOKEN_TTL_DAYS is equal to or greater than OFFLINE_GRACE_DAYS.
+3. No minute-based grace overrides are used.
 
 ## 6. Optional Plan Flexibility (No Rebuild)
 

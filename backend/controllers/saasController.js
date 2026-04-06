@@ -17,6 +17,7 @@ const { generateInstaller } = require('../templates/installerTemplate');
 let businessInfoSchemaReady = false;
 let renewalSchemaReady = false;
 let deviceRuntimeSchemaReady = false;
+let backupSchemaReady = false;
 
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
@@ -359,6 +360,81 @@ async function ensureDeviceRuntimeSchema() {
   deviceRuntimeSchemaReady = true;
 }
 
+async function ensureBackupSchema() {
+  if (backupSchemaReady) {
+    return;
+  }
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS subscription_backups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      subscription_id INT NOT NULL,
+      client_id INT NOT NULL,
+      api_key VARCHAR(255) NOT NULL,
+      backup_name VARCHAR(255) NOT NULL,
+      original_name VARCHAR(255) NULL,
+      file_path VARCHAR(500) NOT NULL,
+      file_size BIGINT NOT NULL DEFAULT 0,
+      source ENUM('desktop', 'manual', 'queued') DEFAULT 'desktop',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (subscription_id) REFERENCES client_subscriptions(id) ON DELETE CASCADE,
+      FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+      INDEX idx_backup_subscription (subscription_id),
+      INDEX idx_backup_client (client_id),
+      INDEX idx_backup_uploaded_at (uploaded_at)
+    )
+  `);
+
+  backupSchemaReady = true;
+}
+
+function getBackupStorageDir(subscriptionId) {
+  return path.join(__dirname, '..', 'uploads', 'backups', `subscription_${subscriptionId}`);
+}
+
+async function pruneBackupFiles(subscriptionId, keepCount = 50) {
+  const [rows] = await pool.execute(
+    `SELECT id, file_path
+     FROM subscription_backups
+     WHERE subscription_id = ?
+     ORDER BY uploaded_at DESC, id DESC`,
+    [subscriptionId]
+  );
+
+  if (rows.length <= keepCount) {
+    return;
+  }
+
+  const staleRows = rows.slice(keepCount);
+  for (const row of staleRows) {
+    try {
+      if (row.file_path && fs.existsSync(row.file_path)) {
+        fs.unlinkSync(row.file_path);
+      }
+    } catch (error) {
+      console.warn('Warning: Failed to remove stale backup file:', error.message);
+    }
+    try {
+      await pool.execute('DELETE FROM subscription_backups WHERE id = ?', [row.id]);
+    } catch (error) {
+      console.warn('Warning: Failed to delete stale backup record:', error.message);
+    }
+  }
+}
+
+async function getOwnedSubscription(subscriptionId, userId) {
+  const [rows] = await pool.execute(
+    `SELECT cs.*, c.user_id
+     FROM client_subscriptions cs
+     JOIN clients c ON cs.client_id = c.id
+     WHERE cs.id = ? AND c.user_id = ?`,
+    [subscriptionId, userId]
+  );
+
+  return rows[0] || null;
+}
+
 function addBillingCycle(baseDateValue, billingCycle) {
   const baseDate = new Date(baseDateValue);
   if (Number.isNaN(baseDate.getTime())) {
@@ -367,7 +443,14 @@ function addBillingCycle(baseDateValue, billingCycle) {
   }
 
   const normalized = String(billingCycle || '').toLowerCase();
-  if (normalized === 'yearly') {
+  const monthMatch = normalized.match(/(\d+)\s*month/);
+  const underscoreMonthMatch = normalized.match(/(\d+)_months?/);
+
+  if (monthMatch) {
+    baseDate.setMonth(baseDate.getMonth() + parseInt(monthMatch[1], 10));
+  } else if (underscoreMonthMatch) {
+    baseDate.setMonth(baseDate.getMonth() + parseInt(underscoreMonthMatch[1], 10));
+  } else if (normalized === 'yearly') {
     baseDate.setFullYear(baseDate.getFullYear() + 1);
   } else if (normalized === 'quarterly') {
     baseDate.setMonth(baseDate.getMonth() + 3);
@@ -424,12 +507,6 @@ function boolFromValue(value) {
 function getOfflineGraceDays() {
   const days = parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10);
   return Math.max(1, Number.isFinite(days) ? days : 7);
-}
-
-function getOfflineGraceMinutes() {
-  const fallbackMinutes = getOfflineGraceDays() * 24 * 60;
-  const minutes = parseInt(process.env.OFFLINE_GRACE_MINUTES || String(fallbackMinutes), 10);
-  return Math.max(1, Number.isFinite(minutes) ? minutes : fallbackMinutes);
 }
 
 // Export security controller methods
@@ -1501,16 +1578,15 @@ exports.getSecurityInfo = async (req, res) => {
       1,
       parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || '3', 10)
     );
-    const gracePeriodMinutes = getOfflineGraceMinutes();
-    const gracePeriodDays = Math.max(1, Math.ceil(gracePeriodMinutes / (60 * 24)));
+    const gracePeriodDays = getOfflineGraceDays();
 
     let onlineStatus = false;
-    let offlineMinutes = null;
+    let offlineDays = null;
     if (deviceStats[0]?.last_seen) {
       const lastSeenTime = new Date(deviceStats[0].last_seen).getTime();
       const nowTime = Date.now();
       const diffMinutes = Math.floor((nowTime - lastSeenTime) / (1000 * 60));
-      offlineMinutes = Math.max(diffMinutes, 0);
+      offlineDays = Math.max(Math.floor(diffMinutes / (60 * 24)), 0);
       onlineStatus = diffMinutes <= heartbeatWindowMinutes;
     }
 
@@ -1519,7 +1595,7 @@ exports.getSecurityInfo = async (req, res) => {
       : null;
     const isLifetime = !!(subscriptionEndIso && new Date(subscriptionEndIso).getUTCFullYear() >= 2099);
     const isExpired = !isLifetime && !!subscriptionEndIso && subscriptionEndIso < todayIso;
-    const requiresOnlineRevalidation = offlineMinutes !== null && offlineMinutes > gracePeriodMinutes;
+    const requiresOnlineRevalidation = offlineDays !== null && offlineDays > gracePeriodDays;
     const canRenewNow = isExpired || subscription.status === 'expired' || subscription.status === 'cancelled';
     const canRequestEarlyRenewal = !isLifetime && !canRenewNow;
 
@@ -1533,9 +1609,8 @@ exports.getSecurityInfo = async (req, res) => {
         is_activated: subscription.is_activated || false,
         last_seen: deviceStats[0]?.last_seen || null,
         online_status: onlineStatus,
-        offline_minutes: offlineMinutes,
+        days_offline: offlineDays,
         heartbeat_window_minutes: heartbeatWindowMinutes,
-        grace_period_minutes: gracePeriodMinutes,
         grace_period_days: gracePeriodDays,
         days_remaining: daysRemaining,
         subscription_status: subscription.status,
@@ -2334,8 +2409,7 @@ exports.getSubscriptionDashboardAdmin = async (req, res) => {
       1,
       parseInt(process.env.ONLINE_HEARTBEAT_WINDOW_MINUTES || '3', 10)
     );
-    const graceMinutes = getOfflineGraceMinutes();
-    const graceMs = graceMinutes * 60 * 1000;
+    const graceDays = getOfflineGraceDays();
 
     let latestSeenMs = 0;
     const latestStateByFingerprint = new Map();
@@ -2364,15 +2438,15 @@ exports.getSubscriptionDashboardAdmin = async (req, res) => {
       if (state.appState !== 'running') return false;
       return (nowMs - state.seenMs) <= heartbeatWindowMinutes * 60 * 1000;
     });
-    const offlineMinutes = latestSeenMs > 0 ? Math.max(Math.floor((nowMs - latestSeenMs) / (1000 * 60)), 0) : null;
+    const offlineDays = latestSeenMs > 0 ? Math.max(Math.floor((nowMs - latestSeenMs) / (1000 * 60 * 60 * 24)), 0) : null;
 
     const endDateValue = subscription.end_date ? new Date(subscription.end_date) : null;
     const endMs = endDateValue && !Number.isNaN(endDateValue.getTime()) ? endDateValue.getTime() : null;
     const isLifetime = !!(endDateValue && endDateValue.getUTCFullYear() >= 2099);
-    const renewalCountdownSeconds = endMs ? Math.max(Math.floor((endMs - nowMs) / 1000), 0) : null;
+    const renewalCountdownDays = endMs ? Math.max(Math.ceil((endMs - nowMs) / (1000 * 60 * 60 * 24)), 0) : null;
     const expired = !isLifetime && endMs !== null && endMs < nowMs;
-    const inGrace = expired && endMs !== null && (nowMs - endMs) <= graceMs;
-    const graceExpired = expired && endMs !== null && (nowMs - endMs) > graceMs;
+    const inGrace = offlineDays !== null && offlineDays <= graceDays;
+    const graceExpired = offlineDays !== null && offlineDays > graceDays;
 
     let effectiveStatus = 'active';
     if (isLifetime) {
@@ -2429,9 +2503,9 @@ exports.getSubscriptionDashboardAdmin = async (req, res) => {
         },
         runtime: {
           application_live: isLive,
-          offline_minutes: offlineMinutes,
+          offline_days: offlineDays,
           heartbeat_window_minutes: heartbeatWindowMinutes,
-          renewal_countdown_seconds: renewalCountdownSeconds,
+          renewal_countdown_days: renewalCountdownDays,
           in_grace_period: inGrace,
           grace_period_expired: graceExpired,
           effective_status: effectiveStatus,
@@ -3170,6 +3244,192 @@ exports.syncToServer = async (req, res) => {
       success: false,
       message: 'Failed to sync data to server',
       error: error.message
+    });
+  }
+};
+
+/**
+ * Upload a backup file from the desktop app to the server
+ */
+exports.uploadSubscriptionBackup = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    const subscriptionId = Number(req.params.subscriptionId || req.body.subscription_id || 0);
+    const { api_key, source = 'desktop', backup_name } = req.body;
+
+    if (!subscriptionId || !api_key) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: subscription_id, api_key'
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing backup file upload'
+      });
+    }
+
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.id, cs.client_id, cs.api_key
+       FROM client_subscriptions cs
+       WHERE cs.id = ? AND cs.api_key = ?`,
+      [subscriptionId, api_key]
+    );
+
+    if (subscriptions.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid API key for this subscription'
+      });
+    }
+
+    const subscription = subscriptions[0];
+    const storageDir = getBackupStorageDir(subscriptionId);
+    fs.mkdirSync(storageDir, { recursive: true });
+
+    const originalName = backup_name || req.file.originalname || path.basename(req.file.path);
+    const safeName = String(originalName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const finalName = safeName.endsWith('.db') ? safeName : `${safeName.replace(/\.[^/.]+$/, '')}.db`;
+    const finalPath = path.join(storageDir, `${Date.now()}_${finalName}`);
+
+    if (req.file.path !== finalPath) {
+      fs.renameSync(req.file.path, finalPath);
+    }
+
+    const fileSize = fs.existsSync(finalPath) ? fs.statSync(finalPath).size : Number(req.file.size || 0);
+
+    const [insertResult] = await pool.execute(
+      `INSERT INTO subscription_backups
+        (subscription_id, client_id, api_key, backup_name, original_name, file_path, file_size, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        subscription.id,
+        subscription.client_id,
+        api_key,
+        path.basename(finalPath),
+        originalName,
+        finalPath,
+        fileSize,
+        source,
+      ]
+    );
+
+    await pruneBackupFiles(subscription.id, 50);
+
+    res.json({
+      success: true,
+      message: 'Backup uploaded successfully',
+      backup: {
+        id: insertResult.insertId,
+        backup_name: path.basename(finalPath),
+        file_size: fileSize,
+        source,
+        uploaded_at: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Error uploading subscription backup:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to upload backup',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * List server backups for the client dashboard
+ */
+exports.getSubscriptionBackups = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    const subscriptionId = Number(req.params.subscriptionId || 0);
+    const userId = req.user.id;
+
+    const subscription = await getOwnedSubscription(subscriptionId, userId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    const [backups] = await pool.execute(
+      `SELECT id, backup_name, original_name, file_size, source, created_at, uploaded_at
+       FROM subscription_backups
+       WHERE subscription_id = ?
+       ORDER BY uploaded_at DESC, id DESC
+       LIMIT 50`,
+      [subscriptionId]
+    );
+
+    res.json({
+      success: true,
+      backups: backups.map((backup) => ({
+        ...backup,
+        download_url: `/api/saas/subscriptions/${subscriptionId}/backups/${backup.id}/download`,
+      })),
+    });
+  } catch (error) {
+    console.error('Error listing subscription backups:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load backups',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Download a stored server backup
+ */
+exports.downloadSubscriptionBackup = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    const subscriptionId = Number(req.params.subscriptionId || 0);
+    const backupId = Number(req.params.backupId || 0);
+    const userId = req.user.id;
+
+    const subscription = await getOwnedSubscription(subscriptionId, userId);
+    if (!subscription) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription not found'
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT * FROM subscription_backups WHERE id = ? AND subscription_id = ? LIMIT 1`,
+      [backupId, subscriptionId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Backup not found'
+      });
+    }
+
+    const backup = rows[0];
+    if (!backup.file_path || !fs.existsSync(backup.file_path)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Backup file is missing on the server'
+      });
+    }
+
+    return res.download(backup.file_path, backup.backup_name || path.basename(backup.file_path));
+  } catch (error) {
+    console.error('Error downloading subscription backup:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download backup',
+      error: error.message,
     });
   }
 };

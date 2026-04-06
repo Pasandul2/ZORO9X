@@ -5,7 +5,8 @@ import {
   Package, Key, Calendar,
   Activity, AlertCircle, Copy, Download, ExternalLink,
   Server, Check, Phone, Mail, Edit, Building2,
-  Eye, EyeOff, Shield, Clock, HardDrive, Wifi, WifiOff
+  Eye, EyeOff, Shield, Clock, HardDrive, Wifi, WifiOff,
+  Archive, RefreshCw
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -56,8 +57,6 @@ interface SecurityInfo {
   last_seen: string | null;
   days_offline: number;
   grace_period_days: number;
-  grace_period_minutes?: number;
-  offline_minutes?: number;
   heartbeat_window_minutes?: number;
   requires_online_revalidation?: boolean;
   online_status?: boolean;
@@ -100,6 +99,17 @@ interface BusinessRequestStatus {
   reviewed_at?: string | null;
 }
 
+interface ServerBackup {
+  id: number;
+  backup_name: string;
+  original_name?: string | null;
+  file_size: number;
+  source: string;
+  created_at: string;
+  uploaded_at: string;
+  download_url: string;
+}
+
 const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const MIN_DOWNLOAD_ANIMATION_MS = 2200;
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -132,6 +142,10 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
   const [showDownloadComplete, setShowDownloadComplete] = useState(false);
   const [showExpiredRenewalPopup, setShowExpiredRenewalPopup] = useState(false);
   const [expiredPopupSubscriptionId, setExpiredPopupSubscriptionId] = useState<number | null>(null);
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'overview' | 'backups'>('overview');
+  const [serverBackups, setServerBackups] = useState<ServerBackup[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupsError, setBackupsError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -208,6 +222,12 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
     fetchSubscriptions();
   }, []);
 
+  useEffect(() => {
+    setActiveDashboardTab('overview');
+    setServerBackups([]);
+    setBackupsError('');
+  }, [selectedSubscription?.id]);
+
   const fetchSubscriptions = async () => {
     const token = localStorage.getItem('token');
     
@@ -269,9 +289,8 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
 
       if (secResponse.ok) {
         const secData = await secResponse.json();
-        const offlineMinutes = Number(secData.security.offline_minutes || 0);
-        const graceMinutes = Number(secData.security.grace_period_minutes || (7 * 24 * 60));
-        const daysOffline = Math.floor(offlineMinutes / (60 * 24));
+        const daysOffline = Number(secData.security.days_offline || 0);
+        const graceDays = Number(secData.security.grace_period_days || 7);
         
         setSecurityInfo({
           device_count: secData.security.device_count || 0,
@@ -281,9 +300,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
           downloads_remaining: (secData.security.max_activations || 3) - (secData.security.activation_count || 0),
           last_seen: secData.security.last_seen || null,
           days_offline: daysOffline,
-          grace_period_days: Number(secData.security.grace_period_days || Math.max(1, Math.ceil(graceMinutes / (60 * 24)))),
-          grace_period_minutes: graceMinutes,
-          offline_minutes: offlineMinutes,
+          grace_period_days: graceDays,
           heartbeat_window_minutes: Number(secData.security.heartbeat_window_minutes || 3),
           online_status: !!secData.security.online_status,
           is_activated: secData.security.is_activated || false,
@@ -305,8 +322,6 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
         last_seen: null,
         days_offline: 0,
         grace_period_days: 7,
-        grace_period_minutes: 7 * 24 * 60,
-        offline_minutes: 0,
         heartbeat_window_minutes: 3,
         online_status: false,
         is_activated: false,
@@ -350,6 +365,89 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
     }
 
     return url.startsWith('http') ? url : `${import.meta.env.VITE_API_URL}${url}`;
+  };
+
+  const formatBackupSize = (size: number) => {
+    if (!size || size <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = size;
+    let unitIndex = 0;
+
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+
+    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const fetchServerBackups = async (subscriptionId: number) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return;
+    }
+
+    setBackupsLoading(true);
+    setBackupsError('');
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/backups`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.message || 'Failed to load backups');
+      }
+
+      setServerBackups(data?.backups || []);
+    } catch (error) {
+      console.error('Error fetching server backups:', error);
+      setServerBackups([]);
+      setBackupsError(error instanceof Error ? error.message : 'Failed to load backups');
+    } finally {
+      setBackupsLoading(false);
+    }
+  };
+
+  const handleDownloadServerBackup = async (backup: ServerBackup) => {
+    if (!selectedSubscription) {
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}${backup.download_url}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.message || 'Failed to download backup');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = backup.backup_name || 'backup.db';
+      document.body.appendChild(anchor);
+      anchor.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(anchor);
+    } catch (error) {
+      console.error('Error downloading backup:', error);
+      alert(error instanceof Error ? error.message : 'Failed to download backup');
+    }
   };
 
   const getDownloadFilename = (response: Response) => {
@@ -413,6 +511,14 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
       setExpiredPopupSubscriptionId(selectedSubscription.id);
     }
   }, [isExpiredSubscription, selectedSubscription, expiredPopupSubscriptionId]);
+
+  useEffect(() => {
+    if (activeDashboardTab !== 'backups' || !selectedSubscription) {
+      return;
+    }
+
+    fetchServerBackups(selectedSubscription.id);
+  }, [activeDashboardTab, selectedSubscription]);
 
   const fetchBusinessInfo = async (subscriptionId: number) => {
     const token = localStorage.getItem('token');
@@ -795,11 +901,42 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
 
         {/* Selected Subscription Details */}
         {selectedSubscription && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid md:grid-cols-3 gap-6"
-          >
+          <>
+            <div className="mb-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveDashboardTab('overview')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold border ${
+                  activeDashboardTab === 'overview'
+                    ? 'bg-purple-600 text-white border-purple-500'
+                    : darkMode
+                    ? 'bg-gray-900 text-gray-300 border-gray-700'
+                    : 'bg-white text-gray-700 border-gray-200'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveDashboardTab('backups')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold border flex items-center gap-2 ${
+                  activeDashboardTab === 'backups'
+                    ? 'bg-purple-600 text-white border-purple-500'
+                    : darkMode
+                    ? 'bg-gray-900 text-gray-300 border-gray-700'
+                    : 'bg-white text-gray-700 border-gray-200'
+                }`}
+              >
+                <Archive className="w-4 h-4" />
+                Backups
+              </button>
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className={activeDashboardTab === 'overview' ? 'grid md:grid-cols-3 gap-6' : 'hidden'}
+            >
             {/* Main Details */}
             <div className="md:col-span-2 space-y-6">
               {/* System Info Card */}
@@ -1350,6 +1487,94 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
               </div>
             </div>
           </motion.div>
+
+            {activeDashboardTab === 'backups' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`rounded-2xl border p-6 ${
+                  darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-2xl font-bold flex items-center gap-2">
+                      <Archive className="w-6 h-6 text-purple-500" />
+                      Server Backups
+                    </h2>
+                    <p className={`mt-1 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      Backups uploaded from the desktop app are stored on the server and kept for the latest 50 copies.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => selectedSubscription && fetchServerBackups(selectedSubscription.id)}
+                    className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold flex items-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Refresh
+                  </button>
+                </div>
+
+                <div className={`mb-4 rounded-lg border p-4 ${darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-100' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                  <p className="text-sm font-medium">Desktop backups sync automatically when the app reconnects online.</p>
+                </div>
+
+                {backupsLoading ? (
+                  <div className="py-12 flex items-center justify-center">
+                    <div className="h-10 w-10 animate-spin rounded-full border-4 border-purple-500 border-t-transparent"></div>
+                  </div>
+                ) : backupsError ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-200">
+                    {backupsError}
+                  </div>
+                ) : serverBackups.length === 0 ? (
+                  <div className={`rounded-lg border p-6 text-center ${darkMode ? 'border-gray-700 bg-gray-800/60 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+                    No backups have been uploaded yet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-700/30">
+                    <table className="min-w-full divide-y divide-gray-700/30">
+                      <thead className={darkMode ? 'bg-gray-800' : 'bg-gray-50'}>
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Backup</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Size</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Source</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Download</th>
+                        </tr>
+                      </thead>
+                      <tbody className={darkMode ? 'divide-y divide-gray-700/30 bg-gray-900' : 'divide-y divide-gray-200 bg-white'}>
+                        {serverBackups.map((backup) => (
+                          <tr key={backup.id}>
+                            <td className="px-4 py-3">
+                              <div className="font-semibold">{backup.backup_name}</div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                {backup.original_name || 'Database backup'}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm">{new Date(backup.uploaded_at || backup.created_at).toLocaleString()}</td>
+                            <td className="px-4 py-3 text-sm">{formatBackupSize(Number(backup.file_size || 0))}</td>
+                            <td className="px-4 py-3 text-sm capitalize">{backup.source}</td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadServerBackup(backup)}
+                                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                              >
+                                <Download className="h-4 w-4" />
+                                Download
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </>
         )}
       </div>
 

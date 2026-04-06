@@ -24,6 +24,11 @@ if (!fs.existsSync(receiptsDir)) {
   fs.mkdirSync(receiptsDir, { recursive: true });
 }
 
+const backupsDir = path.join(__dirname, '../uploads/backups');
+if (!fs.existsSync(backupsDir)) {
+  fs.mkdirSync(backupsDir, { recursive: true });
+}
+
 // Configure multer for logo uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -107,6 +112,45 @@ const handleReceiptUpload = (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: err.message || 'Invalid receipt upload',
+      });
+    }
+    next();
+  });
+};
+
+const backupStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const subscriptionId = req.params.subscriptionId || req.body.subscription_id || 'general';
+    const backupTargetDir = path.join(backupsDir, `subscription_${subscriptionId}`);
+    fs.mkdirSync(backupTargetDir, { recursive: true });
+    cb(null, backupTargetDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname).toLowerCase() || '.db';
+    cb(null, `backup-${uniqueSuffix}${ext}`);
+  },
+});
+
+const backupUpload = multer({
+  storage: backupStorage,
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /db|sqlite|sqlite3/;
+    const extname = allowed.test(path.extname(file.originalname).toLowerCase().replace('.', ''));
+    if (extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only database backup files are allowed'));
+  },
+});
+
+const handleBackupUpload = (req, res, next) => {
+  backupUpload.single('backup_file')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'Invalid backup upload',
       });
     }
     next();
@@ -394,6 +438,24 @@ router.get('/admin/security/subscriptions/:id/devices', authenticateToken, authe
  * Requires API key in request body
  */
 router.post('/sync/to-server', saasController.syncToServer);
+
+/**
+ * POST /api/saas/subscriptions/:subscriptionId/backups/upload
+ * Upload a backup file to the server
+ */
+router.post('/subscriptions/:subscriptionId/backups/upload', handleBackupUpload, saasController.uploadSubscriptionBackup);
+
+/**
+ * GET /api/saas/subscriptions/:subscriptionId/backups
+ * List server backups for the client dashboard
+ */
+router.get('/subscriptions/:subscriptionId/backups', authenticateToken, saasController.getSubscriptionBackups);
+
+/**
+ * GET /api/saas/subscriptions/:subscriptionId/backups/:backupId/download
+ * Download a specific backup file
+ */
+router.get('/subscriptions/:subscriptionId/backups/:backupId/download', authenticateToken, saasController.downloadSubscriptionBackup);
 
 /**
  * POST /api/saas/sync/from-server

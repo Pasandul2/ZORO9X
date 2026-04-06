@@ -59,20 +59,6 @@ class LoginPage:
         login_btn = self.theme.make_button(inner, text='Sign In', command=self._do_login, kind='primary', width=30, pady=10)
         login_btn.pack(fill=tk.X, pady=(0, 10))
 
-        quick_admin_btn = self.theme.make_button(
-            inner,
-            text='Quick Admin Login (Temp)',
-            command=self._quick_admin_login,
-            kind='ghost',
-            width=30,
-            pady=8,
-        )
-        quick_admin_btn.pack(fill=tk.X, pady=(0, 10))
-
-        # Default credentials hint
-        tk.Label(inner, text='Default: admin / admin123', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(pady=(0, 10))
-
         # Keyboard flow: Enter on username moves to password; Enter on password logs in.
         self.user_entry.entry.bind('<Return>', lambda _event: self._move_focus_to_password())
         self.pass_entry.entry.bind('<Return>', lambda _event: self._do_login())
@@ -124,12 +110,6 @@ class LoginPage:
         self._startup_focus_job_ids.clear()
         self._startup_focus_job_ids.append(self.frame.after(50, self._try_focus_username_entry))
         self._startup_focus_job_ids.append(self.frame.after(150, lambda: self._try_focus_username_entry(force=True)))
-
-    def _quick_admin_login(self):
-        self._disable_startup_autofocus()
-        self.username_var.set('admin')
-        self.password_var.set('admin123')
-        self._do_login()
 
     def _do_login(self):
         try:

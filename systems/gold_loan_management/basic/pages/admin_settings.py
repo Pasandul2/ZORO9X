@@ -1252,8 +1252,8 @@ class AdminSettingsPage:
 
     def _create_backup_now(self):
         """Create a backup immediately"""
-        if self.backup_manager.create_backup():
-            messagebox.showinfo('Success', 'Backup created successfully.')
+        if self.backup_manager.create_backup_and_upload():
+            messagebox.showinfo('Success', 'Backup created successfully. Server upload will run now or queue when offline.')
             self._show_backup_restore()
         else:
             messagebox.showerror('Error', 'Failed to create backup.')

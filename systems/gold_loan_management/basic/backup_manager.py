@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 import json
+import requests
 
 
 class BackupManager:
@@ -26,8 +27,14 @@ class BackupManager:
         self.db_file = db_file
         self.db_full_path = self.db_path / db_file
         self.config_file = self.db_path / 'backup_config.json'
+        self.app_config_file = self.db_path / 'gold_loan_config.json'
+        self.license_cache_file = self.db_path / 'gold_loan_license.json'
+        self.server_api_url_file = self.db_path / 'server_api_url.txt'
+        self.pending_uploads_file = self.db_path / 'backup_upload_queue.json'
         self.default_backup_dir1 = self.db_path / 'backups'
         self.default_backup_dir2 = self.db_path / 'backups_cloud'
+        self.last_backup_path = None
+        self.last_backup_name = None
         
         # Load or create backup config
         self.config = self._load_config()
@@ -65,6 +72,124 @@ class BackupManager:
                 json.dump(self.config, f, indent=2)
         except Exception as e:
             print(f"Error saving backup config: {e}")
+
+    def _load_json_file(self, file_path: Path) -> dict:
+        if not file_path.exists():
+            return {}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_json_file(self, file_path: Path, data) -> None:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+
+    def _resolve_server_api_url(self) -> str:
+        env_url = (os.getenv('ZORO9X_PUBLIC_API_URL') or '').strip()
+        if env_url.startswith('http://') or env_url.startswith('https://'):
+            return env_url.rstrip('/')
+
+        if self.server_api_url_file.exists():
+            try:
+                file_url = self.server_api_url_file.read_text(encoding='utf-8').strip()
+                if file_url.startswith('http://') or file_url.startswith('https://'):
+                    return file_url.rstrip('/')
+            except Exception:
+                pass
+
+        return 'https://www.zoro9x.com'
+
+    def _get_upload_credentials(self):
+        config = self._load_json_file(self.app_config_file)
+        cache = self._load_json_file(self.license_cache_file)
+
+        api_key = (config.get('api_key') or '').strip()
+        subscription_id = cache.get('subscription_id')
+
+        if not api_key or not subscription_id:
+            return None, None
+
+        return api_key, str(subscription_id)
+
+    def _load_pending_uploads(self) -> list:
+        data = self._load_json_file(self.pending_uploads_file)
+        pending = data.get('pending_uploads', [])
+        return pending if isinstance(pending, list) else []
+
+    def _save_pending_uploads(self, pending_uploads: list) -> None:
+        self._save_json_file(self.pending_uploads_file, {'pending_uploads': pending_uploads})
+
+    def _queue_backup_upload(self, backup_path: str, backup_name: str = None) -> None:
+        if not backup_path:
+            return
+
+        pending_uploads = self._load_pending_uploads()
+        queued_name = backup_name or Path(backup_path).name
+        if any(item.get('backup_path') == backup_path for item in pending_uploads):
+            return
+
+        pending_uploads.append({
+            'backup_path': backup_path,
+            'backup_name': queued_name,
+            'queued_at': datetime.now().isoformat(),
+        })
+        self._save_pending_uploads(pending_uploads)
+
+    def _upload_backup_file(self, backup_path: str, backup_name: str = None, source: str = 'desktop') -> bool:
+        api_key, subscription_id = self._get_upload_credentials()
+        if not api_key or not subscription_id:
+            return False
+
+        backup_file = Path(backup_path)
+        if not backup_file.exists():
+            return False
+
+        api_url = self._resolve_server_api_url()
+        upload_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups/upload"
+
+        try:
+            with open(backup_file, 'rb') as file_handle:
+                response = requests.post(
+                    upload_url,
+                    files={'backup_file': (backup_name or backup_file.name, file_handle, 'application/octet-stream')},
+                    data={
+                        'api_key': api_key,
+                        'subscription_id': subscription_id,
+                        'backup_name': backup_name or backup_file.name,
+                        'source': source,
+                    },
+                    timeout=float(os.getenv('ZORO9X_BACKUP_UPLOAD_TIMEOUT_SECONDS', '6')),
+                )
+
+            return response.status_code == 200 and bool(response.json().get('success'))
+        except Exception as e:
+            print(f"Warning: backup upload failed: {e}")
+            return False
+
+    def sync_pending_uploads(self) -> int:
+        pending_uploads = self._load_pending_uploads()
+        if not pending_uploads:
+            return 0
+
+        remaining = []
+        uploaded_count = 0
+
+        for item in pending_uploads:
+            backup_path = item.get('backup_path', '')
+            backup_name = item.get('backup_name', '')
+            if not backup_path or not Path(backup_path).exists():
+                continue
+
+            if self._upload_backup_file(backup_path, backup_name, source='queued'):
+                uploaded_count += 1
+            else:
+                remaining.append(item)
+
+        self._save_pending_uploads(remaining)
+        return uploaded_count
     
     def set_backup_locations(self, location1: str, location2: str) -> bool:
         """
@@ -122,20 +247,43 @@ class BackupManager:
             loc1, loc2 = self.get_backup_locations()
             
             # Create backups in both locations
-            success = True
+            created_any = False
             for loc_path in [loc1, loc2]:
                 try:
                     Path(loc_path).mkdir(parents=True, exist_ok=True)
                     backup_file = Path(loc_path) / backup_name
                     shutil.copy2(str(self.db_full_path), str(backup_file))
+                    self.last_backup_path = str(backup_file)
+                    self.last_backup_name = backup_file.name
+                    created_any = True
                 except Exception as e:
                     print(f"Error creating backup in {loc_path}: {e}")
-                    success = False
             
-            return success
+            return created_any
         except Exception as e:
             print(f"Error creating backup: {e}")
             return False
+
+    def create_backup_and_queue(self, backup_name: str = None) -> bool:
+        if not self.create_backup(backup_name):
+            return False
+
+        if self.last_backup_path:
+            self._queue_backup_upload(self.last_backup_path, self.last_backup_name)
+
+        return True
+
+    def create_backup_and_upload(self, backup_name: str = None) -> bool:
+        if not self.create_backup(backup_name):
+            return False
+
+        if self.last_backup_path and self._upload_backup_file(self.last_backup_path, self.last_backup_name):
+            return True
+
+        if self.last_backup_path:
+            self._queue_backup_upload(self.last_backup_path, self.last_backup_name)
+
+        return True
     
     def get_backups(self, max_count: int = 20) -> list:
         """

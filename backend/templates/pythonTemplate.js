@@ -504,11 +504,10 @@ class ${className}App:
             return False
 
         remaining = grace_period_days - days_offline
-        if remaining <= 2:
-            messagebox.showwarning(
-                'Offline Mode',
-                f'Running in offline mode. Internet required within {remaining} day(s).'
-            )
+        messagebox.showwarning(
+            'Offline Mode',
+            f'Application started in offline mode. Internet required within {remaining} day(s).'
+        )
 
         return True
 

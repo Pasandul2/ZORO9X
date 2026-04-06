@@ -30,10 +30,6 @@ LICENSE_CACHE_FILE = os.path.join(APP_DIR, 'gold_loan_license.json')
 SERVER_API_URL_FILE = os.path.join(APP_DIR, 'server_api_url.txt')
 DEFAULT_LOCAL_LOGO_PATH = os.path.join(APP_DIR, 'logo.png')
 DEFAULT_OFFLINE_GRACE_DAYS = max(1, int(os.getenv('ZORO9X_OFFLINE_GRACE_DAYS', '7')))
-DEFAULT_OFFLINE_GRACE_MINUTES = max(
-    1,
-    int(os.getenv('ZORO9X_OFFLINE_GRACE_MINUTES', str(DEFAULT_OFFLINE_GRACE_DAYS * 24 * 60)))
-)
 API_URL = 'https://www.zoro9x.com'
 PAYMENT_PORTAL_URL = f'{API_URL}/client-dashboard'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
@@ -215,19 +211,13 @@ def verify_server_signed_token(token):
         return False, {}
 
 
-def resolve_grace_period_minutes(payload):
-    try:
-        if payload.get('grace_period_minutes') is not None:
-            return max(1, int(payload.get('grace_period_minutes')))
-    except Exception:
-        pass
-
+def resolve_grace_period_days(payload):
     try:
         grace_days = int(payload.get('grace_period_days') or DEFAULT_OFFLINE_GRACE_DAYS)
     except Exception:
         grace_days = DEFAULT_OFFLINE_GRACE_DAYS
 
-    return max(1, grace_days * 24 * 60)
+    return max(1, grace_days)
 
 
 def sign_cache(cache_data, device_fp):
@@ -237,7 +227,6 @@ def sign_cache(cache_data, device_fp):
         'token': cache_data.get('token', ''),
         'subscription_id': cache_data.get('subscription_id'),
         'device_fingerprint': cache_data.get('device_fingerprint', ''),
-        'grace_period_minutes': cache_data.get('grace_period_minutes', DEFAULT_OFFLINE_GRACE_MINUTES),
         'grace_period_days': cache_data.get('grace_period_days', DEFAULT_OFFLINE_GRACE_DAYS),
     }
     material = json.dumps(signable, sort_keys=True, separators=(',', ':'))
@@ -312,7 +301,8 @@ class GoldLoanSystemApp:
             db_dir = os.path.dirname(self.db_file)
             self.backup_manager = get_backup_manager(db_dir)
             # Create initial backup on app start
-            self.backup_manager.create_backup()
+            self.backup_manager.create_backup_and_queue()
+            self.backup_manager.sync_pending_uploads()
         except Exception as e:
             print(f"Warning: Backup manager initialization failed: {e}")
             self.backup_manager = None
@@ -527,15 +517,14 @@ class GoldLoanSystemApp:
                 )
                 data = resp.json()
                 if resp.status_code == 200 and data.get('valid'):
-                    grace_period_minutes = resolve_grace_period_minutes(data)
+                    grace_period_days = resolve_grace_period_days(data)
                     cache_data = {
                         'valid': True,
                         'last_check': datetime.now().isoformat(),
                         'token': data.get('token', ''),
                         'subscription_id': data.get('subscription', {}).get('id'),
                         'device_fingerprint': device_fp,
-                        'grace_period_minutes': grace_period_minutes,
-                        'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
+                        'grace_period_days': grace_period_days,
                     }
                     cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
                     save_license_cache(cache_data)
@@ -586,15 +575,14 @@ class GoldLoanSystemApp:
                 )
                 data = resp.json()
                 if resp.status_code == 200 and data.get('success'):
-                    grace_period_minutes = resolve_grace_period_minutes(data)
+                    grace_period_days = resolve_grace_period_days(data)
                     cache_data = {
                         'valid': True,
                         'last_check': datetime.now().isoformat(),
                         'token': data.get('token', ''),
                         'subscription_id': data.get('subscription', {}).get('id'),
                         'device_fingerprint': device_fp,
-                        'grace_period_minutes': grace_period_minutes,
-                        'grace_period_days': max(1, int((grace_period_minutes + 1439) / 1440)),
+                        'grace_period_days': grace_period_days,
                     }
                     cache_data['cache_signature'] = sign_cache(cache_data, device_fp)
                     save_license_cache(cache_data)
@@ -665,33 +653,13 @@ class GoldLoanSystemApp:
                 'Stored token has expired. Please connect to internet and renew your subscription.'
             )
             return False
-        grace_period_minutes = resolve_grace_period_minutes(cache)
+        grace_period_days = resolve_grace_period_days(cache)
         try:
             last_check = datetime.fromisoformat(cache.get('last_check', '2000-01-01T00:00:00'))
         except Exception:
             messagebox.showerror('License Cache Invalid',
                                  'Offline cache timestamp is invalid.\nPlease reconnect to refresh your license.')
             return False
-        offline_minutes = int((datetime.now() - last_check).total_seconds() // 60)
-
-        # Keep minute mode for explicit QA overrides, otherwise enforce day-based production rules.
-        if grace_period_minutes < 1440:
-            if offline_minutes > grace_period_minutes:
-                self._show_payment_required_popup(
-                    f'No server contact for {offline_minutes} minute(s) '
-                    f'(limit: {grace_period_minutes}). Please reconnect and renew if your plan has expired.'
-                )
-                return False
-
-            remaining_minutes = grace_period_minutes - offline_minutes
-            if remaining_minutes <= 1:
-                messagebox.showwarning(
-                    'Offline Mode',
-                    f'Running in offline mode. Internet required within {remaining_minutes} minute(s).'
-                )
-            return True
-
-        grace_period_days = max(1, int((grace_period_minutes + 1439) // 1440))
         offline_days = max(0, int((datetime.now() - last_check).total_seconds() // (60 * 60 * 24)))
 
         if offline_days > grace_period_days:
@@ -702,11 +670,10 @@ class GoldLoanSystemApp:
             return False
 
         remaining_days = grace_period_days - offline_days
-        if remaining_days <= 2:
-            messagebox.showwarning(
-                'Offline Mode',
-                f'Running in offline mode. Internet required within {remaining_days} day(s).'
-            )
+        messagebox.showwarning(
+            'Offline Mode',
+            f'Application started in offline mode. Internet required within {remaining_days} day(s).'
+        )
         return True
 
     def _send_heartbeat(self, device_fp=None):
@@ -883,6 +850,16 @@ class GoldLoanSystemApp:
         )
         logout_btn.pack(side=tk.BOTTOM, pady=14, padx=12, fill=tk.X)
 
+        developer_btn = self.theme.make_button(
+            sidebar,
+            text='ZORO9X',
+            command=lambda: webbrowser.open('https://www.zoro9x.com'),
+            kind='ghost',
+            width=20,
+            pady=8,
+        )
+        developer_btn.pack(side=tk.BOTTOM, pady=(0, 6), padx=12, fill=tk.X)
+
         # Content area
         content_outer = tk.Frame(self.root, bg=self.theme.palette.bg_app)
         content_outer.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -1037,6 +1014,8 @@ class GoldLoanSystemApp:
     def _on_closing(self):
         """Handle app closing quickly without blocking UI on network calls."""
         try:
+            if self.backup_manager:
+                self.backup_manager.create_backup_and_queue()
             threading.Thread(target=self._send_shutdown, daemon=True).start()
         except Exception as e:
             print(f"Warning: Failed to start shutdown notifier: {e}")
@@ -1047,7 +1026,8 @@ class GoldLoanSystemApp:
         """Create a backup after important actions"""
         try:
             if self.backup_manager:
-                self.backup_manager.create_backup()
+                self.backup_manager.create_backup_and_queue()
+                self.backup_manager.sync_pending_uploads()
         except Exception as e:
             print(f"Warning: Failed to create backup: {e}")
 
