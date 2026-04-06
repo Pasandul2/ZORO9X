@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +10,7 @@ import ContactSection from '../components/ContactSection';
 
 export function Home() {
   const bgRef = useRef<HTMLDivElement>(null);
-  const [darkMode, setDarkMode] = useState(true); // 🔥 Dark mode state
+  const darkMode = true;
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -24,9 +24,13 @@ export function Home() {
       try {
         const userData = JSON.parse(decodeURIComponent(user));
         login(token, userData);
-        // Clean URL and reload to update all components
-        navigate('/', { replace: true });
-        window.location.reload();
+
+        // Prevent re-processing OAuth params and avoid reload loops.
+        const cleanedParams = new URLSearchParams(searchParams);
+        cleanedParams.delete('token');
+        cleanedParams.delete('user');
+        const remainingParams = cleanedParams.toString();
+        navigate(remainingParams ? `/?${remainingParams}` : '/', { replace: true });
       } catch (error) {
         console.error('Error parsing OAuth data:', error);
       }

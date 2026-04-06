@@ -24,10 +24,7 @@ const Login: React.FC = () => {
       try {
         const userData = user ? JSON.parse(decodeURIComponent(user)) : {};
         login(token, userData);
-        // Use replace: true to prevent back button issues
         navigate('/', { replace: true });
-        // Reload to ensure all components update properly
-        window.location.href = '/';
       } catch (error) {
         console.error('Error parsing OAuth data:', error);
         setError('Authentication failed. Please try again.');
