@@ -9,6 +9,9 @@ const path = require('path');
 const { generatePythonApp } = require('../templates/pythonTemplate');
 const { generateInstaller } = require('../templates/installerTemplate');
 
+const DEFAULT_GENERATED_LOGO_URL = '/uploads/logos/logo-1773518864236-919323203.png';
+const DEFAULT_GENERATED_LOGO_SOURCE = path.join(__dirname, '..', 'uploads', 'logos', 'logo-1773518864236-919323203.png');
+
 /**
  * Generate complete system with Basic and Premium versions
  */
@@ -68,7 +71,7 @@ exports.generateSystem = async (req, res) => {
     console.log('     description:', description);
     
     // Handle icon upload or URL
-    let finalIconUrl = icon_url || '/images/default-icon.png';
+    let finalIconUrl = icon_url || DEFAULT_GENERATED_LOGO_URL;
     if (req.file) {
       // If a file was uploaded, use the upload path
       finalIconUrl = `/uploads/icons/${req.file.filename}`;
@@ -198,9 +201,20 @@ exports.generateSystem = async (req, res) => {
     fs.writeFileSync(path.join(basicPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
     fs.writeFileSync(path.join(premiumPath, 'server_api_url.txt'), `${serverApiUrl}\n`);
     console.log('✅ Saved server_api_url.txt for both versions');
+
+    if (fs.existsSync(DEFAULT_GENERATED_LOGO_SOURCE)) {
+      fs.copyFileSync(DEFAULT_GENERATED_LOGO_SOURCE, path.join(basicPath, 'logo.png'));
+      fs.copyFileSync(DEFAULT_GENERATED_LOGO_SOURCE, path.join(premiumPath, 'logo.png'));
+      console.log('✅ Copied default logo.png for both versions');
+    } else {
+      console.warn(`⚠️ Default generated logo not found: ${DEFAULT_GENERATED_LOGO_SOURCE}`);
+    }
     
-    // 5. Create requirements.txt (build-time dependencies)
-    const requirements = `pyinstaller
+    // 5. Create requirements.txt (runtime + build dependencies)
+    const requirements = `requests
+  Pillow
+  pywebview
+  pyinstaller
   pywin32
   `;
     
@@ -279,7 +293,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='logo.png',
 )
 `;
 
@@ -295,7 +309,7 @@ a = Analysis(
     ['installer.py'],
     pathex=[],
     binaries=[(dist_app_exe, '.')] if os.path.exists(dist_app_exe) else [],
-    datas=[('README.md', '.')] if os.path.exists('README.md') else [],
+    datas=[('README.md', '.'), ('logo.png', '.')] if os.path.exists('README.md') and os.path.exists('logo.png') else ([('README.md', '.')] if os.path.exists('README.md') else ([('logo.png', '.')] if os.path.exists('logo.png') else [])),
     hiddenimports=['tkinter', 'sqlite3', 'subprocess', 'json', 'shutil'],
     hookspath=[],
     hooksconfig={},
@@ -329,7 +343,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='logo.png',
 )
 `;
     

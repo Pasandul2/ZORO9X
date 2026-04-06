@@ -445,27 +445,35 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
 
   const getDownloadFilename = (response: Response) => {
     const contentDisposition = response.headers.get('Content-Disposition');
-    const contentType = response.headers.get('Content-Type') || '';
+
+    const ensureExeFilename = (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return 'system_installer.exe';
+      }
+
+      if (/\.exe$/i.test(trimmed)) {
+        return trimmed;
+      }
+
+      return `${trimmed.replace(/\.[^/.\\]+$/i, '')}.exe`;
+    };
 
     if (contentDisposition) {
       const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
       if (utf8Match?.[1]) {
-        return decodeURIComponent(utf8Match[1]);
+        return ensureExeFilename(decodeURIComponent(utf8Match[1]));
       }
 
       const quotedMatch = /filename="([^"]+)"/i.exec(contentDisposition);
       if (quotedMatch?.[1]) {
-        return quotedMatch[1];
+        return ensureExeFilename(quotedMatch[1]);
       }
 
       const plainMatch = /filename=([^;]+)/i.exec(contentDisposition);
       if (plainMatch?.[1]) {
-        return plainMatch[1].trim();
+        return ensureExeFilename(plainMatch[1]);
       }
-    }
-
-    if (contentType.includes('application/zip')) {
-      return 'system_installer_package.zip';
     }
 
     return 'system_installer.exe';

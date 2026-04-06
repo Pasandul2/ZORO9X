@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Renewal Pawn Ticket</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 2mm;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
+      color: #111;
+      background: #eef3fb;
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 148.5mm;
+      margin: 0 auto;
+      padding: 2mm;
+      background: #fff;
+    }
+
+    .ticket {
+      border: 1px solid #c4cad6;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .row {
+      display: flex;
+      width: 100%;
+    }
+
+    .col {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .border-r { border-right: 1px solid #c4cad6; }
+    .border-b { border-bottom: 1px solid #c4cad6; }
+
+    .p-1 { padding: 1.6mm; }
+    .p-2 { padding: 2.2mm; }
+
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: 700; }
+    .sm { font-size: 11px; }
+
+    .field-label {
+      font-size: 9px;
+      font-weight: 700;
+      margin-bottom: 0.8mm;
+      color: #202938;
+    }
+
+    .value {
+      min-height: 6mm;
+      font-size: 12px;
+      background: #fff;
+    }
+
+    .split-stack {
+      position: relative;
+    }
+
+    .split-stack::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 40mm;
+      border-left: 1px solid #9ea9ba;
+      pointer-events: none;
+    }
+
+    .split-field {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 2mm;
+    }
+
+    .split-field .field-label {
+      margin-bottom: 0;
+      font-size: 9px;
+      font-weight: 700;
+      flex: 1;
+    }
+
+    .split-field .value {
+      width: 33mm;
+      min-height: 0;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      font-weight: 700;
+    }
+
+    .brand-banner {
+      display: flex;
+      align-items: center;
+      gap: 2.2mm;
+      padding: 1.4mm 1.8mm;
+      border-radius: 9px;
+      background: linear-gradient(125deg, #f5f8fc 0%, #ebeff6 55%, #f7f8fa 100%);
+      border: 1px solid #d6dbe6;
+    }
+
+    .brand-logo {
+      width: 23mm;
+      height: 23mm;
+      object-fit: contain;
+      background: #fff;
+      border: 1px solid #d2d7e1;
+      border-radius: 6px;
+      padding: 0.8mm;
+    }
+
+    .brand-copy .si {
+      font-size: 12px;
+      font-weight: 800;
+      color: #dc1f24;
+      line-height: 1.08;
+    }
+
+    .brand-copy .en,
+    .brand-copy .ta {
+      font-size: 12px;
+      font-weight: 800;
+      color: #0f4ea0;
+      line-height: 1.08;
+      margin-top: 0.3mm;
+    }
+
+        /* ===== STAMP GUIDE ===== */
+    .stamp-zone {
+      position: absolute;
+      right: 175mm;
+      top: 82mm;
+      width: 45mm;
+      height: 14mm;
+      border: 3.2px dotted rgba(255, 0, 0, 0.452);
+      border-radius: 20px;
+      transform: rotate(-20deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 7mm;
+      font-weight: 700;
+      color: rgba(255, 0, 0, 0.349);
+      pointer-events: none;
+    }
+
+
+    .tagline {
+      display: inline-flex;
+      margin-top: 0.5mm;
+      border-radius: 999px;
+      padding: 0.55mm 2.1mm;
+      font-size: 8px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(90deg, #ea1e25 0%, #ff4b3a 100%);
+    }
+
+    .renew-grid {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .renew-grid th,
+    .renew-grid td {
+      border: 1px solid #c4cad6;
+      padding: 1mm;
+      font-size: 10px;
+      vertical-align: top;
+      background: #fff;
+    }
+
+    .renew-grid th {
+      font-size: 9px;
+      color: #1a3d78;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .sign-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8mm;
+      margin-top: 2mm;
+      padding: 0 2mm 2mm;
+    }
+
+    .sign {
+      text-align: center;
+      font-size: 8px;
+    }
+
+    .sign-line {
+      border-top: 1px solid #9ea9ba;
+      height: 4mm;
+    }
+
+    .no-print {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      max-width: 210mm;
+      margin: 10px auto;
+      font-size: 13px;
+      color: #555;
+    }
+
+    .pdf-btn {
+      padding: 10px 26px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, #0f4ea0 0%, #1a6dd4 100%);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(15, 78, 160, 0.35);
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button class="pdf-btn" onclick="window.print()">Print Renewal Ticket</button>
+    <span>Use A4 · Portrait · No margins</span>
+  </div>
+
+  <div class="page">
+    <div class="ticket">
+      <div class="row border-b">
+        <div class="col p-2">
+          <div class="center bold sm">රන් ණය මුදල් බැරපත / தங்கக் கடன் ரொக்க வரவுச் சீட்டு /Gold Loan Cash Credit Slip</div>
+          <div class="brand-banner" style="margin-top: 2mm;">
+            <img src="{{LOGO_SRC}}" alt="PMS Logo" class="brand-logo" />
+            <div class="brand-copy">
+              <div class="si">PMS රන් ණය මධ්‍යස්ථානය</div>
+              <div class="en">PMS Gold Loan Center</div>
+              <div class="tagline">බලයලත් උකස්කරුවෝ / Authorised Pawnbroker / அங்கீகரிக்கப்பட்ட அடகு வியாபாரி</div>
+              <div class="reg" style="font-size: 12px;">ලි.ප. අංකය / Reg. No / பதிவு எண் : ර|කො|02488</div>
+                  <div class="address-lines" style="font-size: 12px;">
+                    <div>අළුත් වත්ත, නව නගරය, කොලොන්න. | 076 761 22 08 / 071 039 30 24</div>
+                  </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col border-r p-2" style="max-width: 56mm;">
+          <div class="field-label">ශාඛාව / கிளை / Branch</div>
+          <div class="value">{{BRANCH}}</div>
+          <div class="field-label" style="margin-top: 2mm;">ටිකට් අංකය / சீட்டு எண் / Ticket No.</div>
+          <div class="value">{{PAWN_TICKET_NO}}</div>
+          <div class="field-label" style="margin-top: 2mm;">දිනය / தேதி / Date </div>
+          <div class="value">{{DATE}} {{TIME}}</div>
+        </div>
+      </div>
+
+      <div class="row border-b">
+        <div class="col border-r p-1" style="flex: 1;">
+          <div class="field-label" style="margin-bottom: 2mm;">නම සහ ලිපිනය / பெயர் மற்றும் முகவரி / Name and Address of Pawner</div>
+          <div class="value">{{PAWNER_NAME}}</div>
+          <div class="value">{{PAWNER_ADDRESS}}</div>
+          <div class="row" style="margin-top: 1.2mm;">
+            <div class="col" style="padding-right: 1mm;">
+              <div class="field-label" style="margin-bottom: 2mm;">හැඳුනුම්පත් අංකය / அடையாள அட்டை எண் / Passport / NIC No.</div>
+              <div class="value">{{NIC}}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col split-stack" style="flex: 1;">
+          <div class="row border-b"><div class="col p-1 split-field"><div class="field-label">අත්තිකාරම් මුදල / வழங்கிய முன்பணம் / Amount Advanced</div><div class="value right">{{ADVANCED_AMOUNT}}</div></div></div>
+          <div class="row border-b"><div class="col p-1 split-field"><div class="field-label">පොලී මුදල /வட்டித் தொகை / Interest Amount</div><div class="value right">{{INTEREST_AMOUNT}}</div></div></div>
+          <div class="row border-b"><div class="col p-1 split-field"><div class="field-label">පිරිවැටුම් බදු / விற்றுமுதல் வரி /BTT</div><div class="value right">0.00</div></div></div>
+          <div class="row border-b"><div class="col p-1 split-field"><div class="field-label">අනෙකුත් ගාස්තු / மற்ற செலவுகள் / Other Charges</div><div class="value right">{{OTHER_CHARGES}}</div></div></div>
+          <div class="row border-b"><div class="col p-1 split-field"><div class="field-label">ගෙවූ මුදල / செலுத்தப்பட்ட தொகை / Paid Amount</div><div class="value right">{{PAYMENT_AMOUNT}}</div></div></div>
+          <div class="row"><div class="col p-1 split-field"><div class="field-label">එකතුව / மொத்தம் / Total</div><div class="value right">{{TOTAL}}</div></div></div>
+        </div>
+      </div>
+
+            <!-- Stamp / seal area -->
+      <div class="stamp-zone">COMPLETED</div>
+
+
+      
+      <div class="sign-row" style="margin-top: 15mm;">
+        <div class="sign">
+          <div class="sign-line"></div>
+          <div>උකස්කරු / அடகு வைப்பவர் / Pawner</div>
+        </div>
+        <div class="sign">
+          <div class="sign-line"></div>
+          <div>තක්සේරුකරු / மதிப்பீட்டாளர் / Valuer</div>
+        </div>
+        <div class="sign">
+          <div class="sign-line"></div>
+          <div>බලයලත් නිලධාරී / அங்கீகாரம் பெற்ற அதிகாரி / Authorised Officer</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

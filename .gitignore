@@ -45,3 +45,8 @@ Thumbs.db
 saas_fresh_platform/backend/uploads/products/
 saas_fresh_platform/python_client/__pycache__/
 saas_fresh_platform/sample_system_project/__pycache__/
+
+# Allow committed desktop artifacts for generated systems
+!systems/**/dist/
+!systems/**/dist/*_installer.exe
+!systems/**/dist/*_app.exe

@@ -80,9 +80,15 @@ function findInstallerExecutable(systemFolder) {
       continue;
     }
 
-    const installer = fs
-      .readdirSync(root)
-      .find((name) => name.toLowerCase().endsWith('_installer.exe'));
+    const files = fs.readdirSync(root).filter((name) => name.toLowerCase().endsWith('.exe'));
+    const prioritized = [
+      files.find((name) => /_installer\.exe$/i.test(name)),
+      files.find((name) => /installer\.exe$/i.test(name)),
+      files.find((name) => /setup.*\.exe$/i.test(name)),
+      files.find((name) => /install.*\.exe$/i.test(name)),
+      files.find((name) => /app\.exe$/i.test(name) === false),
+    ].filter(Boolean);
+    const installer = prioritized[0] || null;
 
     if (installer) {
       return path.join(root, installer);
@@ -125,6 +131,76 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   }
 
   return findInstallerExecutable(systemFolder);
+}
+
+function writeFileIfChanged(filePath, nextContent) {
+  if (fs.existsSync(filePath)) {
+    const currentContent = fs.readFileSync(filePath, 'utf8');
+    if (currentContent === nextContent) {
+      return false;
+    }
+  }
+
+  fs.writeFileSync(filePath, nextContent, 'utf8');
+  return true;
+}
+
+function shouldAffectInstallerFreshness(filePath) {
+  const fileName = path.basename(filePath).toLowerCase();
+
+  // Runtime artifacts should not force installer rebuild checks.
+  if (
+    fileName.endsWith('.db') ||
+    fileName.endsWith('.sqlite') ||
+    fileName.endsWith('.sqlite3') ||
+    fileName.endsWith('.pyc') ||
+    fileName.endsWith('.log') ||
+    fileName.endsWith('_config.json') ||
+    fileName.endsWith('_license.json')
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isInstallerOutdated(systemFolder, installerPath) {
+  if (!installerPath || !fs.existsSync(installerPath)) {
+    return true;
+  }
+
+  const installerMtime = fs.statSync(installerPath).mtimeMs;
+  const stack = [systemFolder];
+
+  while (stack.length > 0) {
+    const currentPath = stack.pop();
+    if (!currentPath || !fs.existsSync(currentPath)) {
+      continue;
+    }
+
+    const stat = fs.statSync(currentPath);
+    if (stat.isDirectory()) {
+      const dirName = path.basename(currentPath).toLowerCase();
+      if (dirName === 'dist' || dirName === '__pycache__') {
+        continue;
+      }
+
+      fs.readdirSync(currentPath).forEach((child) => {
+        stack.push(path.join(currentPath, child));
+      });
+      continue;
+    }
+
+    if (!shouldAffectInstallerFreshness(currentPath)) {
+      continue;
+    }
+
+    if (stat.mtimeMs > installerMtime) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function createZipArchive(sourceDir, outFilePath) {
@@ -2061,29 +2137,39 @@ exports.downloadSystem = async (req, res) => {
     });
 
 
-    fs.writeFileSync(path.join(packageDir, 'installer.py'), installerSource, 'utf8');
+    writeFileIfChanged(path.join(packageDir, 'installer.py'), installerSource);
 
-    // Try to use pre-built installer from source system folder first
-    let installerPath = findInstallerExecutable(systemFolder);
-    
-    // If no pre-built installer, try to build one in package dir
-    if (!installerPath) {
-      installerPath = buildInstallerIfMissing(packageDir, false);
+    // Force rebuild only on Windows where BUILD.bat can produce a Windows EXE.
+    // On Linux servers, reuse an existing prebuilt installer if available.
+    const shouldForceRebuild = process.platform === 'win32';
+    let installerPath = buildInstallerIfMissing(packageDir, shouldForceRebuild);
+
+    if (installerPath && isInstallerOutdated(packageDir, installerPath)) {
+      if (process.platform === 'win32') {
+        installerPath = buildInstallerIfMissing(packageDir, true);
+      } else {
+        installerPath = null;
+      }
     }
     
+    if (!installerPath) {
+      try {
+        fs.rmSync(packageDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.error('Failed to clean package directory after missing installer:', cleanupError);
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Server installer EXE is outdated or missing. Please rebuild the latest Windows installer and deploy it to the server.'
+      });
+    }
+
     let downloadPath = installerPath;
-    let deliveryMode = 'exe';
+    const deliveryMode = 'exe';
     const cleanupPaths = [packageDir];
 
-    if (!installerPath) {
-      const zipName = `${safeSystemName}_${tier}_system.zip`;
-      const zipPath = path.join(tempRoot, `download_${subscription.id}_${Date.now()}.zip`);
-      await createZipArchive(packageDir, zipPath);
-      downloadPath = zipPath;
-      downloadName = zipName;
-      deliveryMode = 'zip';
-      cleanupPaths.push(zipPath);
-    } else if (!installerPath.startsWith(packageDir)) {
+    if (!installerPath.startsWith(packageDir)) {
       // If using source installer, copy it to package dir for cleanup.
       const destPath = path.join(packageDir, path.basename(installerPath));
       fs.copyFileSync(installerPath, destPath);
@@ -2440,10 +2526,8 @@ BUSINESS_CONFIG = load_business_config()
         fs.writeFileSync(gymAppPath, gymAppContent);
       }
       
-      let installerPath = findInstallerExecutable(tempDir);
-      if (!installerPath) {
-        installerPath = buildInstallerIfMissing(tempDir);
-      }
+      const shouldForceRebuild = process.platform === 'win32';
+      let installerPath = buildInstallerIfMissing(tempDir, shouldForceRebuild);
       if (!installerPath) {
         throw new Error('Installer executable not found. Please build installer before download.');
       }

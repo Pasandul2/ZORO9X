@@ -42,6 +42,7 @@ import hmac
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, '${category}_config.json')
 LICENSE_CACHE_FILE = os.path.join(APP_DIR, '${category}_license.json')
+DEFAULT_LOCAL_LOGO_PATH = os.path.join(APP_DIR, 'logo.png')
 DEFAULT_OFFLINE_GRACE_DAYS = 7
 API_URL = '${publicApiUrl}'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
@@ -214,6 +215,7 @@ class ${className}App:
         self.root.title("${systemName} - ${tier.charAt(0).toUpperCase() + tier.slice(1)} Edition")
         self.root.geometry("1400x800")
         self.root.configure(bg='#f5f7fa')
+        self.set_window_icon()
         
         # Load configuration
         self.config = self.load_config()
@@ -238,6 +240,39 @@ class ${className}App:
         self.init_database()
 
         self.create_main_ui()
+
+    def set_window_icon(self):
+        bundle_dir = getattr(sys, '_MEIPASS', '') if getattr(sys, 'frozen', False) else ''
+        icon_candidates = [
+            os.path.join(APP_DIR, 'logo.ico'),
+            os.path.join(APP_DIR, 'app.ico'),
+        ]
+        if bundle_dir:
+            icon_candidates.extend([
+                os.path.join(bundle_dir, 'logo.ico'),
+                os.path.join(bundle_dir, 'app.ico'),
+            ])
+        for icon_path in icon_candidates:
+            if os.path.exists(icon_path):
+                try:
+                    self.root.iconbitmap(icon_path)
+                    return
+                except Exception:
+                    pass
+
+        logo_candidates = [DEFAULT_LOCAL_LOGO_PATH]
+        if bundle_dir:
+            logo_candidates.append(os.path.join(bundle_dir, 'logo.png'))
+
+        for logo_path in logo_candidates:
+            if not os.path.exists(logo_path):
+                continue
+            try:
+                self._window_icon_image = tk.PhotoImage(file=logo_path)
+                self.root.iconphoto(True, self._window_icon_image)
+                return
+            except Exception:
+                pass
     
     def load_config(self):
         """Load configuration from file and decrypt protected values."""

@@ -29,7 +29,9 @@ class NewTicketPage:
         self.article_types = get_article_types() or ARTICLE_TYPES
         self._gold_wt_manual_override = False
         self.is_other_bank_var = tk.BooleanVar(value=False)
-        self.service_charge_payment_mode_var = tk.StringVar(value='financed')
+        self.service_charge_payment_mode_var = tk.StringVar(value='balance')
+        self.service_charge_amount_var = tk.StringVar(value='')
+        self._service_charge_user_edited = False
         self._form_state = dict(NEW_TICKET_DRAFT)
         self._birthday_syncing = False
 
@@ -172,7 +174,12 @@ class NewTicketPage:
         self.desc_entry = self.theme.make_entry(r3, variable=self.desc_var, width=20)
         self.desc_entry.grid(row=0, column=3, sticky='ew')
         self.desc_entry.entry.bind('<KeyRelease>', self._on_desc_key)
-        self.desc_entry.entry.bind('<Return>', lambda e: self._add_item() or 'break')
+        self.desc_entry.entry.bind('<Down>', lambda e: self._on_suggestion_nav('_desc_listbox', 1) and 'break')
+        self.desc_entry.entry.bind('<Up>', lambda e: self._on_suggestion_nav('_desc_listbox', -1) and 'break')
+        self.desc_entry.entry.bind(
+            '<Return>',
+            lambda e: (self._on_suggestion_pick('_desc_listbox', self._select_desc) or (self._add_item() or True)) and 'break'
+        )
         carat_combo.bind('<Return>', lambda e: self.desc_entry.entry.focus_set() or 'break')
 
         # Add Item button
@@ -204,6 +211,12 @@ class NewTicketPage:
         purpose_entry = self._make_form_row(loan_form, 'Purpose:', 'purpose')
         self._purpose_entry = purpose_entry.entry
         purpose_entry.entry.bind('<KeyRelease>', self._on_purpose_key)
+        purpose_entry.entry.bind('<Down>', lambda e: self._on_suggestion_nav('_purpose_listbox', 1) and 'break')
+        purpose_entry.entry.bind('<Up>', lambda e: self._on_suggestion_nav('_purpose_listbox', -1) and 'break')
+        purpose_entry.entry.bind(
+            '<Return>',
+            lambda e: self._on_suggestion_pick('_purpose_listbox', self._select_purpose) or (e.widget.tk_focusNext().focus_set() or 'break')
+        )
 
         # Duration
         dur_row = tk.Frame(loan_form, bg=self.theme.palette.bg_surface)
@@ -308,7 +321,7 @@ class NewTicketPage:
 
     def _on_purpose_key(self, event):
         val = self.loan_vars['purpose'].get().strip()
-        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+        if event.keysym in ('Escape', 'Tab', 'Return', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
             self._hide_purpose_suggestions()
             return
 
@@ -337,6 +350,7 @@ class NewTicketPage:
             except Exception:
                 pass
             self._purpose_popup = None
+        self._purpose_listbox = None
 
     def _show_purpose_suggestions(self, entry_widget, purposes):
         self._hide_purpose_suggestions()
@@ -362,19 +376,27 @@ class NewTicketPage:
 
         for item in purposes:
             listbox.insert(tk.END, item)
+        if listbox.size() > 0:
+            listbox.selection_set(0)
+            listbox.activate(0)
 
         def _pick(_event=None):
             sel = listbox.curselection()
             if sel:
                 self._select_purpose(listbox.get(sel[0]))
+                return 'break'
 
         listbox.bind('<ButtonRelease-1>', _pick)
-        listbox.bind('<Return>', _pick)
+        listbox.bind('<Return>', lambda e: _pick(e) or 'break')
+        listbox.bind('<Escape>', lambda _e: self._hide_purpose_suggestions() or 'break')
+        listbox.bind('<Down>', lambda _e: self._on_suggestion_nav('_purpose_listbox', 1) or 'break')
+        listbox.bind('<Up>', lambda _e: self._on_suggestion_nav('_purpose_listbox', -1) or 'break')
 
         x = entry_widget.winfo_rootx()
         y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
         popup.geometry(f'+{x}+{y}')
         self._purpose_popup = popup
+        self._purpose_listbox = listbox
 
     def _on_nic_enter(self):
         self._search_customer()
@@ -476,6 +498,12 @@ class NewTicketPage:
         job_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._job_entry = job_entry.entry
         job_entry.entry.bind('<KeyRelease>', self._on_job_key)
+        job_entry.entry.bind('<Down>', lambda e: self._on_suggestion_nav('_job_listbox', 1) and 'break')
+        job_entry.entry.bind('<Up>', lambda e: self._on_suggestion_nav('_job_listbox', -1) and 'break')
+        job_entry.entry.bind(
+            '<Return>',
+            lambda e: self._on_suggestion_pick('_job_listbox', self._select_job) or (e.widget.tk_focusNext().focus_set() or 'break')
+        )
         self.cust_entries['job'] = job_entry
 
     def _render_marital_status_row(self, parent):
@@ -556,7 +584,7 @@ class NewTicketPage:
 
     def _on_job_key(self, event):
         val = self.cust_vars['job'].get().strip()
-        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+        if event.keysym in ('Escape', 'Tab', 'Return', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
             self._hide_job_suggestions()
             return
 
@@ -585,6 +613,7 @@ class NewTicketPage:
             except Exception:
                 pass
             self._job_popup = None
+        self._job_listbox = None
 
     def _show_job_suggestions(self, entry_widget, jobs):
         self._hide_job_suggestions()
@@ -610,19 +639,27 @@ class NewTicketPage:
 
         for item in jobs:
             listbox.insert(tk.END, item)
+        if listbox.size() > 0:
+            listbox.selection_set(0)
+            listbox.activate(0)
 
         def _pick(_event=None):
             sel = listbox.curselection()
             if sel:
                 self._select_job(listbox.get(sel[0]))
+                return 'break'
 
         listbox.bind('<ButtonRelease-1>', _pick)
-        listbox.bind('<Return>', _pick)
+        listbox.bind('<Return>', lambda e: _pick(e) or 'break')
+        listbox.bind('<Escape>', lambda _e: self._hide_job_suggestions() or 'break')
+        listbox.bind('<Down>', lambda _e: self._on_suggestion_nav('_job_listbox', 1) or 'break')
+        listbox.bind('<Up>', lambda _e: self._on_suggestion_nav('_job_listbox', -1) or 'break')
 
         x = entry_widget.winfo_rootx()
         y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
         popup.geometry(f'+{x}+{y}')
         self._job_popup = popup
+        self._job_listbox = listbox
 
     def _on_birthday_parts_changed(self, *_args):
         if self._birthday_syncing:
@@ -695,7 +732,7 @@ class NewTicketPage:
 
     def _on_desc_key(self, event):
         val = self.desc_var.get().strip()
-        if event.keysym in ('Escape', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+        if event.keysym in ('Escape', 'Tab', 'Return', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
             self._hide_desc_suggestions()
             return
 
@@ -718,6 +755,7 @@ class NewTicketPage:
             except Exception:
                 pass
             self._desc_popup = None
+        self._desc_listbox = None
 
     def _show_desc_suggestions(self, entry_widget, descriptions):
         self._hide_desc_suggestions()
@@ -743,25 +781,63 @@ class NewTicketPage:
 
         for item in descriptions:
             listbox.insert(tk.END, item)
+        if listbox.size() > 0:
+            listbox.selection_set(0)
+            listbox.activate(0)
 
         def _pick(_event=None):
             sel = listbox.curselection()
             if sel:
                 self._select_desc(listbox.get(sel[0]))
+                return 'break'
 
         listbox.bind('<ButtonRelease-1>', _pick)
-        listbox.bind('<Return>', _pick)
+        listbox.bind('<Return>', lambda e: _pick(e) or 'break')
+        listbox.bind('<Escape>', lambda _e: self._hide_desc_suggestions() or 'break')
+        listbox.bind('<Down>', lambda _e: self._on_suggestion_nav('_desc_listbox', 1) or 'break')
+        listbox.bind('<Up>', lambda _e: self._on_suggestion_nav('_desc_listbox', -1) or 'break')
 
         x = entry_widget.winfo_rootx()
         y = entry_widget.winfo_rooty() + entry_widget.winfo_height()
         popup.geometry(f'+{x}+{y}')
         self._desc_popup = popup
+        self._desc_listbox = listbox
 
     def _select_desc(self, value):
         self.desc_var.set(value)
         self._hide_desc_suggestions()
         self.desc_entry.entry.icursor(tk.END)
         self.desc_entry.entry.focus_set()
+
+    def _on_suggestion_nav(self, listbox_attr, delta):
+        listbox = getattr(self, listbox_attr, None)
+        if not listbox or not listbox.winfo_exists():
+            return False
+        if listbox.size() == 0:
+            return True
+        sel = listbox.curselection()
+        if not sel:
+            idx = 0
+        else:
+            idx = max(0, min(listbox.size() - 1, sel[0] + delta))
+        listbox.selection_clear(0, tk.END)
+        listbox.selection_set(idx)
+        listbox.activate(idx)
+        listbox.see(idx)
+        listbox.focus_set()
+        return True
+
+    def _on_suggestion_pick(self, listbox_attr, select_fn):
+        listbox = getattr(self, listbox_attr, None)
+        if not listbox or not listbox.winfo_exists():
+            return False
+        sel = listbox.curselection()
+        if not sel and listbox.size() > 0:
+            sel = (0,)
+        if sel:
+            select_fn(listbox.get(sel[0]))
+            return True
+        return False
 
     def _add_item(self):
         self._hide_desc_suggestions()
@@ -862,12 +938,33 @@ class NewTicketPage:
         else:
             self.other_bank_frame.pack_forget()
             self.other_bank_paid_var.set('0')
-            self.service_charge_payment_mode_var.set('financed')
+            self.service_charge_payment_mode_var.set('balance')
+            if hasattr(self, 'service_charge_amount_var'):
+                self.service_charge_amount_var.set('')
         self._recalculate()
 
     def _recalculate(self):
         self._save_form_state()
         self._render_summary()
+
+    def _update_service_charge_on_advance_change(self):
+        """Update service charge amount when advance amount changes (AJAX-like behavior)."""
+        # Only auto-update if user hasn't manually edited the service charge amount
+        if getattr(self, '_service_charge_user_edited', False):
+            return
+        
+        # Don't update if not an other bank ticket
+        if not self.is_other_bank_var.get():
+            return
+        
+        try:
+            calc = self._get_calculations()
+            # Update service charge amount display with calculated value
+            if hasattr(self, 'service_charge_amount_var'):
+                self.service_charge_amount_var.set(f"{calc['service_charge_amount']:.2f}".rstrip('0').rstrip('.'))
+        except Exception:
+            # Silently ignore errors during auto-update
+            pass
 
     def _setup_draft_autosave(self):
         """Auto-save draft on edits so tab switches keep recent input."""
@@ -880,6 +977,7 @@ class NewTicketPage:
         vars_to_track.append(self.is_other_bank_var)
         vars_to_track.append(self.other_bank_paid_var)
         vars_to_track.append(self.service_charge_payment_mode_var)
+        vars_to_track.append(self.service_charge_amount_var)
 
         for var in vars_to_track:
             if var is not None:
@@ -901,7 +999,8 @@ class NewTicketPage:
             'advance_amount': self.advance_amount_var.get() if hasattr(self, 'advance_amount_var') else '',
             'is_other_bank': self.is_other_bank_var.get() if hasattr(self, 'is_other_bank_var') else False,
             'other_bank_paid': self.other_bank_paid_var.get() if hasattr(self, 'other_bank_paid_var') else '0',
-            'service_charge_mode': self.service_charge_payment_mode_var.get() if hasattr(self, 'service_charge_payment_mode_var') else 'financed',
+            'service_charge_mode': self.service_charge_payment_mode_var.get() if hasattr(self, 'service_charge_payment_mode_var') else 'balance',
+            'service_charge_amount': self.service_charge_amount_var.get() if hasattr(self, 'service_charge_amount_var') else '',
             'items': self.items.copy() if hasattr(self, 'items') else [],
         }
         global NEW_TICKET_DRAFT
@@ -933,7 +1032,11 @@ class NewTicketPage:
         if hasattr(self, 'other_bank_paid_var'):
             self.other_bank_paid_var.set(self._form_state.get('other_bank_paid', '0'))
         if hasattr(self, 'service_charge_payment_mode_var'):
-            self.service_charge_payment_mode_var.set(self._form_state.get('service_charge_mode', 'financed'))
+            self.service_charge_payment_mode_var.set(self._form_state.get('service_charge_mode', 'balance'))
+        if hasattr(self, 'service_charge_amount_var'):
+            self.service_charge_amount_var.set(self._form_state.get('service_charge_amount', ''))
+        # Keep service charge in auto mode by default; user edits in the field toggle manual mode.
+        self._service_charge_user_edited = False
         
         if hasattr(self, 'items'):
             self.items = self._form_state.get('items', [])
@@ -967,7 +1070,10 @@ class NewTicketPage:
         if hasattr(self, 'other_bank_paid_var'):
             self.other_bank_paid_var.set('0')
         if hasattr(self, 'service_charge_payment_mode_var'):
-            self.service_charge_payment_mode_var.set('financed')
+            self.service_charge_payment_mode_var.set('balance')
+        if hasattr(self, 'service_charge_amount_var'):
+            self.service_charge_amount_var.set('')
+        self._service_charge_user_edited = False
         
         # Clear items
         self.items = []
@@ -1056,9 +1162,9 @@ class NewTicketPage:
         if service_charge_rate < 0:
             service_charge_rate = 0
 
-        mode = self.service_charge_payment_mode_var.get() or 'financed'
+        mode = self.service_charge_payment_mode_var.get() or 'balance'
         if mode not in ('financed', 'balance'):
-            mode = 'financed'
+            mode = 'balance'
 
         try:
             other_bank_paid_amount = float((self.other_bank_paid_var.get() or '0').strip().replace(',', ''))
@@ -1066,7 +1172,21 @@ class NewTicketPage:
             other_bank_paid_amount = 0.0
         other_bank_paid_amount = max(0.0, other_bank_paid_amount)
 
-        service_charge_amount = round(advance_amount * (service_charge_rate / 100.0), 2) if is_other_bank else 0.0
+        service_charge_amount = 0.0
+        if is_other_bank:
+            if getattr(self, '_service_charge_user_edited', False):
+                raw_service_charge = ''
+                if hasattr(self, 'service_charge_amount_var'):
+                    raw_service_charge = self.service_charge_amount_var.get().strip().replace(',', '')
+                if raw_service_charge:
+                    try:
+                        service_charge_amount = max(0.0, float(raw_service_charge))
+                    except ValueError:
+                        service_charge_amount = 0.0
+                else:
+                    service_charge_amount = round(advance_amount * (service_charge_rate / 100.0), 2)
+            else:
+                service_charge_amount = round(advance_amount * (service_charge_rate / 100.0), 2)
         financed_service_charge = service_charge_amount if is_other_bank and mode == 'financed' else 0.0
         loan_amount = round(advance_amount + financed_service_charge, 2)
 
@@ -1111,6 +1231,7 @@ class NewTicketPage:
 
         calc = self._get_calculations()
         assessed_value = calc['assessed_value']
+        label_width = 24
 
         # Default advance amount to empty string unless populated by user
         raw_advance = self.advance_amount_var.get().strip().replace(',', '')
@@ -1149,13 +1270,14 @@ class NewTicketPage:
             ('Duration', f"{calc['duration_months']} month(s)" if has_duration else "-"),
             ('Interest Principal', format_currency(calc['interest_principal_amount']) if has_duration else "-"),
             ('Interest Amount', format_currency(calc['interest']) if has_duration else "-"),
+            ('Redeem Balance', format_currency(calc['interest_principal_amount'] + calc['interest']) if has_duration else "-"),
             ('Expire Date', calc['expire_date'] if has_duration else "-"),
         ]
 
         for label, value in part1:
             row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
             row.pack(fill=tk.X, padx=14, pady=2)
-            tk.Label(row, text=label, font=self.theme.fonts.body, width=18, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(row, text=label, font=self.theme.fonts.body, width=label_width, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(row, text=value, font=self.theme.fonts.body_bold, anchor='e', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
 
         def _on_pct_edit():
@@ -1163,7 +1285,7 @@ class NewTicketPage:
 
         pct_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
         pct_row.pack(fill=tk.X, padx=14, pady=2)
-        tk.Label(pct_row, text='Assessed %', font=self.theme.fonts.body, width=18, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+        tk.Label(pct_row, text='Assessed %', font=self.theme.fonts.body, width=label_width, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
         tk.Label(pct_row, text='%', font=self.theme.fonts.body_bold, bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT, padx=(4, 0))
         pct_entry = self.theme.make_entry(pct_row, variable=self.custom_assessed_pct_var, width=8)
         pct_entry.pack(side=tk.RIGHT)
@@ -1177,7 +1299,7 @@ class NewTicketPage:
         for label, value in part2:
             row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
             row.pack(fill=tk.X, padx=14, pady=2)
-            tk.Label(row, text=label, font=self.theme.fonts.body, width=18, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(row, text=label, font=self.theme.fonts.body, width=label_width, anchor='w', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(row, text=value, font=self.theme.fonts.body_bold, anchor='e', bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
 
         advance_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
@@ -1186,7 +1308,7 @@ class NewTicketPage:
             advance_row,
             text='Advance Amount',
             font=self.theme.fonts.body_bold,
-            width=18,
+            width=label_width,
             anchor='w',
             bg=self.theme.palette.bg_surface,
             fg=self.theme.palette.accent,
@@ -1197,7 +1319,7 @@ class NewTicketPage:
         self.advance_entry_widget = advance_entry.entry
 
         # Mark user edits so future recalculations don't overwrite if we decided to autofill
-        advance_entry.entry.bind('<KeyRelease>', lambda _event: self._validate_advance_amount(calc['assessed_value']))
+        advance_entry.entry.bind('<KeyRelease>', lambda _event: (self._validate_advance_amount(calc['assessed_value']), setattr(self, '_service_charge_user_edited', False), self._update_service_charge_on_advance_change()))
         advance_entry.entry.bind('<KeyRelease>', lambda _event: setattr(self, '_advance_user_edited', True))
         advance_entry.entry.bind('<FocusOut>', lambda _event: self._recalculate())
         advance_entry.entry.bind('<Return>', lambda _event: self._recalculate())
@@ -1217,32 +1339,41 @@ class NewTicketPage:
         if calc['is_other_bank_ticket'] and has_duration:
             paid_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
             paid_row.pack(fill=tk.X, padx=14, pady=(0, 6))
-            tk.Label(paid_row, text='Paid to Other Bank', font=self.theme.fonts.body, width=18, anchor='w',
+            tk.Label(paid_row, text='Paid to Other Bank', font=self.theme.fonts.body, width=label_width, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             self.other_bank_paid_entry = self.theme.make_entry(paid_row, variable=self.other_bank_paid_var, width=12)
             self.other_bank_paid_entry.pack(side=tk.RIGHT)
             self.other_bank_paid_entry.entry.bind('<Return>', lambda _e: self._recalculate())
 
         if calc['is_other_bank_ticket'] and has_duration:
-            for label, value in [
-                ('Service Charge Rate', f"{calc['service_charge_rate']}%"),
-                ('Service Charge Amount', format_currency(calc['service_charge_amount'])),
-                ('Service Charge Mode', {
-                    'financed': 'Add To Loan',
-                    'balance': 'Deduct From Balance',
-                }.get(calc['service_charge_payment_mode'], 'Add To Loan')),
-            ]:
-                row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
-                row.pack(fill=tk.X, padx=14, pady=2)
-                tk.Label(row, text=label, font=self.theme.fonts.body, width=18, anchor='w',
-                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
-                tk.Label(row, text=value, font=self.theme.fonts.body_bold, anchor='e',
-                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+            rate_text = f"{calc['service_charge_rate']:.1f}%"
+            sc_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+            sc_row.pack(fill=tk.X, padx=14, pady=2)
+            tk.Label(sc_row, text=f"Service Charge Amount ({rate_text})", font=self.theme.fonts.body,
+                     width=label_width, anchor='w', bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            if not getattr(self, '_service_charge_user_edited', False):
+                self.service_charge_amount_var.set(f"{calc['service_charge_amount']:.2f}".rstrip('0').rstrip('.'))
+            sc_entry = self.theme.make_entry(sc_row, variable=self.service_charge_amount_var, width=12)
+            sc_entry.pack(side=tk.RIGHT)
+            sc_entry.entry.bind('<KeyRelease>', lambda _e: setattr(self, '_service_charge_user_edited', True))
+            sc_entry.entry.bind('<FocusOut>', lambda _e: self._recalculate())
+            sc_entry.entry.bind('<Return>', lambda _e: self._recalculate())
+
+            mode_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
+            mode_row.pack(fill=tk.X, padx=14, pady=2)
+            tk.Label(mode_row, text='Service Charge Mode', font=self.theme.fonts.body, width=label_width, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(mode_row, text={
+                'financed': 'Add To Loan',
+                'balance': 'Deduct From Balance',
+            }.get(calc['service_charge_payment_mode'], 'Add To Loan'), font=self.theme.fonts.body_bold, anchor='e',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
             
             # Customer Balance with enhanced styling
             cb_row = tk.Frame(self.summary_frame, bg=self.theme.palette.bg_surface)
             cb_row.pack(fill=tk.X, padx=14, pady=4)
-            tk.Label(cb_row, text='Customer Balance', font=self.theme.fonts.body, width=18, anchor='w',
+            tk.Label(cb_row, text='Customer Balance', font=self.theme.fonts.body, width=label_width, anchor='w',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(cb_row, text=format_currency(calc['customer_balance_amount']), font=('Segoe UI', 13, 'bold'), anchor='e',
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.success).pack(side=tk.RIGHT)
@@ -1390,6 +1521,9 @@ class NewTicketPage:
                 'The loan is currently ACTIVE and will remain so pending review.'
             )
             
+        # Clear draft after successful creation
+        NEW_TICKET_DRAFT.clear()
+        
         if messagebox.askyesno('Success', f'Loan ticket {ticket_no} created successfully!\n\n'
                                            f'Would you like to print the ticket?'):
             self.navigate('print_ticket', loan_id)

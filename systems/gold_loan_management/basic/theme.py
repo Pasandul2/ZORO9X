@@ -46,12 +46,20 @@ class AppTheme:
         self.radius = 12  # Token for future custom Canvas rounded components.
         self.shadow = '#d4dce9'  # Token for layered card effects.
 
-    def apply_window(self, root, *, min_size=(980, 640), size=(1280, 760), title=''):
+    def apply_window(self, root, *, min_size=(980, 640), size=(1280, 760), title='', maximize=False):
         root.configure(bg=self.palette.bg_app)
         root.geometry(f'{size[0]}x{size[1]}')
         root.minsize(min_size[0], min_size[1])
         if title:
             root.title(title)
+        if maximize:
+            try:
+                root.state('zoomed')
+            except tk.TclError:
+                try:
+                    root.attributes('-zoomed', True)
+                except tk.TclError:
+                    pass
 
     def make_card(self, parent, bg=None, border=None, padding=(14, 14), radius=None):
         bg_color = bg or self.palette.bg_surface

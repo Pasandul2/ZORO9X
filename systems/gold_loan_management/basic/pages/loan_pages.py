@@ -3,7 +3,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from database import (search_loans, get_loan, get_loan_items, get_loan_renewals,
-                      get_loan_payments, update_loan_status, get_approval_request_by_loan, get_duration_rate)
+                      get_loan_payments, update_loan_status, get_approval_request_by_loan, get_duration_rate,
+                      get_setting, list_customer_letters)
 from utils import (format_currency, format_date, get_status_text, get_status_color,
                    calculate_total_payable, is_overdue)
 
@@ -112,7 +113,7 @@ class LoanListPage:
 
         # Table
         cols = ['Ticket #', 'Customer', 'NIC', 'Amount', 'Status', 'Issue', 'Expire', 'Actions']
-        col_widths = [110, 170, 140, 120, 110, 110, 110, 170]
+        col_widths = [90, 140, 100, 100, 80, 80, 80, 220]
 
         tbl = tk.Frame(self.table_frame, bg=self.theme.palette.bg_surface)
         tbl.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
@@ -135,8 +136,9 @@ class LoanListPage:
             for idx, width_px in enumerate(col_widths):
                 row.grid_columnconfigure(idx, minsize=width_px, weight=0)
 
-            status_text = get_status_text(loan['status'], loan['expire_date'])
-            status_color = get_status_color(loan['status'], loan['expire_date'])
+            effective_status = 'active' if loan.get('status') == 'renewed' else loan.get('status')
+            status_text = get_status_text(effective_status, loan['expire_date'])
+            status_color = get_status_color(effective_status, loan['expire_date'])
 
             vals = [
                 (loan['ticket_no'], self.theme.palette.accent),
@@ -155,22 +157,37 @@ class LoanListPage:
                 lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('loan_detail', lid))
 
             # Action buttons
-            act_frame = tk.Frame(row, bg=row_bg)
-            act_frame.grid(row=0, column=7, sticky='w', padx=6)
-            view_lbl = tk.Label(act_frame, text='👁 View', font=self.theme.fonts.small,
-                                bg=row_bg, fg=self.theme.palette.accent, cursor='hand2')
-            view_lbl.pack(side=tk.LEFT, padx=(0, 6))
+            act_frame = tk.Frame(row, bg=row_bg, width=col_widths[7] - 12, height=28)
+            act_frame.grid(row=0, column=7, sticky='ew', padx=6)
+            act_frame.grid_propagate(False)
+            act_frame.grid_columnconfigure(0, weight=1, uniform='loan-actions')
+            act_frame.grid_columnconfigure(1, weight=1, uniform='loan-actions')
+            act_frame.grid_columnconfigure(2, weight=1, uniform='loan-actions')
+
+            def _make_action_badge(parent, text, bg_color):
+                return tk.Label(
+                    parent,
+                    text=text,
+                    font=self.theme.fonts.small,
+                    bg=bg_color,
+                    fg=self.theme.palette.text_inverse,
+                    cursor='hand2',
+                    padx=4,
+                    pady=2,
+                    anchor='center',
+                )
+
+            view_lbl = _make_action_badge(act_frame, '👁 View', self.theme.palette.accent)
+            view_lbl.grid(row=0, column=0, sticky='ew', padx=(0, 4))
             view_lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('loan_detail', lid))
 
-            if loan['status'] == 'active':
-                ren_lbl = tk.Label(act_frame, text='🔄', font=self.theme.fonts.small,
-                                   bg=row_bg, fg=self.theme.palette.info, cursor='hand2')
-                ren_lbl.pack(side=tk.LEFT, padx=(0, 4))
+            if effective_status == 'active':
+                ren_lbl = _make_action_badge(act_frame, '🔄 Renew', self.theme.palette.info)
+                ren_lbl.grid(row=0, column=1, sticky='ew', padx=(0, 4))
                 ren_lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('renew_loan', lid))
 
-                red_lbl = tk.Label(act_frame, text='✅', font=self.theme.fonts.small,
-                                   bg=row_bg, fg=self.theme.palette.success, cursor='hand2')
-                red_lbl.pack(side=tk.LEFT)
+                red_lbl = _make_action_badge(act_frame, '✅ Redeem', self.theme.palette.success)
+                red_lbl.grid(row=0, column=2, sticky='ew')
                 red_lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('redeem_loan', lid))
 
         if not loans:
@@ -211,8 +228,9 @@ class LoanDetailPage:
         tk.Label(hdr, text=f'Loan: {loan["ticket_no"]}', font=self.theme.fonts.h1,
                  bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
-        status_text = get_status_text(loan['status'], loan['expire_date'])
-        status_color = get_status_color(loan['status'], loan['expire_date'])
+        effective_status = 'active' if loan.get('status') == 'renewed' else loan.get('status')
+        status_text = get_status_text(effective_status, loan['expire_date'])
+        status_color = get_status_color(effective_status, loan['expire_date'])
         tk.Label(hdr, text=status_text, font=('Segoe UI', 12, 'bold'),
                  bg=self.theme.palette.bg_app, fg=status_color).pack(side=tk.RIGHT, padx=10)
 
@@ -231,17 +249,71 @@ class LoanDetailPage:
         cc.pack(fill=tk.X, pady=(0, 10))
         tk.Label(cc.inner, text='👤 Customer', font=self.theme.fonts.h3,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
-        for lbl, val in [('Name', loan['customer_name']), ('NIC', loan['customer_nic']),
-                         ('Phone', loan['customer_phone']), ('Birthday', loan.get('customer_birthday', '')),
-                         ('Job', loan.get('customer_job', '')), ('Married Status', loan.get('customer_marital_status', '')),
-                         ('Language', loan.get('customer_language', '')), ('Address', loan.get('customer_address', ''))]:
-            r = tk.Frame(cc.inner, bg=self.theme.palette.bg_surface)
-            r.pack(fill=tk.X, padx=14, pady=1)
-            tk.Label(r, text=f'{lbl}:', font=self.theme.fonts.body_bold, width=10, anchor='w',
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
-            tk.Label(r, text=val or '-', font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+
+        default_dur_rate = get_duration_rate(loan['duration_months'], loan.get('carat') or 22)
+        default_assessed_pct = float(default_dur_rate.get('assessed_percentage', 0)) if default_dur_rate else 0.0
+        current_assessed_pct = (loan['assessed_value'] / loan['market_value'] * 100) if loan['market_value'] else 0.0
+
+        try:
+            default_service_charge_pct = float(get_setting('other_bank_service_charge_pct', '2.0') or 2.0)
+        except ValueError:
+            default_service_charge_pct = 2.0
+        current_service_charge_pct = float(loan.get('service_charge_rate') or 0.0)
+        advance_for_charge = float(loan.get('advance_amount') or loan.get('loan_amount') or 0.0)
+        default_service_charge_amount = round(advance_for_charge * (default_service_charge_pct / 100.0), 2)
+        current_service_charge_amount = float(loan.get('service_charge_amount') or 0.0)
+
+        details_rows = [('Name', loan['customer_name']), ('NIC', loan['customer_nic']),
+                        ('Phone', loan['customer_phone']), ('Birthday', loan.get('customer_birthday', '')),
+                        ('Job', loan.get('customer_job', '')), ('Married Status', loan.get('customer_marital_status', '')),
+                        ('Language', loan.get('customer_language', '')), ('Address', loan.get('customer_address', '')),
+                        ('Purpose', loan.get('purpose', '')),
+                        ('Another Bank Ticket', 'Yes' if loan.get('is_other_bank_ticket') else 'No')]
+
+        details_grid = tk.Frame(cc.inner, bg=self.theme.palette.bg_surface)
+        details_grid.pack(fill=tk.X, padx=14, pady=(0, 2))
+        details_grid.grid_columnconfigure(0, minsize=120, weight=0)
+        details_grid.grid_columnconfigure(1, weight=1)
+
+        for row_idx, (lbl, val) in enumerate(details_rows):
+            tk.Label(details_grid, text=f'{lbl}:', font=self.theme.fonts.body_bold, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).grid(
+                row=row_idx, column=0, sticky='w', pady=1
+            )
+            tk.Label(details_grid, text=val or '-', font=self.theme.fonts.body, anchor='w', justify='left',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary, wraplength=240).grid(
+                row=row_idx, column=1, sticky='w', padx=(8, 0), pady=1
+            )
         tk.Frame(cc.inner, height=6, bg=self.theme.palette.bg_surface).pack()
+
+        # Show loan-specific default changes right after customer details.
+        changed_defaults = []
+        if default_assessed_pct > 0 and abs(current_assessed_pct - default_assessed_pct) > 0.001:
+            changed_defaults.append(
+                ('Assessed % Change', f"Default {default_assessed_pct:.1f}% -> Used {current_assessed_pct:.1f}%")
+            )
+        if loan.get('is_other_bank_ticket') and abs(current_service_charge_pct - default_service_charge_pct) > 0.001:
+            changed_defaults.append(
+                ('Service Charge % Change', f"Default {default_service_charge_pct:.1f}% -> Used {current_service_charge_pct:.1f}%")
+            )
+        if loan.get('is_other_bank_ticket') and abs(current_service_charge_amount - default_service_charge_amount) > 0.009:
+            changed_defaults.append(
+                ('Service Charge Amount Change', f"Default {format_currency(default_service_charge_amount)} -> Used {format_currency(current_service_charge_amount)}")
+            )
+
+        if changed_defaults:
+            changes_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
+            changes_card.pack(fill=tk.X, pady=(0, 10))
+            tk.Label(changes_card.inner, text='📝 Loan Detail Changes', font=self.theme.fonts.h3,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
+            for lbl, val in changed_defaults:
+                row = tk.Frame(changes_card.inner, bg=self.theme.palette.bg_surface)
+                row.pack(fill=tk.X, padx=14, pady=1)
+                tk.Label(row, text=f'{lbl}:', font=self.theme.fonts.body_bold, width=22, anchor='w',
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+                tk.Label(row, text=val, font=self.theme.fonts.body, anchor='w', justify='left',
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary, wraplength=240).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            tk.Frame(changes_card.inner, height=6, bg=self.theme.palette.bg_surface).pack()
 
         # Items card
         ic = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
@@ -274,23 +346,111 @@ class LoanDetailPage:
         abf = tk.Frame(act_card.inner, bg=self.theme.palette.bg_surface)
         abf.pack(fill=tk.X, padx=14, pady=10)
 
+        # Arrange buttons in a 2x3 grid for better visibility
+        abf.grid_columnconfigure(0, weight=1)
+        abf.grid_columnconfigure(1, weight=1)
+
         renew_btn = self.theme.make_button(abf, text='🔄 Renew Loan', kind='primary', width=13, pady=8,
                                            command=lambda: self.navigate('renew_loan', self.loan_id))
-        renew_btn.pack(side=tk.LEFT, padx=(0, 8))
+        renew_btn.grid(row=0, column=0, padx=(0, 4), pady=(0, 4), sticky='ew')
 
         redeem_btn = self.theme.make_button(abf, text='✅ Redeem Loan', kind='primary', width=13, pady=8,
                                             command=lambda: self.navigate('redeem_loan', self.loan_id))
-        redeem_btn.pack(side=tk.LEFT, padx=(0, 8))
+        redeem_btn.grid(row=0, column=1, padx=(4, 0), pady=(0, 4), sticky='ew')
 
-        self.theme.make_button(abf, text='📜 Loan History', kind='ghost', width=13, pady=8,
-                               command=lambda: self.navigate('loan_history', self.loan_id)).pack(side=tk.LEFT, padx=(0, 8))
+        history_btn = self.theme.make_button(abf, text='📜 Loan History', kind='ghost', width=13, pady=8,
+                                             command=lambda: self.navigate('loan_history', self.loan_id))
+        history_btn.grid(row=1, column=0, padx=(0, 4), pady=(4, 0), sticky='ew')
 
-        self.theme.make_button(abf, text='🖨 Print', kind='ghost', width=10, pady=8,
-                               command=lambda: self.navigate('print_ticket', self.loan_id)).pack(side=tk.LEFT)
+        print_btn = self.theme.make_button(abf, text='🖨 Print', kind='ghost', width=13, pady=8,
+                                           command=lambda: self.navigate('print_ticket', self.loan_id))
+        print_btn.grid(row=1, column=1, padx=(4, 0), pady=(4, 0), sticky='ew')
 
-        if loan['status'] != 'active':
+        letter_btn = self.theme.make_button(abf, text='✉️ Send Letter', kind='secondary', width=13, pady=8,
+                                            command=lambda: self._send_letter_for_loan(loan))
+        letter_btn.grid(row=2, column=0, padx=(0, 4), pady=(4, 0), sticky='ew')
+
+        if effective_status in ('redeemed', 'forfeited'):
             renew_btn.config(state=tk.DISABLED)
             redeem_btn.config(state=tk.DISABLED)
+
+        # Allow closing overdue active loans as forfeited directly from details.
+        if self.user.get('role') == 'admin' and effective_status == 'active' and is_overdue(loan['expire_date']):
+            def _mark_forfeited():
+                if not messagebox.askyesno(
+                    'Confirm Forfeit',
+                    f"Mark loan {loan['ticket_no']} as forfeited?\n\nThis action can be reversed only by changing the status manually."
+                ):
+                    return
+                update_loan_status(self.loan_id, 'forfeited')
+                messagebox.showinfo('Loan Updated', f"Loan {loan['ticket_no']} marked as forfeited.")
+                self.navigate('loan_detail', self.loan_id)
+
+            forfeit_btn = self.theme.make_button(
+                abf,
+                text='⚠ Mark As Forfeited',
+                kind='danger',
+                width=28,
+                pady=8,
+                command=_mark_forfeited,
+            )
+            forfeit_btn.grid(row=3, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
+
+        # Letter History section (below action buttons on left side)
+        letter_hist_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
+        letter_hist_card.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
+        tk.Label(letter_hist_card.inner, text='📮 Letter History for This Customer', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
+
+        # Get letters for this customer
+        all_letters = list_customer_letters()
+        customer_letters = [ltr for ltr in all_letters if ltr.get('customer_id') == loan.get('customer_id')]
+
+        if customer_letters:
+            letter_list_frame = tk.Frame(letter_hist_card.inner, bg=self.theme.palette.bg_surface)
+            letter_list_frame.pack(fill=tk.BOTH, expand=False, padx=14, pady=(0, 10))
+
+            for letter in customer_letters[:5]:  # Show last 5 letters
+                letter_id = letter.get('id')
+                letter_subject = letter.get('subject', '(No Subject)')
+                letter_status = (letter.get('status') or 'draft').upper()
+                letter_date = letter.get('updated_at', '-')
+                if letter_date and letter_date != '-':
+                    try:
+                        letter_date = letter_date.split()[0]  # Extract just the date part
+                    except:
+                        pass
+                
+                # Create a clickable letter row
+                letter_row = tk.Frame(letter_list_frame, bg=self.theme.palette.bg_surface_alt, padx=8, pady=6)
+                letter_row.pack(fill=tk.X, pady=4)
+                
+                # Bind click event to navigate to letters
+                def make_navigate_fn(lid):
+                    return lambda event: self.navigate('letters', {
+                        'letter_id': lid,
+                        'customer_id': loan.get('customer_id'),
+                        'customer_name': loan.get('customer_name'),
+                        'ticket_no': loan.get('ticket_no'),
+                    })
+                
+                letter_row.bind('<Button-1>', make_navigate_fn(letter_id))
+                
+                subject_label = tk.Label(letter_row, text=f"[{letter_date}] {letter_subject}",
+                         font=self.theme.fonts.body_bold, bg=self.theme.palette.bg_surface_alt,
+                         fg=self.theme.palette.text_primary, anchor='w', wraplength=280, justify='left', cursor='hand2')
+                subject_label.pack(fill=tk.X)
+                subject_label.bind('<Button-1>', make_navigate_fn(letter_id))
+                
+                meta_label = tk.Label(letter_row, text=f"Status: {letter_status} | Type: {letter.get('type') or 'Letter'} | Language: {letter.get('language', 'English')}",
+                         font=self.theme.fonts.small, bg=self.theme.palette.bg_surface_alt,
+                         fg=self.theme.palette.text_muted, anchor='w', cursor='hand2')
+                meta_label.pack(fill=tk.X)
+                meta_label.bind('<Button-1>', make_navigate_fn(letter_id))
+        else:
+            tk.Label(letter_hist_card.inner, text='No letters found for this customer.',
+                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 10))
 
         # Right - Financial details
         right = tk.Frame(main, bg=self.theme.palette.bg_app)
@@ -320,7 +480,7 @@ class LoanDetailPage:
             ('Assessed %', f"{assessed_pct:.1f}%"),
             ('Advance Amount', format_currency(loan.get('advance_amount') or loan['loan_amount'])),
             ('Interest Principal', format_currency(principal_base)),
-            ('Interest Rate', f"{loan['interest_rate']}% / month"),
+            ('Interest Rate', f"{float(loan['interest_rate']):.2f}% / month"),
             ('Duration', f"{loan['duration_months']} month(s)"),
             ('Issue Date', format_date(loan['issue_date'])),
             ('Renew Date', format_date(loan.get('renew_date') or '')),
@@ -383,6 +543,15 @@ class LoanDetailPage:
         tk.Label(tr, text=format_currency(payable['total']), font=('Segoe UI', 16, 'bold'),
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.accent).pack(side=tk.RIGHT)
 
+    def _send_letter_for_loan(self, loan):
+        """Navigate to Letters section with this customer pre-selected for letter sending."""
+        # Navigate to letters page with customer info to pre-select in Send Letters tab
+        self.navigate('letters', {
+            'customer_id': loan.get('customer_id'),
+            'customer_name': loan.get('customer_name'),
+            'ticket_no': loan.get('ticket_no'),
+            'loan_id': self.loan_id
+        })
 
 
 class LoanHistoryPage:
@@ -423,13 +592,14 @@ class LoanHistoryPage:
         tk.Label(summary_card.inner, text='Loan Summary', font=self.theme.fonts.h3,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
 
-        status_text = get_status_text(loan['status'], loan['expire_date'])
+        effective_status = 'active' if loan.get('status') == 'renewed' else loan.get('status')
+        status_text = get_status_text(effective_status, loan['expire_date'])
         summary_rows = [
             ('Customer', loan['customer_name']),
             ('Ticket No', loan['ticket_no']),
             ('Loan Status', status_text),
             ('Loan Amount', format_currency(loan['loan_amount'])),
-            ('Interest Rate', f"{loan['interest_rate']}% / month"),
+            ('Interest Rate', f"{float(loan['interest_rate']):.2f}% / month"),
             ('Issued Date', format_date(loan['issue_date'])),
             ('Expire Date', format_date(loan['expire_date'])),
             ('Created On', format_date(loan.get('created_at', ''))),
@@ -460,7 +630,7 @@ class LoanHistoryPage:
                     ('Old Expire Date', format_date(ren.get('old_expire_date'))),
                     ('New Expire Date', format_date(ren.get('new_expire_date'))),
                     ('New Duration', f"{ren.get('new_duration_months', 0)} month(s)"),
-                    ('New Interest Rate', f"{ren.get('new_interest_rate', 0)}% / month"),
+                    ('New Interest Rate', f"{float(ren.get('new_interest_rate', 0) or 0):.2f}% / month"),
                     ('Payment Amount', format_currency(ren.get('payment_amount', ren.get('interest_paid', 0)))),
                     ('Normal Interest Due', format_currency(ren.get('normal_interest_due', 0))),
                     ('Overdue Interest Due', format_currency(ren.get('overdue_interest_due', 0))),

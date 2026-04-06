@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 block_cipher = None
 
 a = Analysis(
     ['gold_loan_app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('logo.png', '.')] if os.path.exists('logo.png') else [],
     hiddenimports=['tkinter', 'sqlite3', 'requests', 'hashlib', 'platform', 'uuid'],
     hookspath=[],
     hooksconfig={},
@@ -40,5 +42,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='logo.png',
 )
