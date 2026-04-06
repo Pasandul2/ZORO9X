@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
@@ -11,25 +11,37 @@ const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const oauthHandledRef = useRef(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
 
   // Handle OAuth callback
   useEffect(() => {
+    if (oauthHandledRef.current) {
+      return;
+    }
+
     const token = searchParams.get('token');
     const user = searchParams.get('user');
 
     if (token) {
       try {
+        oauthHandledRef.current = true;
+
+        const cleanedParams = new URLSearchParams(searchParams);
+        cleanedParams.delete('token');
+        cleanedParams.delete('user');
+        const remainingParams = cleanedParams.toString();
+        const cleanUrl = remainingParams ? `/login?${remainingParams}` : '/login';
+        window.history.replaceState({}, '', cleanUrl);
+
         const userData = user ? JSON.parse(decodeURIComponent(user)) : {};
         login(token, userData);
-        // Use replace: true to prevent back button issues
         navigate('/', { replace: true });
-        // Reload to ensure all components update properly
-        window.location.href = '/';
       } catch (error) {
         console.error('Error parsing OAuth data:', error);
+        oauthHandledRef.current = false;
         setError('Authentication failed. Please try again.');
       }
     }

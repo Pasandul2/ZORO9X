@@ -35,6 +35,21 @@ const FRONTEND_ORIGINS = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
   : DEFAULT_FRONTEND_ORIGINS;
 
+const normalizeOrigin = (value) => {
+  if (!value) {
+    return value;
+  }
+
+  return value.replace(/^https:\/\/www\./i, 'https://').replace(/^http:\/\/www\./i, 'http://');
+};
+
+const ALLOWED_ORIGINS = new Set([
+  ...FRONTEND_ORIGINS,
+  ...FRONTEND_ORIGINS.map(normalizeOrigin),
+  ...FRONTEND_ORIGINS.map((origin) => origin.replace(/^https:\/\//i, 'https://www.')).filter(Boolean),
+  ...FRONTEND_ORIGINS.map((origin) => origin.replace(/^http:\/\//i, 'http://www.')).filter(Boolean)
+]);
+
 async function ensurePortIsAvailable(port) {
   return new Promise((resolve, reject) => {
     const tester = net
@@ -77,7 +92,7 @@ app.use(session({
 app.use(cors({
   origin: (origin, callback) => {
     // Allow non-browser clients and same-origin server-to-server calls.
-    if (!origin || FRONTEND_ORIGINS.includes(origin)) {
+    if (!origin || ALLOWED_ORIGINS.has(origin) || ALLOWED_ORIGINS.has(normalizeOrigin(origin))) {
       return callback(null, true);
     }
 
