@@ -76,12 +76,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
 
+error_log("🔍 API Key Check:");
+error_log("  Expected: " . API_KEY);
+error_log("  Received: " . ($apiKey ?: 'NOT SENT'));
+error_log("  Headers: " . json_encode(getallheaders()));
+
 if ($apiKey !== API_KEY) {
     http_response_code(401);
     error_log("❌ Unauthorized API key attempt: $apiKey");
     exit(json_encode([
         'success' => false,
-        'message' => 'Unauthorized'
+        'message' => 'Unauthorized - API key mismatch'
     ]));
 }
 

@@ -55,15 +55,19 @@ const sendViaPhpGateway = async (mailOptions) => {
 
   try {
     console.log(`📧 Sending via PHP gateway to: ${mailOptions.to}`);
+    console.log(`🔗 URL: ${PHP_MAIL_SERVICE_URL}`);
+    console.log(`🔐 API Key: ${PHP_MAIL_API_KEY}`);
     
-    const response = await axios.post(PHP_MAIL_SERVICE_URL, {
+    const requestData = {
       to: mailOptions.to,
       from: mailOptions.from || process.env.EMAIL_USER || 'noreply@zoro9x.com',
       subject: mailOptions.subject,
       html: mailOptions.html,
       cc: mailOptions.cc || null,
       bcc: mailOptions.bcc || null
-    }, {
+    };
+
+    const response = await axios.post(PHP_MAIL_SERVICE_URL, requestData, {
       timeout: 10000,
       headers: {
         'Content-Type': 'application/json',
@@ -83,6 +87,10 @@ const sendViaPhpGateway = async (mailOptions) => {
     }
   } catch (error) {
     console.error('❌ PHP Gateway Error:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
     throw error;
   }
 };
