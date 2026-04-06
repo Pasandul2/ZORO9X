@@ -13,6 +13,27 @@ const execFileAsync = promisify(execFile);
 const PHP_MAIL_SERVICE_URL = process.env.PHP_MAIL_SERVICE_URL;
 const PHP_MAIL_API_KEY = process.env.PHP_MAIL_API_KEY || 'your-secret-key';
 
+const escapeHtml = (value = '') => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+// LiteSpeed/WAF can reject large styled HTML templates. Convert to a safe body.
+const toGatewaySafeHtml = (html = '') => {
+  const withoutScripts = String(html)
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const clipped = withoutScripts.slice(0, 8000);
+  const safeText = escapeHtml(clipped || 'Message content unavailable.');
+  return `<p style="font-family: Arial, sans-serif; line-height: 1.5;">${safeText}</p>`;
+};
+
 /**
  * Send email through the PHP gateway.
  *
@@ -34,7 +55,7 @@ const sendEmail = async (mailOptions) => {
     to: mailOptions.to,
     from: mailOptions.from || process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER || 'noreply@zoro9x.com',
     subject: mailOptions.subject,
-    html: mailOptions.html,
+    html: toGatewaySafeHtml(mailOptions.html),
     cc: mailOptions.cc || null,
     bcc: mailOptions.bcc || null
   };
@@ -42,6 +63,7 @@ const sendEmail = async (mailOptions) => {
   try {
     console.log(`📧 Sending via PHP gateway to: ${requestData.to}`);
     console.log(`🔗 URL: ${PHP_MAIL_SERVICE_URL}`);
+    console.log(`📝 Gateway payload size: ${requestData.html.length} chars`);
 
     const curlArgs = [
       '-sS',
