@@ -10,6 +10,7 @@ import ContactSection from '../components/ContactSection';
 
 export function Home() {
   const bgRef = useRef<HTMLDivElement>(null);
+  const oauthHandledRef = useRef(false);
   const darkMode = true;
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
@@ -17,22 +18,31 @@ export function Home() {
 
   // Handle Google OAuth callback
   useEffect(() => {
+    if (oauthHandledRef.current) {
+      return;
+    }
+
     const token = searchParams.get('token');
     const user = searchParams.get('user');
 
     if (token && user) {
       try {
-        const userData = JSON.parse(decodeURIComponent(user));
-        login(token, userData);
+        oauthHandledRef.current = true;
 
-        // Prevent re-processing OAuth params and avoid reload loops.
+        // Immediately remove sensitive params from URL.
         const cleanedParams = new URLSearchParams(searchParams);
         cleanedParams.delete('token');
         cleanedParams.delete('user');
         const remainingParams = cleanedParams.toString();
-        navigate(remainingParams ? `/?${remainingParams}` : '/', { replace: true });
+        const cleanUrl = remainingParams ? `/?${remainingParams}` : '/';
+        window.history.replaceState({}, '', cleanUrl);
+
+        const userData = JSON.parse(decodeURIComponent(user));
+        login(token, userData);
+        navigate(cleanUrl, { replace: true });
       } catch (error) {
         console.error('Error parsing OAuth data:', error);
+        oauthHandledRef.current = false;
       }
     }
   }, [searchParams, login, navigate]);
