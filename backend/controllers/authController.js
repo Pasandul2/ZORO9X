@@ -7,7 +7,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { transporter, sendEmail } = require('../config/email');
+const { sendEmail } = require('../config/email');
 const { verificationEmailTemplate, passwordResetTemplate, welcomeEmailTemplate } = require('../utils/emailTemplates');
 
 // ============================================
@@ -22,8 +22,8 @@ const generateVerificationCode = () => {
 // ============================================
 const sendVerificationEmail = async (email, fullName, code) => {
   try {
-    await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+    await sendEmail({
+      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER}>`,
       to: email,
       subject: 'Verify Your Email - Zoro9x',
       html: verificationEmailTemplate(fullName, code)
@@ -31,7 +31,7 @@ const sendVerificationEmail = async (email, fullName, code) => {
     console.log('✅ Verification email sent to:', email);
     return true;
   } catch (error) {
-    console.error('❌ Error sending verification email:', error);
+    console.error('❌ Error sending verification email:', error.message);
     return false;
   }
 };
@@ -41,8 +41,8 @@ const sendVerificationEmail = async (email, fullName, code) => {
 // ============================================
 const sendPasswordResetEmail = async (email, fullName, code) => {
   try {
-    await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+    await sendEmail({
+      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER}>`,
       to: email,
       subject: 'Reset Your Password - Zoro9x',
       html: passwordResetTemplate(fullName, code)
@@ -50,7 +50,7 @@ const sendPasswordResetEmail = async (email, fullName, code) => {
     console.log('✅ Password reset email sent to:', email);
     return true;
   } catch (error) {
-    console.error('❌ Error sending password reset email:', error);
+    console.error('❌ Error sending password reset email:', error.message);
     return false;
   }
 };
@@ -60,15 +60,15 @@ const sendPasswordResetEmail = async (email, fullName, code) => {
 // ============================================
 const sendWelcomeEmail = async (email, fullName) => {
   try {
-    await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+    await sendEmail({
+      from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER}>`,
       to: email,
       subject: 'Welcome to Zoro9x! 🎉',
       html: welcomeEmailTemplate(fullName)
     });
     console.log('✅ Welcome email sent to:', email);
   } catch (error) {
-    console.error('❌ Error sending welcome email:', error);
+    console.error('❌ Error sending welcome email:', error.message);
   }
 };
 

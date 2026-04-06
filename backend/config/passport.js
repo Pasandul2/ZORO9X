@@ -9,7 +9,7 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const bcrypt = require('bcryptjs');
 const { pool } = require('./database');
-const { transporter, sendEmail } = require('./email');
+const { sendEmail } = require('./email');
 const { welcomeEmailTemplate } = require('../utils/emailTemplates');
 
 // ============================================
@@ -86,20 +86,15 @@ passport.use(
           // ============================================
           // Send welcome email to new Google user (non-blocking)
           try {
-            await transporter.sendMail({
-              from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+            await sendEmail({
+              from: `"${process.env.EMAIL_FROM_NAME || 'Zoro9x'}" <${process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER}>`,
               to: email,
               subject: 'Welcome to Zoro9x! 🎉',
-              html: welcomeEmailTemplate(fullName),
-              attachments: [{
-                filename: 'logo.png',
-                path: __dirname + '/../assets/logo.png',
-                cid: 'logo'
-              }]
+              html: welcomeEmailTemplate(fullName)
             });
             console.log('✅ Welcome email sent to:', email);
           } catch (emailError) {
-            console.error('❌ Error sending welcome email:', emailError);
+            console.error('❌ Error sending welcome email:', emailError.message);
             // Don't fail authentication if email fails
           }
         }
