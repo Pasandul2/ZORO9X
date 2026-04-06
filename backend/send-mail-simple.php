@@ -52,6 +52,16 @@ if (!$data || !isset($data['to']) || !isset($data['subject']) || !isset($data['h
     exit(json_encode(['success' => false, 'message' => 'Missing fields']));
 }
 
+// Decode full HTML template if provided as base64 by backend
+if (isset($data['html_b64']) && is_string($data['html_b64']) && $data['html_b64'] !== '') {
+    $decodedHtml = base64_decode($data['html_b64'], true);
+    if ($decodedHtml !== false) {
+        $data['html'] = $decodedHtml;
+    } else {
+        error_log('⚠️ Invalid html_b64 payload; using fallback html body');
+    }
+}
+
 // Try PHPMailer if available
 $result = false;
 $error = '';
