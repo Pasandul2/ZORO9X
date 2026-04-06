@@ -49,6 +49,8 @@ VALIDATE_ENDPOINT = '/api/saas/validate-key'
 ACTIVATE_ENDPOINT = '/api/saas/activate-device'
 TOKEN_VERIFY_SECRET = '${tokenVerifySecret}'
 CONFIG_SIGNING_SECRET = '${configSigningSecret}'
+VALIDATION_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_VALIDATE_TIMEOUT_SECONDS', '4'))
+ACTIVATION_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_ACTIVATE_TIMEOUT_SECONDS', '4'))
 
 
 def get_effective_api_url():
@@ -352,7 +354,7 @@ class ${className}App:
             resp = requests.post(
                 f'{api_url}{VALIDATE_ENDPOINT}',
                 json={'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
-                timeout=10,
+                timeout=VALIDATION_TIMEOUT_SECONDS,
             )
             data = resp.json()
             if resp.status_code == 200 and data.get('valid'):
@@ -390,7 +392,7 @@ class ${className}App:
             resp = requests.post(
                 f'{api_url}{ACTIVATE_ENDPOINT}',
                 json={'api_key': api_key, 'device_fingerprint': device_fp, 'device_info': device_info},
-                timeout=10,
+                timeout=ACTIVATION_TIMEOUT_SECONDS,
             )
             data = resp.json()
             if resp.status_code == 200 and data.get('success'):

@@ -6,19 +6,20 @@
 const { pool } = require('../config/database');
 const crypto = require('crypto');
 
-const DEFAULT_OFFLINE_GRACE_MINUTES = Math.max(
-  1,
-  parseInt(process.env.OFFLINE_GRACE_MINUTES || '3', 10)
-);
 const DEFAULT_OFFLINE_GRACE_DAYS = Math.max(
   1,
-  Math.ceil(DEFAULT_OFFLINE_GRACE_MINUTES / (60 * 24))
+  parseInt(process.env.OFFLINE_GRACE_DAYS || '7', 10)
+);
+const DEFAULT_OFFLINE_GRACE_MINUTES = Math.max(
+  1,
+  parseInt(process.env.OFFLINE_GRACE_MINUTES || String(DEFAULT_OFFLINE_GRACE_DAYS * 24 * 60), 10)
 );
 const LICENSE_TOKEN_TTL_MINUTES = Math.max(
   DEFAULT_OFFLINE_GRACE_MINUTES,
   parseInt(process.env.OFFLINE_TOKEN_TTL_MINUTES || String(7 * 24 * 60), 10)
 );
 let deviceApprovalColumnsReady = false;
+let deviceRuntimeColumnsReady = false;
 
 async function ensureDeviceApprovalColumns() {
   if (deviceApprovalColumnsReady) {
@@ -42,6 +43,28 @@ async function ensureDeviceApprovalColumns() {
   }
 
   deviceApprovalColumnsReady = true;
+}
+
+async function ensureDeviceRuntimeColumns() {
+  if (deviceRuntimeColumnsReady) {
+    return;
+  }
+
+  const alterStatements = [
+    "ALTER TABLE device_activations ADD COLUMN app_state ENUM('running', 'offline') DEFAULT 'offline'",
+  ];
+
+  for (const sql of alterStatements) {
+    try {
+      await pool.execute(sql);
+    } catch (error) {
+      if (error.code !== 'ER_DUP_FIELDNAME') {
+        throw error;
+      }
+    }
+  }
+
+  deviceRuntimeColumnsReady = true;
 }
 
 /**
@@ -90,6 +113,7 @@ function generateLicenseToken(subscriptionId, deviceFingerprint) {
  */
 exports.activateDevice = async (req, res) => {
   try {
+    await ensureDeviceRuntimeColumns();
     const { api_key, device_fingerprint, device_info } = req.body;
     const { ip, headers } = req;
 
@@ -206,8 +230,8 @@ exports.activateDevice = async (req, res) => {
     // Create device activation
     await pool.execute(
       `INSERT INTO device_activations 
-       (subscription_id, device_fingerprint, device_name, device_info, status, ip_address, first_activated) 
-       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+       (subscription_id, device_fingerprint, device_name, device_info, status, app_state, ip_address, first_activated) 
+       VALUES (?, ?, ?, ?, ?, 'running', ?, NOW())`,
       [
         subscription.id,
         device_fingerprint,
@@ -304,6 +328,7 @@ exports.activateDevice = async (req, res) => {
  */
 exports.validateApiKey = async (req, res) => {
   try {
+    await ensureDeviceRuntimeColumns();
     const { api_key, device_fingerprint, device_info } = req.body;
     const { ip, headers } = req;
 
@@ -402,8 +427,8 @@ exports.validateApiKey = async (req, res) => {
 
       // Update last seen
       await pool.execute(
-        `UPDATE device_activations 
-         SET last_seen = NOW(), ip_address = ? 
+        `UPDATE device_activations
+         SET last_seen = NOW(), ip_address = ?, app_state = 'running'
          WHERE id = ?`,
         [ip, device.id]
       );
@@ -662,6 +687,7 @@ exports.validateApiKey = async (req, res) => {
  */
 exports.heartbeat = async (req, res) => {
   try {
+    await ensureDeviceRuntimeColumns();
     const { api_key, device_fingerprint } = req.body;
     const ip = req.ip;
 
@@ -686,10 +712,10 @@ exports.heartbeat = async (req, res) => {
     const subscriptionId = subscriptions[0].id;
 
     const [devices] = await pool.execute(
-      `SELECT id, status
+      `SELECT id, status, app_state
        FROM device_activations
        WHERE subscription_id = ? AND device_fingerprint = ?
-       LIMIT 1`,
+       ORDER BY COALESCE(last_seen, first_activated) DESC, id DESC`,
       [subscriptionId, device_fingerprint]
     );
 
@@ -704,17 +730,69 @@ exports.heartbeat = async (req, res) => {
       });
     }
 
+    await ensureDeviceRuntimeColumns();
+
     await pool.execute(
       `UPDATE device_activations
-       SET last_seen = NOW(), ip_address = ?
-       WHERE id = ?`,
-      [ip, devices[0].id]
+       SET last_seen = NOW(), ip_address = ?, app_state = 'running'
+       WHERE subscription_id = ? AND device_fingerprint = ?`,
+      [ip, subscriptionId, device_fingerprint]
     );
 
     return res.json({ success: true, message: 'Heartbeat updated' });
   } catch (error) {
     console.error('Error updating heartbeat:', error);
     return res.status(500).json({ success: false, message: 'Failed to update heartbeat' });
+  }
+};
+
+/**
+ * Mark device offline when application closes cleanly.
+ */
+exports.shutdown = async (req, res) => {
+  try {
+    await ensureDeviceRuntimeColumns();
+
+    const { api_key, device_fingerprint } = req.body;
+    if (!api_key || !device_fingerprint) {
+      return res.status(400).json({ success: false, message: 'api_key and device_fingerprint are required' });
+    }
+
+    const [subscriptions] = await pool.execute(
+      `SELECT cs.id
+       FROM client_subscriptions cs
+       WHERE cs.api_key = ? AND cs.status = 'active'`,
+      [api_key]
+    );
+
+    if (subscriptions.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid or inactive API key' });
+    }
+
+    const subscriptionId = subscriptions[0].id;
+
+    const [devices] = await pool.execute(
+      `SELECT id
+       FROM device_activations
+       WHERE subscription_id = ? AND device_fingerprint = ?`,
+      [subscriptionId, device_fingerprint]
+    );
+
+    if (devices.length === 0) {
+      return res.status(403).json({ success: false, message: 'Device not activated' });
+    }
+
+    await pool.execute(
+      `UPDATE device_activations
+       SET app_state = 'offline', last_seen = NOW()
+       WHERE subscription_id = ? AND device_fingerprint = ?`,
+      [subscriptionId, device_fingerprint]
+    );
+
+    return res.json({ success: true, message: 'Shutdown acknowledged' });
+  } catch (error) {
+    console.error('Error handling shutdown:', error);
+    return res.status(500).json({ success: false, message: 'Failed to process shutdown' });
   }
 };
 
