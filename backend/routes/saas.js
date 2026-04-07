@@ -346,6 +346,7 @@ router.put('/admin/systems/:id', authenticateToken, authenticateAdmin, handleSys
  * Requires admin authentication
  */
 router.post('/admin/systems/:id/generate-build', authenticateToken, authenticateAdmin, saasController.generateSystemBuildAdmin);
+router.get('/admin/systems/:id/generate-build/:jobId', authenticateToken, authenticateAdmin, saasController.getSystemBuildJobStatusAdmin);
 
 
 /**

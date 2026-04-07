@@ -324,13 +324,60 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
         );
       }
 
-      const resultSummary = Array.isArray(data.results)
-        ? data.results
-            .map((entry: any) => `${entry.tier}: ${entry.status}${entry.installer ? ` (${entry.installer})` : ''}`)
-            .join('\n')
-        : '';
+      const jobId = data?.jobId as string | undefined;
+      if (!jobId) {
+        const resultSummary = Array.isArray(data.results)
+          ? data.results
+              .map((entry: any) => `${entry.tier}: ${entry.status}${entry.installer ? ` (${entry.installer})` : ''}`)
+              .join('\n')
+          : '';
+        alert(`Build generated successfully.\n${resultSummary}`.trim());
+        return;
+      }
 
-      alert(`Build generated successfully.\n${resultSummary}`.trim());
+      const pollIntervalMs = 3000;
+      const maxPollAttempts = 180; // 9 minutes
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        if (attempt > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
+        }
+
+        const statusResponse = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${systemId}/generate-build/${jobId}`,
+          {
+            method: 'GET',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const statusData = await statusResponse.json().catch(() => null);
+        if (!statusResponse.ok || !statusData?.success) {
+          throw new Error(statusData?.message || 'Failed to check build status');
+        }
+
+        const job = statusData.job;
+        const results = Array.isArray(job?.results) ? job.results : [];
+
+        if (job?.status === 'completed') {
+          const resultSummary = results
+            .map((entry: any) => `${entry.tier}: ${entry.status}${entry.installer ? ` (${entry.installer})` : ''}`)
+            .join('\n');
+          alert(`Build generated successfully.\n${resultSummary}`.trim());
+          return;
+        }
+
+        if (job?.status === 'failed') {
+          const errorSummary = results
+            .map((entry: any) => `${entry.tier}: ${entry.message || entry.status}`)
+            .join('\n');
+          throw new Error([job?.message || 'Build generation failed', errorSummary].filter(Boolean).join('\n'));
+        }
+      }
+
+      throw new Error('Build is still running. Please check again in a moment.');
     } catch (error) {
       console.error('Error generating build:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate build');

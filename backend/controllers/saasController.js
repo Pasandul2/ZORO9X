@@ -18,6 +18,7 @@ let businessInfoSchemaReady = false;
 let renewalSchemaReady = false;
 let deviceRuntimeSchemaReady = false;
 let backupSchemaReady = false;
+const systemBuildJobs = new Map();
 
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
@@ -369,6 +370,110 @@ function regenerateTierBuild(systemFolder, tier) {
       status: 'failed',
       message: error instanceof Error ? error.message : 'Unknown build error',
     };
+  }
+}
+
+function createSystemBuildJob(systemId) {
+  const jobId = `build_${systemId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+  const job = {
+    id: jobId,
+    systemId: Number(systemId),
+    status: 'queued',
+    message: 'Build queued',
+    results: [],
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+  };
+
+  systemBuildJobs.set(jobId, job);
+
+  // Keep memory bounded.
+  if (systemBuildJobs.size > 100) {
+    const oldEntries = Array.from(systemBuildJobs.values())
+      .filter((entry) => entry.status === 'completed' || entry.status === 'failed')
+      .sort((a, b) => new Date(a.finishedAt || a.createdAt).getTime() - new Date(b.finishedAt || b.createdAt).getTime());
+    oldEntries.slice(0, Math.max(0, oldEntries.length - 80)).forEach((entry) => {
+      systemBuildJobs.delete(entry.id);
+    });
+  }
+
+  return job;
+}
+
+async function buildSystemById(systemId) {
+  const [systems] = await pool.execute(
+    'SELECT id, name, python_file_path FROM systems WHERE id = ? LIMIT 1',
+    [systemId]
+  );
+
+  if (systems.length === 0) {
+    const notFoundError = new Error('System not found');
+    notFoundError.status = 404;
+    throw notFoundError;
+  }
+
+  const system = systems[0];
+  const normalizedPath = normalizeSystemPath(system.python_file_path);
+  if (!normalizedPath) {
+    const pathError = new Error('System path is not configured for this system');
+    pathError.status = 400;
+    throw pathError;
+  }
+
+  const systemFolder = path.join(__dirname, '../../systems', normalizedPath);
+  if (!fs.existsSync(systemFolder) || !fs.statSync(systemFolder).isDirectory()) {
+    const folderError = new Error(`System folder not found on server: ${normalizedPath}`);
+    folderError.status = 404;
+    throw folderError;
+  }
+
+  const results = ['basic', 'premium'].map((tier) => regenerateTierBuild(systemFolder, tier));
+  const attempted = results.filter((entry) => entry.status !== 'skipped');
+  const failed = results.filter((entry) => entry.status === 'failed');
+
+  if (attempted.length === 0) {
+    const noTierError = new Error('No buildable tiers were found for this system');
+    noTierError.status = 400;
+    noTierError.results = results;
+    throw noTierError;
+  }
+
+  if (failed.length > 0) {
+    const pyInstallerMissing = failed.every((entry) => /no module named pyinstaller/i.test(String(entry.message || '')));
+
+    const buildError = new Error(
+      pyInstallerMissing
+        ? `Build generation failed because PyInstaller is not installed on the server.\n${getPyInstallerInstallHint()}`
+        : `Build generation failed for one or more tiers. ${failed.map((entry) => `${entry.tier}: ${entry.message}`).join(' | ')}`
+    );
+    buildError.status = 500;
+    buildError.results = results;
+    throw buildError;
+  }
+
+  return {
+    message: 'Build generated successfully. Existing dist/build outputs were replaced.',
+    results,
+  };
+}
+
+async function runSystemBuildJob(job) {
+  job.status = 'running';
+  job.message = 'Build in progress';
+  job.startedAt = new Date().toISOString();
+
+  try {
+    const output = await buildSystemById(job.systemId);
+    job.status = 'completed';
+    job.message = output.message;
+    job.results = output.results || [];
+  } catch (error) {
+    job.status = 'failed';
+    job.message = error?.message || 'Build generation failed';
+    job.results = error?.results || [];
+  } finally {
+    job.finishedAt = new Date().toISOString();
   }
 }
 
@@ -1038,74 +1143,35 @@ exports.deleteSystem = async (req, res) => {
 exports.generateSystemBuildAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const [systems] = await pool.execute(
-      'SELECT id, name, python_file_path FROM systems WHERE id = ? LIMIT 1',
-      [id]
+    const numericSystemId = parseInt(id, 10);
+    const runningJob = Array.from(systemBuildJobs.values()).find(
+      (job) => job.systemId === numericSystemId && (job.status === 'queued' || job.status === 'running')
     );
 
-    if (systems.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'System not found',
+    if (runningJob) {
+      return res.status(202).json({
+        success: true,
+        message: 'A build is already running for this system',
+        jobId: runningJob.id,
+        job: runningJob,
       });
     }
 
-    const system = systems[0];
-    const normalizedPath = normalizeSystemPath(system.python_file_path);
-    if (!normalizedPath) {
-      return res.status(400).json({
-        success: false,
-        message: 'System path is not configured for this system',
+    const job = createSystemBuildJob(numericSystemId);
+    setImmediate(() => {
+      runSystemBuildJob(job).catch((error) => {
+        job.status = 'failed';
+        job.message = error?.message || 'Build generation failed';
+        job.results = error?.results || [];
+        job.finishedAt = new Date().toISOString();
       });
-    }
+    });
 
-    const systemFolder = path.join(__dirname, '../../systems', normalizedPath);
-    if (!fs.existsSync(systemFolder) || !fs.statSync(systemFolder).isDirectory()) {
-      return res.status(404).json({
-        success: false,
-        message: `System folder not found on server: ${normalizedPath}`,
-      });
-    }
-
-    const results = ['basic', 'premium'].map((tier) => regenerateTierBuild(systemFolder, tier));
-    const attempted = results.filter((entry) => entry.status !== 'skipped');
-    const failed = results.filter((entry) => entry.status === 'failed');
-
-    if (attempted.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No buildable tiers were found for this system',
-        results,
-      });
-    }
-
-    if (failed.length > 0) {
-      const pyInstallerMissing = failed.every((entry) => /no module named pyinstaller/i.test(String(entry.message || '')));
-
-      if (pyInstallerMissing) {
-        return res.status(500).json({
-          success: false,
-          message: `Build generation failed because PyInstaller is not installed on the server.\n${getPyInstallerInstallHint()}`,
-          results,
-        });
-      }
-
-      const failureSummary = failed
-        .map((entry) => `${entry.tier}: ${entry.message}`)
-        .join(' | ');
-
-      return res.status(500).json({
-        success: false,
-        message: `Build generation failed for one or more tiers. ${failureSummary}`,
-        results,
-      });
-    }
-
-    return res.json({
+    return res.status(202).json({
       success: true,
-      message: 'Build generated successfully. Existing dist/build outputs were replaced.',
-      results,
+      message: 'Build generation started',
+      jobId: job.id,
+      job,
     });
   } catch (error) {
     console.error('Error generating system build:', error);
@@ -1113,6 +1179,32 @@ exports.generateSystemBuildAdmin = async (req, res) => {
       success: false,
       message: 'Failed to generate build',
       error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+};
+
+exports.getSystemBuildJobStatusAdmin = async (req, res) => {
+  try {
+    const { id, jobId } = req.params;
+    const numericSystemId = parseInt(id, 10);
+    const job = systemBuildJobs.get(jobId);
+
+    if (!job || job.systemId !== numericSystemId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Build job not found for this system',
+      });
+    }
+
+    return res.json({
+      success: true,
+      job,
+    });
+  } catch (error) {
+    console.error('Error fetching system build job status:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch build status',
     });
   }
 };
