@@ -200,48 +200,84 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         return str(self._get_downloads_dir() / filename)
 
     def _get_edge_exe(self):
-        edge_in_path = shutil.which('msedge')
+        """Locate Microsoft Edge executable on Windows systems."""
+        # Try PATH first
+        edge_in_path = shutil.which('msedge') or shutil.which('microsoft-edge') or shutil.which('edge')
         if edge_in_path:
             return edge_in_path
 
+        # Try common Windows installation paths
         candidates = [
             os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
             os.path.join(os.environ.get('ProgramFiles', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),  # Chrome fallback
+            os.path.join(os.environ.get('ProgramFiles', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
         ]
         for cand in candidates:
             if cand and os.path.exists(cand):
                 return cand
         return None
 
+    def _generate_pdf_fallback_warning(self):
+        """Generate a user-friendly error message for missing PDF generation dependencies."""
+        return (
+            'Microsoft Edge is required for PDF export and is not currently installed on this system.\n\n'
+            'Options:\n'
+            '1. Install Microsoft Edge from https://www.microsoft.com/en-us/edge/download\n'
+            '2. Use "🌐 Open Web Print Preview" button and print to PDF using your browser\n\n'
+            'The HTML preview is saved in your Downloads folder and can be printed manually.'
+        )
+
     def _generate_pdf(self, html_path, pdf_path):
+        """Generate PDF using Microsoft Edge headless mode."""
         edge_exe = self._get_edge_exe()
         if not edge_exe:
-            raise RuntimeError('Microsoft Edge not found for PDF export.')
+            # Provide helpful error message with alternatives
+            raise RuntimeError(self._generate_pdf_fallback_warning())
 
         pdf_parent = Path(pdf_path).parent
-        pdf_parent.mkdir(parents=True, exist_ok=True)
+        try:
+            pdf_parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            raise RuntimeError(f'Unable to create PDF directory {pdf_parent}: {e}')
 
         cmd = [
             edge_exe,
             '--headless',
             '--disable-gpu',
+            '--no-sandbox',
             f'--print-to-pdf={pdf_path}',
             Path(html_path).as_uri(),
         ]
 
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        if result.returncode != 0:
-            stderr_msg = (result.stderr or '').strip() or 'Unknown PDF generation error.'
-            raise RuntimeError(f'Edge PDF generation failed: {stderr_msg}')
+        try:
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('PDF generation timed out. Please try again.')
+        except Exception as e:
+            raise RuntimeError(f'Failed to start PDF generation process: {e}')
 
+        if result.returncode != 0:
+            stderr_msg = (result.stderr or '').strip() or 'Unknown error'
+            stdout_msg = (result.stdout or '').strip() or ''
+            error_detail = stderr_msg if stderr_msg else stdout_msg
+            raise RuntimeError(f'PDF generation failed: {error_detail}')
+
+        # Verify PDF was actually created
         if not os.path.exists(pdf_path):
-            stderr_msg = (result.stderr or '').strip()
-            detail = f'\nDetails: {stderr_msg}' if stderr_msg else ''
-            raise FileNotFoundError(f'PDF file was not generated at expected path: {pdf_path}{detail}')
+            raise FileNotFoundError(f'PDF file was not generated at: {pdf_path}')
+
+        # Verify PDF has content (not empty/zero-byte file)
+        pdf_size = os.path.getsize(pdf_path)
+        if pdf_size == 0:
+            os.remove(pdf_path)
+            raise RuntimeError('PDF generation produced an empty file. Please try again or use browser print-to-PDF.')
 
         return pdf_path
 
     def _save_pdf(self):
+        """Save the current ticket as a PDF file."""
         try:
             if self.doc_type == 'ticket' and not self._confirm_multi_page_ticket():
                 return
@@ -259,10 +295,25 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             self._generate_pdf(html_path, pdf_path)
 
             if not os.path.exists(pdf_path):
-                raise FileNotFoundError(f'PDF not found after export: {pdf_path}')
-            os.startfile(pdf_path)
+                raise FileNotFoundError(f'PDF file disappeared after generation: {pdf_path}')
+
+            # Try to open the PDF file
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(pdf_path)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', pdf_path], check=False)
+                else:  # Linux
+                    subprocess.run(['xdg-open', pdf_path], check=False)
+                messagebox.showinfo('PDF Saved', f'PDF saved to:\n{pdf_path}')
+            except Exception as open_error:
+                messagebox.showinfo('PDF Saved', f'PDF saved to:\n{pdf_path}\n\n(Could not open automatically: {open_error})')
         except Exception as exc:
-            messagebox.showerror('PDF Export', f'Could not save PDF:\n{exc}')
+            error_msg = str(exc)
+            if 'Edge is required' in error_msg or 'Microsoft Edge' in error_msg:
+                messagebox.showerror('PDF Export - Dependencies Required', error_msg)
+            else:
+                messagebox.showerror('PDF Export Error', f'Could not save PDF:\n{error_msg}')
 
     def _try_open_webview(self, html_path, title, print_on_open=False):
         """Try to open pywebview, returning True if successful."""

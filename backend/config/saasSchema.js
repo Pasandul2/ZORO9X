@@ -568,7 +568,14 @@ async function createAuditLogsTable() {
           'validation_blocked',
           'policy_violation',
           'approval',
-          'rejection'
+          'rejection',
+          'admin_subscription_activate',
+          'admin_subscription_deactivate',
+          'admin_subscription_expire',
+          'admin_subscription_extend_days',
+          'admin_subscription_set_end_date',
+          'admin_subscription_lifetime',
+          'admin_subscription_set_activation'
         ) NOT NULL,
         actor VARCHAR(64) DEFAULT 'system',
         details JSON NULL,
