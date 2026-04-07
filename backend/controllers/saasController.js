@@ -261,6 +261,18 @@ function normalizeSystemPath(rawPath) {
   return normalized.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+function getPyInstallerInstallHint() {
+  if (process.platform === 'win32') {
+    return 'Install command: py -m pip install --upgrade pip pyinstaller';
+  }
+  return [
+    'Install commands:',
+    'python3 -m pip install --upgrade pip',
+    'python3 -m pip install pyinstaller',
+    'If your distro blocks system pip, use: python3 -m pip install --break-system-packages pyinstaller',
+  ].join('\n');
+}
+
 function regenerateTierBuild(systemFolder, tier) {
   const tierFolder = path.join(systemFolder, tier);
   if (!fs.existsSync(tierFolder) || !fs.statSync(tierFolder).isDirectory()) {
@@ -1026,6 +1038,16 @@ exports.generateSystemBuildAdmin = async (req, res) => {
     }
 
     if (failed.length > 0) {
+      const pyInstallerMissing = failed.every((entry) => /no module named pyinstaller/i.test(String(entry.message || '')));
+
+      if (pyInstallerMissing) {
+        return res.status(500).json({
+          success: false,
+          message: `Build generation failed because PyInstaller is not installed on the server.\n${getPyInstallerInstallHint()}`,
+          results,
+        });
+      }
+
       const failureSummary = failed
         .map((entry) => `${entry.tier}: ${entry.message}`)
         .join(' | ');
