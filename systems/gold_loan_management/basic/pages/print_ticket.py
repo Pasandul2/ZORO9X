@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import tkinter as tk
+import time
 from datetime import datetime
 from tkinter import messagebox
 import html as html_escape
@@ -229,6 +230,18 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             'The HTML preview is saved in your Downloads folder and can be printed manually.'
         )
 
+    def _wait_for_file(self, file_path, timeout_seconds=8.0):
+        """Wait until a file exists and has content to avoid race conditions."""
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            try:
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                    return True
+            except OSError:
+                pass
+            time.sleep(0.15)
+        return False
+
     def _generate_pdf(self, html_path, pdf_path):
         """Generate PDF using Microsoft Edge headless mode."""
         edge_exe = self._get_edge_exe()
@@ -264,8 +277,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             error_detail = stderr_msg if stderr_msg else stdout_msg
             raise RuntimeError(f'PDF generation failed: {error_detail}')
 
-        # Verify PDF was actually created
-        if not os.path.exists(pdf_path):
+        # Edge can return before the file handle is fully flushed on some machines.
+        if not self._wait_for_file(pdf_path, timeout_seconds=8.0):
             raise FileNotFoundError(f'PDF file was not generated at: {pdf_path}')
 
         # Verify PDF has content (not empty/zero-byte file)
@@ -294,7 +307,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             self._generate_pdf(html_path, pdf_path)
 
-            if not os.path.exists(pdf_path):
+            if not self._wait_for_file(pdf_path, timeout_seconds=3.0):
                 raise FileNotFoundError(f'PDF file disappeared after generation: {pdf_path}')
 
             # Try to open the PDF file
