@@ -117,6 +117,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
   const [businessInfoRequestCounts, setBusinessInfoRequestCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
   const [renewalRequests, setRenewalRequests] = useState<RenewalAdminRequest[]>([]);
   const [adminSubscriptions, setAdminSubscriptions] = useState<AdminSubscription[]>([]);
+  const [generatingBuildSystemId, setGeneratingBuildSystemId] = useState<number | null>(null);
   
   // Security states
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -285,6 +286,46 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       setBusinessInfoRequestCounts(data.counts || { pending: 0, approved: 0, rejected: 0 });
     } catch (error) {
       console.error('Error fetching business info requests:', error);
+    }
+  };
+
+  const handleGenerateBuild = async (systemId: number) => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) {
+      navigate('/admin/login');
+      return;
+    }
+
+    if (!window.confirm('Generate new build now? Existing dist and build folders will be replaced.')) {
+      return;
+    }
+
+    try {
+      setGeneratingBuildSystemId(systemId);
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${systemId}/generate-build`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data?.message || 'Failed to generate build');
+      }
+
+      const resultSummary = Array.isArray(data.results)
+        ? data.results
+            .map((entry: any) => `${entry.tier}: ${entry.status}${entry.installer ? ` (${entry.installer})` : ''}`)
+            .join('\n')
+        : '';
+
+      alert(`Build generated successfully.\n${resultSummary}`.trim());
+    } catch (error) {
+      console.error('Error generating build:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate build');
+    } finally {
+      setGeneratingBuildSystemId(null);
     }
   };
 
@@ -537,6 +578,9 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
     const parsed = Number(r);
     return Number.isFinite(parsed) ? parsed : 0;
   })();
+  const generatingBuildSystem = generatingBuildSystemId
+    ? systems.find((system) => system.id === generatingBuildSystemId)
+    : null;
 
   return (
     <div className={`min-h-screen pt-32 pb-20 px-4 ${
@@ -730,9 +774,13 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
                   key={system.id}
                   system={system}
                   darkMode={darkMode}
+                  isGeneratingBuild={generatingBuildSystemId === system.id}
                   onEdit={() => {
                     setSelectedSystem(system);
                     setShowEditSystem(true);
+                  }}
+                  onGenerateBuild={() => {
+                    handleGenerateBuild(system.id);
                   }}
                   onManagePlans={() => {
                     setSelectedSystem(system);
@@ -1426,6 +1474,44 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
           </motion.div>
         )}
       </div>
+
+      {generatingBuildSystemId !== null && (
+        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className={`w-full max-w-xl rounded-2xl border p-8 shadow-2xl ${
+              darkMode ? 'bg-gray-900 border-emerald-500/40 text-white' : 'bg-white border-emerald-300 text-gray-900'
+            }`}
+          >
+            <div className="flex items-center gap-4 mb-4">
+              <div className="relative">
+                <div className="w-14 h-14 rounded-full border-4 border-emerald-500/30" />
+                <div className="w-14 h-14 rounded-full border-4 border-transparent border-t-emerald-500 animate-spin absolute inset-0" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold">Generating Build</h3>
+                <p className={`${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  {generatingBuildSystem?.name || 'Selected system'} is being compiled on the server.
+                </p>
+              </div>
+            </div>
+
+            <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+              <motion.div
+                className="h-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500"
+                initial={{ x: '-100%' }}
+                animate={{ x: ['-100%', '100%'] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
+              />
+            </div>
+
+            <p className={`text-sm mt-4 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              Please wait. Existing dist and build outputs are being replaced with the new build.
+            </p>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1459,7 +1545,7 @@ const StatCard: React.FC<any> = ({ title, value, icon, color, darkMode }) => {
 };
 
 // System Card Component
-const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, onDelete }) => {
+const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onGenerateBuild, onManagePlans, onDelete, isGeneratingBuild }) => {
   const iconSrc = system.icon_url
     ? system.icon_url.startsWith('http')
       ? system.icon_url
@@ -1511,7 +1597,7 @@ const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, on
         {system.description}
       </p>
       
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <button
           onClick={onEdit}
           className="bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg flex items-center justify-center gap-1 text-sm"
@@ -1525,6 +1611,14 @@ const SystemCard: React.FC<any> = ({ system, darkMode, onEdit, onManagePlans, on
         >
           <Package className="w-3 h-3" />
           Plans
+        </button>
+        <button
+          onClick={onGenerateBuild}
+          disabled={isGeneratingBuild}
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-700/60 disabled:cursor-not-allowed text-white py-2 rounded-lg flex items-center justify-center gap-1 text-sm"
+        >
+          <Activity className="w-3 h-3" />
+          {isGeneratingBuild ? 'Building...' : 'Generate Build'}
         </button>
         <button
           onClick={() => onDelete(system.id)}

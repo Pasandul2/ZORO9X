@@ -340,6 +340,13 @@ router.post('/admin/systems', authenticateToken, authenticateAdmin, saasControll
  */
 router.put('/admin/systems/:id', authenticateToken, authenticateAdmin, handleSystemIconUpload, saasController.updateSystem);
 
+/**
+ * POST /api/saas/admin/systems/:id/generate-build
+ * Regenerate executable builds for a system and replace old dist/build artifacts
+ * Requires admin authentication
+ */
+router.post('/admin/systems/:id/generate-build', authenticateToken, authenticateAdmin, saasController.generateSystemBuildAdmin);
+
 
 /**
  * DELETE /api/saas/admin/systems/:id

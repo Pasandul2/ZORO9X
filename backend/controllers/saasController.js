@@ -135,6 +135,78 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   return findInstallerExecutable(systemFolder);
 }
 
+function clearBuildArtifacts(systemFolder) {
+  ['build', 'dist'].forEach((artifactDirName) => {
+    const artifactPath = path.join(systemFolder, artifactDirName);
+    if (fs.existsSync(artifactPath)) {
+      fs.rmSync(artifactPath, { recursive: true, force: true });
+    }
+  });
+}
+
+function normalizeSystemPath(rawPath) {
+  let normalized = String(rawPath || '').trim();
+  if (normalized.startsWith('systems/')) {
+    normalized = normalized.substring(8);
+  }
+  return normalized.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function regenerateTierBuild(systemFolder, tier) {
+  const tierFolder = path.join(systemFolder, tier);
+  if (!fs.existsSync(tierFolder) || !fs.statSync(tierFolder).isDirectory()) {
+    return { tier, status: 'skipped', message: 'Tier folder not found' };
+  }
+
+  const buildScript = path.join(tierFolder, 'BUILD.bat');
+  if (!fs.existsSync(buildScript)) {
+    return { tier, status: 'failed', message: 'BUILD.bat not found' };
+  }
+
+  try {
+    clearBuildArtifacts(tierFolder);
+    updateInstallerSpecDatas(tierFolder);
+
+    const result = spawnSync('cmd.exe', ['/c', 'BUILD.bat'], {
+      cwd: tierFolder,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 40,
+    });
+
+    if (result.status !== 0) {
+      const stderr = (result.stderr || '').trim();
+      const stdout = (result.stdout || '').trim();
+      return {
+        tier,
+        status: 'failed',
+        message: stderr || stdout || `Build failed with status ${result.status}`,
+      };
+    }
+
+    const installerPath = findInstallerExecutable(tierFolder);
+    if (!installerPath) {
+      return {
+        tier,
+        status: 'failed',
+        message: 'Build completed but installer EXE was not generated',
+      };
+    }
+
+    return {
+      tier,
+      status: 'success',
+      installer: path.basename(installerPath),
+      message: 'Build generated successfully',
+    };
+  } catch (error) {
+    return {
+      tier,
+      status: 'failed',
+      message: error instanceof Error ? error.message : 'Unknown build error',
+    };
+  }
+}
+
 function writeFileIfChanged(filePath, nextContent) {
   if (fs.existsSync(filePath)) {
     const currentContent = fs.readFileSync(filePath, 'utf8');
@@ -791,6 +863,84 @@ exports.deleteSystem = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete system'
+    });
+  }
+};
+
+/**
+ * Regenerate installer build files for a system (Admin only)
+ */
+exports.generateSystemBuildAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (process.platform !== 'win32') {
+      return res.status(400).json({
+        success: false,
+        message: 'Build generation requires a Windows server with PyInstaller and build tools installed.',
+      });
+    }
+
+    const [systems] = await pool.execute(
+      'SELECT id, name, python_file_path FROM systems WHERE id = ? LIMIT 1',
+      [id]
+    );
+
+    if (systems.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'System not found',
+      });
+    }
+
+    const system = systems[0];
+    const normalizedPath = normalizeSystemPath(system.python_file_path);
+    if (!normalizedPath) {
+      return res.status(400).json({
+        success: false,
+        message: 'System path is not configured for this system',
+      });
+    }
+
+    const systemFolder = path.join(__dirname, '../../systems', normalizedPath);
+    if (!fs.existsSync(systemFolder) || !fs.statSync(systemFolder).isDirectory()) {
+      return res.status(404).json({
+        success: false,
+        message: `System folder not found on server: ${normalizedPath}`,
+      });
+    }
+
+    const results = ['basic', 'premium'].map((tier) => regenerateTierBuild(systemFolder, tier));
+    const attempted = results.filter((entry) => entry.status !== 'skipped');
+    const failed = results.filter((entry) => entry.status === 'failed');
+
+    if (attempted.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No buildable tiers were found for this system',
+        results,
+      });
+    }
+
+    if (failed.length > 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Build generation failed for one or more tiers',
+        results,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Build generated successfully. Existing dist/build outputs were replaced.',
+      results,
+    });
+  } catch (error) {
+    console.error('Error generating system build:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to generate build',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 };
