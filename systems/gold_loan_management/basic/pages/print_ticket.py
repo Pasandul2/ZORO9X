@@ -11,7 +11,12 @@ from datetime import datetime
 from tkinter import messagebox
 import html as html_escape
 import re
-import webview
+import webbrowser
+try:
+    import webview
+    WEBVIEW_AVAILABLE = True
+except ImportError:
+    WEBVIEW_AVAILABLE = False
 from database import get_loan, get_loan_items, get_setting, get_loan_renewals
 from utils import format_currency, format_date, get_status_text
 
@@ -242,6 +247,41 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         except Exception as exc:
             messagebox.showerror('PDF Export', f'Could not save PDF:\n{exc}')
 
+    def _try_open_webview(self, html_path, title, print_on_open=False):
+        """Try to open pywebview, returning True if successful."""
+        if not WEBVIEW_AVAILABLE:
+            return False
+
+        try:
+            script = (
+                "import pathlib, webview\n"
+                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
+                f"print_on_open = {print_on_open!r}\n"
+                "def on_start():\n"
+                "    if print_on_open:\n"
+                "        try:\n"
+                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
+                "        except Exception:\n"
+                "            pass\n"
+                "webview.start(on_start)\n"
+            )
+            proc = subprocess.Popen(
+                [sys.executable, '-c', script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            proc.poll()
+            if proc.returncode is None or proc.returncode == 0:
+                return True
+
+            stderr_output = proc.stderr.read() if proc.stderr else ''
+            if stderr_output:
+                print(f"Warning: pywebview error: {stderr_output}")
+            return False
+        except Exception:
+            return False
+
     def _open_preview_window(self, print_on_open=False):
         try:
             if self.doc_type == 'ticket' and not self._confirm_multi_page_ticket():
@@ -257,19 +297,10 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             title = f"Print Preview - {self.loan.get('ticket_no', '')}"
 
-            script = (
-                "import pathlib, webview\n"
-                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
-                f"print_on_open = {print_on_open!r}\n"
-                "def on_start():\n"
-                "    if print_on_open:\n"
-                "        try:\n"
-                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
-                "        except Exception:\n"
-                "            pass\n"
-                "webview.start(on_start)\n"
-            )
-            subprocess.Popen([sys.executable, '-c', script])
+            if self._try_open_webview(html_path, title, print_on_open):
+                return
+
+            webbrowser.open(Path(html_path).as_uri())
         except Exception as exc:
             messagebox.showerror('Preview Error', f'Could not open preview window:\n{exc}')
 
@@ -361,19 +392,10 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             title = f"Data Only Print - {self.loan.get('ticket_no', '')}"
 
-            script = (
-                "import pathlib, webview\n"
-                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
-                f"print_on_open = {print_on_open!r}\n"
-                "def on_start():\n"
-                "    if print_on_open:\n"
-                "        try:\n"
-                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
-                "        except Exception:\n"
-                "            pass\n"
-                "webview.start(on_start)\n"
-            )
-            subprocess.Popen([sys.executable, '-c', script])
+            if self._try_open_webview(html_path, title, print_on_open):
+                return
+
+            webbrowser.open(Path(html_path).as_uri())
         except Exception as exc:
             messagebox.showerror('Data Only Print', f'Could not open data-only print preview:\n{exc}')
 
@@ -551,7 +573,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         target_rows = max_rows if include_total else (max_rows + 1)
         row_style = f"height: {row_height_mm}mm;"
         if row_font_size_px:
-            row_style += f" font-size: {row_font_size_px}px;"
+            row_style += f" font-size: {row_font_size_px}px !important;"
         total_weight = 0.0
         total_gold_weight = 0.0
         total_value = 0.0
@@ -579,7 +601,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         remaining_rows = target_rows - len(rows)
         if remaining_rows > 0:
             rows.append(
-                f"<tr class=\"empty-space-row\" style=\"height: {remaining_rows * row_height_mm}mm;{' font-size: ' + str(row_font_size_px) + 'px;' if row_font_size_px else ''}\">"
+                f"<tr class=\"empty-space-row\" style=\"height: {remaining_rows * row_height_mm}mm;{' font-size: ' + str(row_font_size_px) + 'px !important;' if row_font_size_px else ''}\">"
                 "<td></td><td></td><td></td><td></td><td></td>"
                 "</tr>"
             )
@@ -639,7 +661,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
         page_template = self._inject_ticket_page_number(template, page_number, total_pages)
         item_rows_top = self._build_item_rows_html(items, include_total=True, row_font_size_px=12)
-        item_rows_bottom = self._build_item_rows_html(items, include_total=False)
+        item_rows_bottom = self._build_item_rows_html(items, include_total=False, row_font_size_px=11)
 
         replacements = {
             '{{LOGO_SRC}}': html_escape.escape(str(logo_src)),

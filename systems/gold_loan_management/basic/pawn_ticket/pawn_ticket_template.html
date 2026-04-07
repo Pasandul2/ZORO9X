@@ -244,9 +244,13 @@
       border: 1px solid #c4cad6;
       padding: 1mm;
       vertical-align: top;
-      font-size: 12px;
+      font-size: 10px;
       word-wrap: break-word;
       background: #fff;
+    }
+
+    .grid-table td {
+      font-size: 11px !important
     }
 
     .grid-table th {
@@ -826,11 +830,11 @@
             </div>
 
             <div class="row">
-              <div class="col border-r p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end;">
+              <div class="col border-r p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 0;">
                
-                <div class="xs">උකස්කරු / அடகு வைப்பவர் / Pawner</div>
+                <div class="xs" style="padding-bottom: 10px;">උකස්කරු / அடகு வைப்பவர் / Pawner</div>
               </div>
-              <div class="col p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end;">
+              <div class="col p-2 center" style="height: 18mm; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 0;">
                 
                 <div class="xs">බලයලත් නිලධාරී / அங்கீகாரம் பெற்ற அதிகாரி / Authorised Officer</div>
               </div>
@@ -841,11 +845,11 @@
             <div class="border-b p-1 center semi sm">උකස් කළ භාණ්ඩ විස්තර / அடகு பொருட்களின் விவரம் / Description of Articles Pawned</div>
             <table class="grid-table" style="border-top: 0;">
               <colgroup>
-                <col style="width: 40%" />
-                <col style="width: 12%" />
-                <col style="width: 12%" />
-                <col style="width: 15%" />
-                <col style="width: 25%" />
+                <col style="width: 35%" />
+                <col style="width: 14%" />
+                <col style="width: 14%" />
+                <col style="width: 10%" />
+                <col style="width: 35%" />
               </colgroup>
               <tbody>
                 {{ITEM_ROWS_BOTTOM}}
