@@ -193,6 +193,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
     def _make_pdf_path(self):
         ticket_no = self.loan.get('ticket_no', 'ticket') if self.loan else 'ticket'
+        # Windows file names cannot contain these characters.
+        ticket_no = re.sub(r'[<>:"/\\|?*\x00-\x1F]', '_', str(ticket_no)).strip(' .') or 'ticket'
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"pawn_ticket_{ticket_no}_{stamp}.pdf"
         return str(self._get_downloads_dir() / filename)
@@ -216,6 +218,9 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         if not edge_exe:
             raise RuntimeError('Microsoft Edge not found for PDF export.')
 
+        pdf_parent = Path(pdf_path).parent
+        pdf_parent.mkdir(parents=True, exist_ok=True)
+
         cmd = [
             edge_exe,
             '--headless',
@@ -223,7 +228,17 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             f'--print-to-pdf={pdf_path}',
             Path(html_path).as_uri(),
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            stderr_msg = (result.stderr or '').strip() or 'Unknown PDF generation error.'
+            raise RuntimeError(f'Edge PDF generation failed: {stderr_msg}')
+
+        if not os.path.exists(pdf_path):
+            stderr_msg = (result.stderr or '').strip()
+            detail = f'\nDetails: {stderr_msg}' if stderr_msg else ''
+            raise FileNotFoundError(f'PDF file was not generated at expected path: {pdf_path}{detail}')
+
         return pdf_path
 
     def _save_pdf(self):
@@ -243,6 +258,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             self._generate_pdf(html_path, pdf_path)
 
+            if not os.path.exists(pdf_path):
+                raise FileNotFoundError(f'PDF not found after export: {pdf_path}')
             os.startfile(pdf_path)
         except Exception as exc:
             messagebox.showerror('PDF Export', f'Could not save PDF:\n{exc}')
