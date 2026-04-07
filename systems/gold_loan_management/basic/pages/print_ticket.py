@@ -253,18 +253,34 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             return False
 
         try:
-            cmd = [
-                sys.executable,
-                '--webview-preview',
-                str(html_path),
-                str(title),
-                '1' if print_on_open else '0',
-            ]
-            proc = subprocess.Popen(cmd)
+            script = (
+                "import pathlib, webview\n"
+                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
+                f"print_on_open = {print_on_open!r}\n"
+                "def on_start():\n"
+                "    if print_on_open:\n"
+                "        try:\n"
+                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
+                "        except Exception:\n"
+                "            pass\n"
+                "try:\n"
+                "    webview.start(on_start)\n"
+                "except KeyboardInterrupt:\n"
+                "    pass\n"
+            )
+            proc = subprocess.Popen(
+                [sys.executable, '-c', script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
             proc.poll()
             if proc.returncode is None or proc.returncode == 0:
                 return True
 
+            stderr_output = proc.stderr.read() if proc.stderr else ''
+            if stderr_output:
+                print(f"Warning: pywebview error: {stderr_output}")
             return False
         except Exception:
             return False

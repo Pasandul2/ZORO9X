@@ -8,7 +8,6 @@ from tkinter import ttk, messagebox
 import sqlite3
 import json
 import os
-from pathlib import Path
 import traceback
 import hashlib
 import platform
@@ -53,36 +52,6 @@ ACTIVATION_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_ACTIVATE_TIMEOUT_SECONDS', 
 HEARTBEAT_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_HEARTBEAT_TIMEOUT_SECONDS', '1.5'))
 SHUTDOWN_TIMEOUT_SECONDS = float(os.getenv('ZORO9X_SHUTDOWN_TIMEOUT_SECONDS', '0.8'))
 MAX_FALLBACK_API_URLS = max(1, int(os.getenv('ZORO9X_MAX_API_FALLBACKS', '2')))
-
-
-def run_webview_preview_mode_from_argv():
-    """Run standalone webview preview mode when invoked with preview arguments."""
-    if len(sys.argv) < 3 or sys.argv[1] != '--webview-preview':
-        return False
-
-    html_path = sys.argv[2]
-    title = sys.argv[3] if len(sys.argv) > 3 else 'Print Preview'
-    print_on_open = len(sys.argv) > 4 and str(sys.argv[4]).strip() == '1'
-
-    try:
-        import webview
-        window = webview.create_window(title, Path(html_path).resolve().as_uri())
-
-        def on_start():
-            if print_on_open:
-                try:
-                    window.evaluate_js('setTimeout(function(){window.print();}, 300);')
-                except Exception:
-                    pass
-
-        webview.start(on_start)
-        return True
-    except Exception as exc:
-        try:
-            messagebox.showerror('Preview Error', f'Could not open preview window:\n{exc}')
-        except Exception:
-            pass
-        return True
 
 
 def get_effective_api_url():
@@ -1162,8 +1131,5 @@ class GoldLoanSystemApp:
 
 
 if __name__ == '__main__':
-    if run_webview_preview_mode_from_argv():
-        sys.exit(0)
-
     app = GoldLoanSystemApp()
     app.run()
