@@ -19,9 +19,17 @@ import base64
 import sys
 import hmac
 import urllib3
+import urllib.request
+import io
 import threading
 from theme import GOLD_THEME
 from backup_manager import get_backup_manager
+
+try:
+    from PIL import Image, ImageTk
+except Exception:
+    Image = None
+    ImageTk = None
 
 # Configuration
 APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
@@ -350,6 +358,40 @@ class GoldLoanSystemApp:
                     return
                 except Exception:
                     pass
+
+    def _load_logo_photoimage(self, source, max_size=36):
+        if not source:
+            return None
+
+        # Prefer Pillow to support PNG/JPG/WebP from both local paths and URLs.
+        if Image is not None and ImageTk is not None:
+            try:
+                if str(source).startswith(('http://', 'https://')):
+                    with urllib.request.urlopen(str(source), timeout=8) as response:
+                        raw = response.read()
+                    image = Image.open(io.BytesIO(raw))
+                else:
+                    image = Image.open(str(source))
+
+                image = image.convert('RGBA')
+                image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(image)
+            except Exception:
+                pass
+
+        # Fallback for local files where tkinter PhotoImage can decode directly.
+        if str(source).startswith(('http://', 'https://')):
+            return None
+
+        try:
+            image = tk.PhotoImage(file=str(source))
+            max_dimension = max(image.width(), image.height())
+            shrink_factor = max(1, int(max_dimension / max_size))
+            if shrink_factor > 1:
+                image = image.subsample(shrink_factor, shrink_factor)
+            return image
+        except Exception:
+            return None
 
         logo_png_candidates = [
             DEFAULT_LOCAL_LOGO_PATH,
@@ -777,27 +819,41 @@ class GoldLoanSystemApp:
         logo_frame.pack(fill=tk.X)
         logo_frame.pack_propagate(False)
 
-        logo_path_candidates = [
+        configured_logo_url = (get_setting('company_logo_url', '') or '').strip()
+        configured_logo_path = (get_setting('company_logo_path', '') or '').strip()
+
+        logo_sources = []
+        if configured_logo_url:
+            if configured_logo_url.startswith(('http://', 'https://')):
+                logo_sources.append(configured_logo_url)
+            elif configured_logo_url.startswith('/'):
+                api_base = get_effective_api_url()
+                logo_sources.append(f"{api_base.rstrip('/')}{configured_logo_url}")
+
+        if configured_logo_path:
+            logo_sources.append(configured_logo_path)
+
+        logo_sources.extend([
             DEFAULT_LOCAL_LOGO_PATH,
             os.path.join(APP_DIR, 'pawn_ticket', 'pms_logo.png'),
-        ]
-        for logo_path in logo_path_candidates:
-            if not os.path.exists(logo_path):
+        ])
+
+        self.sidebar_logo_image = None
+        for source in logo_sources:
+            if not str(source).startswith(('http://', 'https://')) and not os.path.exists(str(source)):
                 continue
-            try:
-                self.sidebar_logo_image = tk.PhotoImage(file=logo_path)
-                max_dimension = max(self.sidebar_logo_image.width(), self.sidebar_logo_image.height())
-                shrink_factor = max(1, int(max_dimension / 36))
-                if shrink_factor > 1:
-                    self.sidebar_logo_image = self.sidebar_logo_image.subsample(shrink_factor, shrink_factor)
-                tk.Label(
-                    logo_frame,
-                    image=self.sidebar_logo_image,
-                    bg=self.theme.palette.bg_surface,
-                ).pack(pady=(8, 2))
-                break
-            except Exception:
+
+            loaded_image = self._load_logo_photoimage(source, max_size=36)
+            if loaded_image is None:
                 continue
+
+            self.sidebar_logo_image = loaded_image
+            tk.Label(
+                logo_frame,
+                image=self.sidebar_logo_image,
+                bg=self.theme.palette.bg_surface,
+            ).pack(pady=(8, 2))
+            break
 
         company_name = get_setting('company_name', 'Gold Loan System') or 'Gold Loan System'
 

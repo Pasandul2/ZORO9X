@@ -457,9 +457,36 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         )
 
     def _get_logo_src(self):
-        logo_path = Path(self._resolve_ticket_asset_path('pms_logo.png'))
-        if logo_path.exists():
-            return logo_path.as_uri()
+        configured_logo_path = (get_setting('company_logo_path', '') or '').strip()
+        if configured_logo_path:
+            logo_path = Path(configured_logo_path)
+            if logo_path.exists():
+                return logo_path.as_uri()
+
+        configured_logo_url = (get_setting('company_logo_url', '') or '').strip()
+        if configured_logo_url:
+            if configured_logo_url.startswith(('http://', 'https://', 'file://', 'data:')):
+                return configured_logo_url
+            if configured_logo_url.startswith('/'):
+                api_base = os.getenv('ZORO9X_PUBLIC_API_URL', '').strip()
+                if not api_base:
+                    server_url_file = Path(__file__).resolve().parent.parent / 'server_api_url.txt'
+                    if server_url_file.exists():
+                        try:
+                            api_base = (server_url_file.read_text(encoding='utf-8') or '').strip()
+                        except Exception:
+                            api_base = ''
+                if not api_base:
+                    api_base = 'https://www.zoro9x.com'
+                return f"{api_base.rstrip('/')}{configured_logo_url}"
+
+        for fallback_name in ('logo.png', 'pms_logo.png'):
+            try:
+                fallback_logo_path = Path(self._resolve_ticket_asset_path(fallback_name))
+                if fallback_logo_path.exists():
+                    return fallback_logo_path.as_uri()
+            except FileNotFoundError:
+                continue
         return ''
 
     def _format_issue_time(self, loan):

@@ -1037,14 +1037,7 @@ class AdminSettingsPage:
 
     def _build_blank_ticket_template_html(self):
         template = self._load_pawn_ticket_template_html()
-        logo_path = None
-        for logo_name in ('logo.png', 'pms_logo.png'):
-            try:
-                logo_path = Path(self._resolve_ticket_asset_path(logo_name))
-                break
-            except FileNotFoundError:
-                continue
-        logo_src = logo_path.as_uri() if logo_path and logo_path.exists() else ''
+        logo_src = self._resolve_company_logo_src()
         blank_rows = (
             '<tr class="empty-space-row" style="height: 30mm; font-size: 12px;">'
             '<td></td><td></td><td></td><td></td><td></td>'
@@ -1055,6 +1048,39 @@ class AdminSettingsPage:
         template = template.replace('{{ITEM_ROWS_BOTTOM}}', blank_rows)
         template = re.sub(r'\{\{[A-Z_]+\}\}', '', template)
         return template
+
+    def _resolve_company_logo_src(self):
+        configured_logo_path = (get_setting('company_logo_path', '') or '').strip()
+        if configured_logo_path:
+            logo_path = Path(configured_logo_path)
+            if logo_path.exists():
+                return logo_path.as_uri()
+
+        configured_logo_url = (get_setting('company_logo_url', '') or '').strip()
+        if configured_logo_url:
+            if configured_logo_url.startswith(('http://', 'https://', 'file://', 'data:')):
+                return configured_logo_url
+            if configured_logo_url.startswith('/'):
+                api_base = os.getenv('ZORO9X_PUBLIC_API_URL', '').strip()
+                if not api_base:
+                    server_url_file = Path(__file__).resolve().parent.parent / 'server_api_url.txt'
+                    if server_url_file.exists():
+                        try:
+                            api_base = (server_url_file.read_text(encoding='utf-8') or '').strip()
+                        except Exception:
+                            api_base = ''
+                if not api_base:
+                    api_base = 'https://www.zoro9x.com'
+                return f"{api_base.rstrip('/')}{configured_logo_url}"
+
+        for logo_name in ('logo.png', 'pms_logo.png'):
+            try:
+                logo_path = Path(self._resolve_ticket_asset_path(logo_name))
+                if logo_path.exists():
+                    return logo_path.as_uri()
+            except FileNotFoundError:
+                continue
+        return ''
 
     def _make_blank_template_download_path(self):
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
