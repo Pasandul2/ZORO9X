@@ -2822,7 +2822,9 @@ exports.downloadSystem = async (req, res) => {
       if (process.platform === 'win32') {
         installerPath = buildInstallerIfMissing(packageDir, true);
       } else {
-        installerPath = null;
+        // Linux/macOS servers cannot run BUILD.bat.
+        // Keep using the uploaded prebuilt installer EXE.
+        console.warn('Installer appears older than source files, but using prebuilt EXE on non-Windows server.');
       }
     }
     

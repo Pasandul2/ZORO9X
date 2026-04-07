@@ -52,5 +52,7 @@ uploads/
 
 # Allow committed desktop artifacts for generated systems
 !systems/**/dist/
+!systems/**/dist/**/*.exe
+!systems/**/dist/*.exe
 !systems/**/dist/*_installer.exe
 !systems/**/dist/*_app.exe
