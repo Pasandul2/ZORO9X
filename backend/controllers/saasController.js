@@ -100,31 +100,120 @@ function findInstallerExecutable(systemFolder) {
   return null;
 }
 
+function executeBuildScript(systemFolder, maxBufferMb = 20) {
+  const candidates = [
+    { script: 'BUILD.bat', command: 'cmd.exe', args: ['/c', 'BUILD.bat'] },
+    { script: 'BUILD.cmd', command: 'cmd.exe', args: ['/c', 'BUILD.cmd'] },
+    { script: 'BUILD.sh', command: 'bash', args: ['BUILD.sh'] },
+  ];
+
+  for (const candidate of candidates) {
+    const scriptPath = path.join(systemFolder, candidate.script);
+    if (!fs.existsSync(scriptPath)) {
+      continue;
+    }
+
+    try {
+      const result = spawnSync(candidate.command, candidate.args, {
+        cwd: systemFolder,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * maxBufferMb,
+      });
+
+      return {
+        attempted: `${candidate.command} ${candidate.args.join(' ')}`,
+        result,
+      };
+    } catch (error) {
+      if (error && error.code === 'ENOENT') {
+        continue;
+      }
+      return {
+        attempted: `${candidate.command} ${candidate.args.join(' ')}`,
+        result: {
+          status: 1,
+          stdout: '',
+          stderr: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+
+  const appSpecPath = path.join(systemFolder, 'app.spec');
+  const installerSpecPath = path.join(systemFolder, 'installer.spec');
+  if (fs.existsSync(appSpecPath) && fs.existsSync(installerSpecPath)) {
+    const pythonCandidates = ['python3', 'python'];
+    for (const pythonCmd of pythonCandidates) {
+      try {
+        const appBuild = spawnSync(
+          pythonCmd,
+          ['-m', 'PyInstaller', '--noconfirm', '--clean', 'app.spec'],
+          {
+            cwd: systemFolder,
+            encoding: 'utf8',
+            maxBuffer: 1024 * 1024 * maxBufferMb,
+          }
+        );
+
+        if (appBuild.status !== 0) {
+          return {
+            attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec`,
+            result: appBuild,
+          };
+        }
+
+        const installerBuild = spawnSync(
+          pythonCmd,
+          ['-m', 'PyInstaller', '--noconfirm', '--clean', 'installer.spec'],
+          {
+            cwd: systemFolder,
+            encoding: 'utf8',
+            maxBuffer: 1024 * 1024 * maxBufferMb,
+          }
+        );
+
+        return {
+          attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec && ${pythonCmd} -m PyInstaller --noconfirm --clean installer.spec`,
+          result: installerBuild,
+        };
+      } catch (error) {
+        if (error && error.code === 'ENOENT') {
+          continue;
+        }
+        return {
+          attempted: `${pythonCmd} -m PyInstaller ...`,
+          result: {
+            status: 1,
+            stdout: '',
+            stderr: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
   const existingInstaller = findInstallerExecutable(systemFolder);
   if (existingInstaller && !forceRebuild) {
     return existingInstaller;
   }
 
-  if (process.platform !== 'win32') {
-    return null;
-  }
-
-  const buildScript = path.join(systemFolder, 'BUILD.bat');
-  if (!fs.existsSync(buildScript)) {
-    return null;
-  }
-
   console.log(`Installer not found. Attempting build in: ${systemFolder}`);
   updateInstallerSpecDatas(systemFolder);
-  const result = spawnSync('cmd.exe', ['/c', 'BUILD.bat'], {
-    cwd: systemFolder,
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 20,
-  });
+  const buildExecution = executeBuildScript(systemFolder, 20);
+  if (!buildExecution) {
+    console.error('Installer build failed: no runnable build script found (BUILD.bat/BUILD.cmd/BUILD.sh).');
+    return null;
+  }
+
+  const { result, attempted } = buildExecution;
 
   if (result.status !== 0) {
     console.error('Installer build failed:', {
+      attempted,
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
@@ -158,20 +247,20 @@ function regenerateTierBuild(systemFolder, tier) {
     return { tier, status: 'skipped', message: 'Tier folder not found' };
   }
 
-  const buildScript = path.join(tierFolder, 'BUILD.bat');
-  if (!fs.existsSync(buildScript)) {
-    return { tier, status: 'failed', message: 'BUILD.bat not found' };
-  }
-
   try {
     clearBuildArtifacts(tierFolder);
     updateInstallerSpecDatas(tierFolder);
 
-    const result = spawnSync('cmd.exe', ['/c', 'BUILD.bat'], {
-      cwd: tierFolder,
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024 * 40,
-    });
+    const buildExecution = executeBuildScript(tierFolder, 40);
+    if (!buildExecution) {
+      return {
+        tier,
+        status: 'failed',
+        message: 'No runnable build script found in tier folder (BUILD.bat/BUILD.cmd/BUILD.sh).',
+      };
+    }
+
+    const { result, attempted } = buildExecution;
 
     if (result.status !== 0) {
       const stderr = (result.stderr || '').trim();
@@ -179,7 +268,7 @@ function regenerateTierBuild(systemFolder, tier) {
       return {
         tier,
         status: 'failed',
-        message: stderr || stdout || `Build failed with status ${result.status}`,
+        message: `${attempted} failed: ${stderr || stdout || `status ${result.status}`}`,
       };
     }
 
@@ -873,13 +962,6 @@ exports.deleteSystem = async (req, res) => {
 exports.generateSystemBuildAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (process.platform !== 'win32') {
-      return res.status(400).json({
-        success: false,
-        message: 'Build generation requires a Windows server with PyInstaller and build tools installed.',
-      });
-    }
 
     const [systems] = await pool.execute(
       'SELECT id, name, python_file_path FROM systems WHERE id = ? LIMIT 1',
