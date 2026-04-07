@@ -1,0 +1,79 @@
+{
+  "pending_uploads": [
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_131637.db",
+      "backup_name": "backup_20260407_131637.db",
+      "queued_at": "2026-04-07T13:16:37.657182"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_132545.db",
+      "backup_name": "backup_20260407_132545.db",
+      "queued_at": "2026-04-07T13:25:45.407582"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_133230.db",
+      "backup_name": "backup_20260407_133230.db",
+      "queued_at": "2026-04-07T13:32:30.019442"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_133235.db",
+      "backup_name": "backup_20260407_133235.db",
+      "queued_at": "2026-04-07T13:32:35.261811"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_134856.db",
+      "backup_name": "backup_20260407_134856.db",
+      "queued_at": "2026-04-07T13:48:56.602744"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_135342.db",
+      "backup_name": "backup_20260407_135342.db",
+      "queued_at": "2026-04-07T13:53:42.346265"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_140000.db",
+      "backup_name": "backup_20260407_140000.db",
+      "queued_at": "2026-04-07T14:00:00.742203"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_140902.db",
+      "backup_name": "backup_20260407_140902.db",
+      "queued_at": "2026-04-07T14:09:02.862307"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_141959.db",
+      "backup_name": "backup_20260407_141959.db",
+      "queued_at": "2026-04-07T14:19:59.082730"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_142052.db",
+      "backup_name": "backup_20260407_142052.db",
+      "queued_at": "2026-04-07T14:20:52.144518"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_142505.db",
+      "backup_name": "backup_20260407_142505.db",
+      "queued_at": "2026-04-07T14:25:05.623105"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_153032.db",
+      "backup_name": "backup_20260407_153032.db",
+      "queued_at": "2026-04-07T15:30:32.817503"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_153429.db",
+      "backup_name": "backup_20260407_153429.db",
+      "queued_at": "2026-04-07T15:34:29.913218"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_153952.db",
+      "backup_name": "backup_20260407_153952.db",
+      "queued_at": "2026-04-07T15:39:52.579192"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_154001.db",
+      "backup_name": "backup_20260407_154001.db",
+      "queued_at": "2026-04-07T15:40:01.136312"
+    }
+  ]
+}

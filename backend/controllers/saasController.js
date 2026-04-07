@@ -338,6 +338,50 @@ async function ensureRenewalSchema() {
     )
   `);
 
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_renewal_requests
+      ADD COLUMN payment_period_start DATE NULL
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add payment_period_start to subscription_renewal_requests:', err.message);
+    }
+  }
+
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_renewal_requests
+      ADD COLUMN payment_period_end DATE NULL
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add payment_period_end to subscription_renewal_requests:', err.message);
+    }
+  }
+
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_renewal_requests
+      ADD COLUMN reviewed_by INT NULL
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add reviewed_by to subscription_renewal_requests:', err.message);
+    }
+  }
+
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_renewal_requests
+      ADD CONSTRAINT fk_renew_reviewed_by FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_KEYNAME' && err.code !== 'ER_CANT_CREATE_TABLE') {
+      console.warn('Warning: Could not add reviewed_by foreign key on subscription_renewal_requests:', err.message);
+    }
+  }
+
   renewalSchemaReady = true;
 }
 
@@ -446,17 +490,18 @@ function addBillingCycle(baseDateValue, billingCycle) {
   const monthMatch = normalized.match(/(\d+)\s*month/);
   const underscoreMonthMatch = normalized.match(/(\d+)_months?/);
 
+  let daysToAdd = 30;
   if (monthMatch) {
-    baseDate.setMonth(baseDate.getMonth() + parseInt(monthMatch[1], 10));
+    daysToAdd = parseInt(monthMatch[1], 10) * 30;
   } else if (underscoreMonthMatch) {
-    baseDate.setMonth(baseDate.getMonth() + parseInt(underscoreMonthMatch[1], 10));
+    daysToAdd = parseInt(underscoreMonthMatch[1], 10) * 30;
   } else if (normalized === 'yearly') {
-    baseDate.setFullYear(baseDate.getFullYear() + 1);
+    daysToAdd = 365;
   } else if (normalized === 'quarterly') {
-    baseDate.setMonth(baseDate.getMonth() + 3);
-  } else {
-    baseDate.setMonth(baseDate.getMonth() + 1);
+    daysToAdd = 90;
   }
+
+  baseDate.setDate(baseDate.getDate() + daysToAdd);
 
   return baseDate.toISOString().slice(0, 10);
 }
@@ -470,13 +515,26 @@ function addDays(baseDateValue, days) {
   return date.toISOString().slice(0, 10);
 }
 
+function toIsoDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
 function getRenewalCoverageWindow(currentEndDateValue, billingCycle, referenceDateValue = new Date()) {
   const todayIso = new Date(referenceDateValue).toISOString().slice(0, 10);
-  const currentEndIso = currentEndDateValue ? new Date(currentEndDateValue).toISOString().slice(0, 10) : null;
+  const currentEndIso = toIsoDate(currentEndDateValue);
 
   if (currentEndIso && currentEndIso >= todayIso) {
     return {
-      payment_period_start: addDays(currentEndIso, 1),
+      payment_period_start: currentEndIso,
       payment_period_end: addBillingCycle(currentEndIso, billingCycle),
     };
   }
@@ -1726,11 +1784,12 @@ exports.submitRenewalRequest = async (req, res) => {
 
     const amount = Number(subscription.price || subscription.total_amount || 0);
     const receiptPath = req.file ? `/uploads/receipts/${req.file.filename}` : null;
+    const coverage = getRenewalCoverageWindow(subscription.end_date, subscription.billing_cycle, new Date());
 
     const [requestResult] = await pool.execute(
       `INSERT INTO subscription_renewal_requests
-       (subscription_id, client_id, user_id, amount, receipt_url, transaction_reference, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+       (subscription_id, client_id, user_id, amount, receipt_url, transaction_reference, notes, status, payment_period_start, payment_period_end)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       [
         subscriptionId,
         subscription.client_id,
@@ -1739,6 +1798,8 @@ exports.submitRenewalRequest = async (req, res) => {
         receiptPath,
         transaction_reference || null,
         notes || null,
+        coverage.payment_period_start,
+        coverage.payment_period_end,
       ]
     );
 
@@ -1807,7 +1868,7 @@ exports.getSubscriptionRenewalRequests = async (req, res) => {
 
     const [requests] = await pool.execute(
       `SELECT rr.id, rr.amount, rr.receipt_url, rr.transaction_reference, rr.notes, rr.status, rr.admin_note, rr.created_at, rr.reviewed_at,
-              cs.end_date, sp.billing_cycle
+              rr.payment_period_start, rr.payment_period_end, cs.end_date, sp.billing_cycle
        FROM subscription_renewal_requests rr
        JOIN client_subscriptions cs ON cs.id = rr.subscription_id
        JOIN subscription_plans sp ON sp.id = cs.plan_id
@@ -1817,10 +1878,14 @@ exports.getSubscriptionRenewalRequests = async (req, res) => {
       [subscriptionId]
     );
 
-    const withPeriods = requests.map((request) => ({
-      ...request,
-      ...getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at),
-    }));
+    const withPeriods = requests.map((request) => {
+      const fallbackPeriod = getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at);
+      return {
+        ...request,
+        payment_period_start: request.payment_period_start || fallbackPeriod.payment_period_start,
+        payment_period_end: request.payment_period_end || fallbackPeriod.payment_period_end,
+      };
+    });
 
     return res.json({ success: true, requests: withPeriods });
   } catch (error) {
@@ -1857,10 +1922,14 @@ exports.getRenewalRequestsAdmin = async (req, res) => {
       params
     );
 
-    const withPeriods = requests.map((request) => ({
-      ...request,
-      ...getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at),
-    }));
+    const withPeriods = requests.map((request) => {
+      const fallbackPeriod = getRenewalCoverageWindow(request.end_date, request.billing_cycle, request.created_at);
+      return {
+        ...request,
+        payment_period_start: request.payment_period_start || fallbackPeriod.payment_period_start,
+        payment_period_end: request.payment_period_end || fallbackPeriod.payment_period_end,
+      };
+    });
 
     return res.json({ success: true, requests: withPeriods });
   } catch (error) {
@@ -1912,9 +1981,9 @@ exports.reviewRenewalRequestAdmin = async (req, res) => {
     const newStatus = action === 'approve' ? 'approved' : 'rejected';
     await connection.execute(
       `UPDATE subscription_renewal_requests
-       SET status = ?, admin_note = ?, reviewed_at = NOW()
+       SET status = ?, admin_note = ?, reviewed_by = ?, reviewed_at = NOW()
        WHERE id = ?`,
-      [newStatus, adminNote, requestId]
+      [newStatus, adminNote, adminId, requestId]
     );
 
     if (reqRow.payment_id) {
@@ -1928,9 +1997,21 @@ exports.reviewRenewalRequestAdmin = async (req, res) => {
 
     if (action === 'approve') {
       const todayIso = new Date().toISOString().slice(0, 10);
-      const baseDate = reqRow.end_date && reqRow.end_date > todayIso ? reqRow.end_date : todayIso;
+      const currentEndIso = toIsoDate(reqRow.end_date);
+      const baseDate = currentEndIso && currentEndIso > todayIso ? currentEndIso : todayIso;
       const newEndDate = addBillingCycle(baseDate, reqRow.billing_cycle);
-      const coverage = getRenewalCoverageWindow(reqRow.end_date, reqRow.billing_cycle, new Date());
+      const fallbackCoverage = getRenewalCoverageWindow(reqRow.end_date, reqRow.billing_cycle, reqRow.created_at || new Date());
+      const coverage = {
+        payment_period_start: reqRow.payment_period_start || fallbackCoverage.payment_period_start,
+        payment_period_end: reqRow.payment_period_end || fallbackCoverage.payment_period_end,
+      };
+
+      await connection.execute(
+        `UPDATE subscription_renewal_requests
+         SET payment_period_start = ?, payment_period_end = ?
+         WHERE id = ?`,
+        [coverage.payment_period_start, coverage.payment_period_end, requestId]
+      );
 
       await connection.execute(
         `UPDATE client_subscriptions

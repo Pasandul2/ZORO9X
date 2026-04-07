@@ -1032,13 +1032,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                   Renewal Access
                 </h2>
 
-                <div className={`rounded-lg p-4 border mb-5 ${
-                  darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'
-                }`}>
-                  <p className="text-sm">
-                    Renewal eligibility is checked using your system security status (API-key linked), not browser date calculations.
-                  </p>
-                </div>
+                
 
                 <button
                   onClick={() => navigate(`/client-dashboard/renewal/${selectedSubscription.id}`)}

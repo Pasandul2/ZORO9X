@@ -10,12 +10,15 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
 import html as html_escape
+import re
 import webview
 from database import get_loan, get_loan_items, get_setting, get_loan_renewals
 from utils import format_currency, format_date, get_status_text
 
 
 class PrintTicketPage:
+    ITEMS_PER_TICKET_PAGE = 4
+
     def __init__(self, container, theme, user, navigate_fn, loan_id):
         self.container = container
         self.theme = theme
@@ -42,6 +45,11 @@ class PrintTicketPage:
         renewals = get_loan_renewals(self.loan_id)
         self.latest_renewal = renewals[0] if renewals else None
 
+        if self.doc_type == 'renewal_ticket' and not self.latest_renewal:
+            messagebox.showwarning('Renewal Ticket', 'No renewal record found for this loan.')
+            self.navigate('loan_detail', self.loan_id)
+            return
+
         view = tk.Frame(self.container, bg=self.theme.palette.bg_app)
         view.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
@@ -52,7 +60,12 @@ class PrintTicketPage:
                                           command=lambda: self.navigate('loan_detail', self.loan_id),
                                           kind='ghost', width=8, pady=6)
         back_btn.pack(side=tk.LEFT, padx=(0, 10))
-        page_title = 'Cash Credit Slip' if self.doc_type == 'cash_credit' else 'Ticket'
+        title_map = {
+            'cash_credit': 'Cash Credit Slip',
+            'renewal_ticket': 'Renewal Ticket',
+            'ticket': 'Ticket',
+        }
+        page_title = title_map.get(self.doc_type, 'Ticket')
         tk.Label(hdr, text=f'🖨 Print {page_title}: {loan["ticket_no"]}', font=self.theme.fonts.h1,
                  bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
 
@@ -61,6 +74,9 @@ class PrintTicketPage:
         opt_frame.pack(fill=tk.X, pady=(0, 10))
         self.theme.make_button(opt_frame, text='🖨 Print A4', command=lambda: self._open_preview_window(print_on_open=True),
                        kind='primary', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 10))
+        if self.doc_type == 'ticket':
+            self.theme.make_button(opt_frame, text='🖨 Print Data Only', command=lambda: self._open_data_only_preview(print_on_open=True),
+                       kind='secondary', width=18, pady=8).pack(side=tk.LEFT)
 
         # HTML preview info
         preview_card = self.theme.make_card(view, bg='#ffffff', padding=(6, 6))
@@ -99,6 +115,17 @@ class PrintTicketPage:
             pady=8,
         )
         web_btn.pack(side=tk.LEFT)
+
+        if self.doc_type == 'ticket':
+            web_data_btn = self.theme.make_button(
+                btn_row,
+                text='🌐 Web Print Data Only',
+                command=self._do_print_data_only,
+                kind='ghost',
+                width=24,
+                pady=8,
+            )
+            web_data_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         save_btn = self.theme.make_button(
             btn_row,
@@ -196,10 +223,15 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
     def _save_pdf(self):
         try:
+            if self.doc_type == 'ticket' and not self._confirm_multi_page_ticket():
+                return
+
             pdf_path = self._make_pdf_path()
 
             if self.doc_type == 'cash_credit':
                 html_content = self._build_cash_credit_html('a4', Path(pdf_path).as_uri())
+            elif self.doc_type == 'renewal_ticket':
+                html_content = self._build_renewal_ticket_html(Path(pdf_path).as_uri())
             else:
                 html_content = self._build_pawn_ticket_html(Path(pdf_path).as_uri())
 
@@ -212,8 +244,13 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
     def _open_preview_window(self, print_on_open=False):
         try:
+            if self.doc_type == 'ticket' and not self._confirm_multi_page_ticket():
+                return
+
             if self.doc_type == 'cash_credit':
                 html_content = self._build_cash_credit_html('a4', '')
+            elif self.doc_type == 'renewal_ticket':
+                html_content = self._build_renewal_ticket_html('')
             else:
                 html_content = self._build_pawn_ticket_html('')
 
@@ -236,6 +273,146 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         except Exception as exc:
             messagebox.showerror('Preview Error', f'Could not open preview window:\n{exc}')
 
+    def _build_data_only_pawn_ticket_html(self):
+        html_content = self._build_pawn_ticket_html('')
+        html_content = re.sub(
+            r'<!-- ============ PAGE 2 — BACKSIDE ============ -->[\s\S]*?(?=</body>)',
+            '',
+            html_content,
+            count=1,
+        )
+        data_only_css = (
+            '\n    body.data-only * {'
+            ' color: transparent !important;'
+            ' text-shadow: none !important;'
+            ' }\n'
+            '    body.data-only, body.data-only .page, body.data-only .ticket, body.data-only .ticket * {'
+            ' background: transparent !important;'
+            ' }\n'
+            '    body.data-only .value, body.data-only .value * {'
+            ' color: #000 !important;'
+            ' }\n'
+            '    body.data-only .rounded-field, body.data-only .rounded-field * {'
+            ' color: #000 !important;'
+            ' }\n'
+            '    body.data-only .grid-table tbody td, body.data-only .grid-table tbody td * {'
+            ' color: #000 !important;'
+            ' }\n'
+            '    body.data-only .ticket-page-note {'
+            ' color: #000 !important;'
+            ' }\n'
+            '    body.data-only .brand-banner, body.data-only .tagline, body.data-only .contact-strip {'
+            ' background: transparent !important;'
+            ' border-color: transparent !important;'
+            ' box-shadow: none !important;'
+            ' }\n'
+            '    body.data-only img {'
+            ' visibility: hidden !important;'
+            ' }\n'
+            '    body.data-only .divider {'
+            ' border: none !important;'
+            ' margin: 0 !important;'
+            ' height: 0 !important;'
+            ' }\n'
+            '    body.data-only .bottom-copy {'
+            ' margin-top: 5mm !important;'
+            ' }\n'
+            '    body.data-only .border-b, body.data-only .border-r, body.data-only .border-t,'
+            ' body.data-only .ticket-body, body.data-only .grid-table th, body.data-only .grid-table td,'
+            ' body.data-only .rounded-field, body.data-only .sign-line {'
+            ' border: none !important;'
+            ' box-shadow: none !important;'
+            ' }\n'
+            '    body.data-only .serial-stack, body.data-only .logo-box {'
+            ' border-left: none !important;'
+            ' border-right: none !important;'
+            ' }\n'
+            '    body.data-only .split-stack::after {'
+            ' display: none !important;'
+            ' }\n'
+            '    body.data-only [style*="border-left"], body.data-only [style*="border-right"],'
+            ' body.data-only [style*="border-top"], body.data-only [style*="border-bottom"] {'
+            ' border-left: none !important;'
+            ' border-right: none !important;'
+            ' border-top: none !important;'
+            ' border-bottom: none !important;'
+            ' }\n'
+            '    body.data-only .grid-table th {'
+            ' background: transparent !important;'
+            ' }\n'
+            '    body.data-only .no-print {'
+            ' display: none !important;'
+            ' }\n'
+        )
+        html_content = html_content.replace('</style>', f'{data_only_css}</style>', 1)
+        html_content = html_content.replace('<body>', '<body class="data-only">', 1)
+        return html_content
+
+    def _open_data_only_preview(self, print_on_open=False):
+        if self.doc_type == 'cash_credit':
+            messagebox.showwarning('Data Only Print', 'Data-only template print is available only for pawn tickets.')
+            return
+
+        try:
+            if not self._confirm_multi_page_ticket():
+                return
+
+            html_content = self._build_data_only_pawn_ticket_html()
+            html_path = self._write_temp_html(html_content)
+            title = f"Data Only Print - {self.loan.get('ticket_no', '')}"
+
+            script = (
+                "import pathlib, webview\n"
+                f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
+                f"print_on_open = {print_on_open!r}\n"
+                "def on_start():\n"
+                "    if print_on_open:\n"
+                "        try:\n"
+                "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
+                "        except Exception:\n"
+                "            pass\n"
+                "webview.start(on_start)\n"
+            )
+            subprocess.Popen([sys.executable, '-c', script])
+        except Exception as exc:
+            messagebox.showerror('Data Only Print', f'Could not open data-only print preview:\n{exc}')
+
+    def _do_print_data_only(self):
+        if self.doc_type == 'cash_credit':
+            messagebox.showwarning('Data Only Print', 'Data-only template print is available only for pawn tickets.')
+            return
+
+        try:
+            import webbrowser
+
+            if not self._confirm_multi_page_ticket():
+                return
+
+            html_content = self._build_data_only_pawn_ticket_html()
+            html_path = self._write_temp_html(html_content)
+            webbrowser.open(Path(html_path).as_uri())
+        except Exception as exc:
+            messagebox.showerror('Data Only Print', f'Could not open web data-only print preview:\n{exc}')
+
+    def _confirm_multi_page_ticket(self):
+        if self.doc_type != 'ticket':
+            return True
+
+        total_items = len(self.items or [])
+        if total_items <= self.ITEMS_PER_TICKET_PAGE:
+            return True
+
+        total_pages = (total_items + self.ITEMS_PER_TICKET_PAGE - 1) // self.ITEMS_PER_TICKET_PAGE
+        return messagebox.askyesno(
+            'Multiple Ticket Pages',
+            (
+                f'This ticket has {total_items} items.\n'
+                f'It will print on {total_pages} ticket paper page(s) '
+                f'({self.ITEMS_PER_TICKET_PAGE} items per page).\n\n'
+                'Continue to preview/print?'
+            ),
+        )
+
     def _load_pawn_ticket_template(self):
         template_path = os.path.normpath(
             os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pawn_ticket_template.html')
@@ -243,10 +420,15 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
+    def _load_renew_pawn_ticket_template(self):
+        template_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'renew_pawn_ticket_template.html')
+        )
+        with open(template_path, 'r', encoding='utf-8') as template_file:
+            return template_file.read()
+
     def _get_logo_src(self):
-        logo_path = Path(__file__).resolve().parent.parent / 'logo.png'
-        if not logo_path.exists():
-            logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+        logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
         if logo_path.exists():
             return logo_path.as_uri()
         return ''
@@ -264,56 +446,122 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 return time_part[:5]
         return ''
 
-    def _build_item_rows_html(self, items, include_total=False):
+    def _extract_body_inner_html(self, full_html):
+        body_start = full_html.find('<body>')
+        body_end = full_html.rfind('</body>')
+        if body_start == -1 or body_end == -1 or body_end <= body_start:
+            return full_html
+        return full_html[body_start + len('<body>'):body_end]
+
+    def _remove_no_print_block(self, html_fragment):
+        return re.sub(r'<div class="no-print">[\s\S]*?</div>', '', html_fragment, count=1)
+
+    def _inject_ticket_page_number(self, template_html, page_number, total_pages):
+        page_label = '' if total_pages <= 1 else f'Ticket Paper Page {page_number} of {total_pages}'
+        return template_html.replace('{{TICKET_PAGE_INFO}}', html_escape.escape(page_label))
+
+    def _prepare_items_with_assessed_values(self, items):
+        prepared_items = [dict(item) for item in (items or [])]
+        if not prepared_items:
+            return prepared_items
+
+        market_value = float(self.loan.get('market_value') or 0)
+        assessed_value = float(self.loan.get('assessed_value') or 0)
+
+        if market_value <= 0:
+            for item in prepared_items:
+                item['assessed_value'] = round(float(item.get('estimated_value') or 0), 2)
+            return prepared_items
+
+        ratio = assessed_value / market_value
+        assessed_values = [
+            round(float(item.get('estimated_value') or 0) * ratio, 2)
+            for item in prepared_items
+        ]
+
+        # Keep item-level assessed values aligned with loan assessed total after rounding.
+        rounding_delta = round(assessed_value - sum(assessed_values), 2)
+        assessed_values[-1] = round(assessed_values[-1] + rounding_delta, 2)
+
+        for index, item in enumerate(prepared_items):
+            item['assessed_value'] = max(0.0, assessed_values[index])
+
+        return prepared_items
+
+    def _build_item_rows_html(self, items, include_total=False, row_font_size_px=None):
         rows = []
+        max_rows = self.ITEMS_PER_TICKET_PAGE
+        row_height_mm = 6
+        target_rows = max_rows if include_total else (max_rows + 1)
+        row_style = f"height: {row_height_mm}mm;"
+        if row_font_size_px:
+            row_style += f" font-size: {row_font_size_px}px;"
         total_weight = 0.0
         total_gold_weight = 0.0
         total_value = 0.0
 
         for item in items:
+            total_weight += float(item.get('total_weight') or 0)
+            total_gold_weight += float(item.get('gold_weight') or 0)
+            total_value += float(item.get('assessed_value') or item.get('estimated_value') or 0)
+
+        for item in items[:max_rows]:
             desc = item.get('article_type', '')
             if item.get('description'):
                 desc = f"{desc} - {item['description']}"
-            total_weight += float(item.get('total_weight') or 0)
-            total_gold_weight += float(item.get('gold_weight') or 0)
-            total_value += float(item.get('estimated_value') or 0)
 
             rows.append(
-                "<tr>"
+                f"<tr style=\"{row_style}\">"
                 f"<td>{html_escape.escape(str(desc))}</td>"
                 f"<td class=\"right\">{float(item.get('total_weight') or 0):.2f}</td>"
                 f"<td class=\"right\">{float(item.get('gold_weight') or 0):.2f}</td>"
                 f"<td class=\"center\">{int(item.get('carat') or 0)}K</td>"
-                f"<td class=\"center\">{int(item.get('carat') or 0)}</td>"
-                f"<td class=\"right\">{format_currency(item.get('estimated_value') or 0)}</td>"
+                f"<td class=\"right\">{format_currency(item.get('assessed_value') or item.get('estimated_value') or 0)}</td>"
                 "</tr>"
             )
 
-        if not rows:
+        remaining_rows = target_rows - len(rows)
+        if remaining_rows > 0:
             rows.append(
-                "<tr style=\"height: 25mm;\">"
-                "<td></td><td class=\"right\"></td><td class=\"right\"></td>"
-                "<td class=\"center\"></td><td class=\"center\"></td><td class=\"right\"></td>"
+                f"<tr class=\"empty-space-row\" style=\"height: {remaining_rows * row_height_mm}mm;{' font-size: ' + str(row_font_size_px) + 'px;' if row_font_size_px else ''}\">"
+                "<td></td><td></td><td></td><td></td><td></td>"
                 "</tr>"
             )
 
         if include_total:
             rows.append(
-                "<tr>"
-                "<td class=\"right bold\">එකතුව / මொத்தம் / Total</td>"
+                f"<tr style=\"{row_style}\">"
+                "<td class=\"right bold\">එකතුව / மொத்தம் / Total</td>"
                 f"<td class=\"right\">{total_weight:.2f}</td>"
                 f"<td class=\"right\">{total_gold_weight:.2f}</td>"
-                "<td></td><td></td>"
+                "<td></td>"
                 f"<td class=\"right\">{format_currency(total_value)}</td>"
                 "</tr>"
             )
 
         return ''.join(rows)
 
-    def _build_pawn_ticket_html(self, pdf_uri=''):
+    def _build_renew_item_rows_html(self, items, max_rows=4):
+        rows = []
+        for item in (items or [])[:max_rows]:
+            desc = item.get('article_type', '')
+            if item.get('description'):
+                desc = f"{desc} - {item['description']}"
+            rows.append(
+                '<tr>'
+                f"<td>{html_escape.escape(str(desc))}</td>"
+                f"<td class=\"right\">{float(item.get('gold_weight') or 0):.2f}</td>"
+                f"<td class=\"right\">{format_currency(item.get('assessed_value') or item.get('estimated_value') or 0)}</td>"
+                '</tr>'
+            )
+
+        for _ in range(max(0, max_rows - len(rows))):
+            rows.append('<tr><td>&nbsp;</td><td></td><td></td></tr>')
+
+        return ''.join(rows)
+
+    def _render_single_ticket_page(self, template, items, page_number, total_pages, pdf_uri=''):
         loan = self.loan
-        items = self.items
-        template = self._load_pawn_ticket_template()
 
         branch = get_setting('branch_name', 'Kolonna')
         logo_src = self._get_logo_src()
@@ -333,7 +581,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         period = f"{loan.get('duration_months', '')} month(s)"
         redemption_date = format_date(loan.get('expire_date', ''))
 
-        item_rows_top = self._build_item_rows_html(items, include_total=True)
+        page_template = self._inject_ticket_page_number(template, page_number, total_pages)
+        item_rows_top = self._build_item_rows_html(items, include_total=True, row_font_size_px=12)
         item_rows_bottom = self._build_item_rows_html(items, include_total=False)
 
         replacements = {
@@ -363,9 +612,95 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         }
 
         for key, value in replacements.items():
-            template = template.replace(key, value)
+            page_template = page_template.replace(key, value)
 
-        return template
+        return page_template
+
+    def _build_pawn_ticket_html(self, pdf_uri=''):
+        items = self._prepare_items_with_assessed_values(self.items or [])
+        template = self._load_pawn_ticket_template()
+        chunked_items = [
+            items[i:i + self.ITEMS_PER_TICKET_PAGE]
+            for i in range(0, len(items), self.ITEMS_PER_TICKET_PAGE)
+        ] or [[]]
+
+        total_pages = len(chunked_items)
+        rendered_pages = [
+            self._render_single_ticket_page(template, item_chunk, index + 1, total_pages, pdf_uri)
+            for index, item_chunk in enumerate(chunked_items)
+        ]
+
+        if total_pages == 1:
+            return rendered_pages[0]
+
+        combined_html = rendered_pages[0]
+        extra_style = (
+            '\n    .ticket-template-break {'
+            ' page-break-before: always;'
+            ' break-before: page;'
+            ' height: 0;'
+            ' }\n'
+            '    .page {'
+            ' page-break-inside: avoid;'
+            ' break-inside: avoid-page;'
+            ' }\n'
+        )
+        combined_html = combined_html.replace('</style>', f'{extra_style}</style>', 1)
+
+        for next_page_html in rendered_pages[1:]:
+            page_body_html = self._remove_no_print_block(self._extract_body_inner_html(next_page_html))
+            combined_html = combined_html.replace(
+                '</body>',
+                f'<div class="ticket-template-break"></div>{page_body_html}</body>',
+                1,
+            )
+
+        return combined_html
+
+    def _build_renewal_ticket_html(self, pdf_uri=''):
+        if not self.latest_renewal:
+            raise ValueError('No renewal record found for this loan.')
+
+        loan = self.loan
+        renewal = self.latest_renewal
+        prepared_items = self._prepare_items_with_assessed_values(self.items or [])
+        template = self._load_renew_pawn_ticket_template()
+        amount_before_renewal = float(renewal.get('new_loan_amount') or 0) + float(renewal.get('principal_reduction') or 0)
+
+        renew_date_raw = renewal.get('renewed_at') or ''
+        renew_date = format_date(renew_date_raw)
+        renew_time = ''
+        if isinstance(renew_date_raw, str) and ' ' in renew_date_raw:
+            renew_time = renew_date_raw.split(' ', 1)[1][:5]
+
+        replacements = {
+            '{{LOGO_SRC}}': html_escape.escape(str(self._get_logo_src())),
+            '{{PDF_URI}}': html_escape.escape(str(pdf_uri)),
+            '{{BRANCH}}': html_escape.escape(str(get_setting('branch_name', 'Kolonna'))),
+            '{{PAWN_TICKET_NO}}': html_escape.escape(str(loan.get('ticket_no', ''))),
+            '{{DATE}}': html_escape.escape(str(renew_date)),
+            '{{TIME}}': html_escape.escape(str(renew_time)),
+            '{{PAWNER_NAME}}': html_escape.escape(str(loan.get('customer_name', ''))),
+            '{{PAWNER_ADDRESS}}': html_escape.escape(str(loan.get('customer_address', ''))),
+            '{{NIC}}': html_escape.escape(str(loan.get('customer_nic', ''))),
+            '{{PHONE}}': html_escape.escape(str(loan.get('customer_phone', ''))),
+            '{{PREVIOUS_LOAN_AMOUNT}}': html_escape.escape(str(format_currency(amount_before_renewal))),
+            '{{RENEWAL_PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(renewal.get('payment_amount', 0)))),
+            '{{RENEWAL_INTEREST_PAID}}': html_escape.escape(str(format_currency(renewal.get('interest_paid', 0)))),
+            '{{RENEWAL_PRINCIPAL_REDUCTION}}': html_escape.escape(str(format_currency(renewal.get('principal_reduction', 0)))),
+            '{{NEW_LOAN_AMOUNT}}': html_escape.escape(str(format_currency(renewal.get('new_loan_amount', loan.get('loan_amount', 0))))),
+            '{{NEW_INTEREST_RATE}}': html_escape.escape(str(f"{renewal.get('new_interest_rate', loan.get('interest_rate', 0))}%")),
+            '{{NEW_EXPIRE_DATE}}': html_escape.escape(str(format_date(renewal.get('new_expire_date', '')))),
+            '{{RENEWAL_REMARKS}}': html_escape.escape(str(renewal.get('remarks') or '-')),
+            '{{RENEWED_BY}}': html_escape.escape(str(renewal.get('renewed_by_name') or self.user.get('full_name', ''))),
+            '{{ITEM_ROWS_RENEW}}': self._build_renew_item_rows_html(prepared_items),
+        }
+
+        html_content = template
+        for key, value in replacements.items():
+            html_content = html_content.replace(key, value)
+
+        return html_content
 
     def _do_print(self, format_type):
         """Print using system print dialog."""
@@ -382,6 +717,15 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 html = self._build_cash_credit_html('a4', '')
                 html_path = self._write_temp_html(html)
                 webbrowser.open(Path(html_path).as_uri())
+                return
+
+            if self.doc_type == 'renewal_ticket':
+                html = self._build_renewal_ticket_html('')
+                html_path = self._write_temp_html(html)
+                webbrowser.open(Path(html_path).as_uri())
+                return
+
+            if not self._confirm_multi_page_ticket():
                 return
 
             html = self._build_pawn_ticket_html('')
