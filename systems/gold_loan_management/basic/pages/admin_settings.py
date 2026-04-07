@@ -1,6 +1,7 @@
 """Admin Settings Page for Gold Loan System."""
 
 import os
+import sys
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
@@ -997,18 +998,53 @@ class AdminSettingsPage:
         messagebox.showinfo('Success', f'Default printer set to: {selected_printer}')
 
     def _load_pawn_ticket_template_html(self):
-        template_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pawn_ticket_template.html')
-        )
+        template_path = self._resolve_ticket_asset_path('pawn_ticket_template.html')
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
+    def _resolve_ticket_asset_path(self, filename):
+        module_base = Path(__file__).resolve().parent.parent
+        bundle_base = Path(getattr(sys, '_MEIPASS', '')) if getattr(sys, 'frozen', False) else None
+        exe_base = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else None
+        cwd_base = Path.cwd()
+
+        candidates = [
+            module_base / 'pawn_ticket' / filename,
+            module_base / filename,
+            cwd_base / 'pawn_ticket' / filename,
+        ]
+
+        if bundle_base:
+            candidates.extend([
+                bundle_base / 'pawn_ticket' / filename,
+                bundle_base / filename,
+            ])
+
+        if exe_base:
+            candidates.extend([
+                exe_base / 'pawn_ticket' / filename,
+                exe_base / filename,
+            ])
+
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+        searched_paths = '\n'.join(str(path) for path in candidates)
+        raise FileNotFoundError(
+            f"Ticket template asset not found: {filename}. Searched:\n{searched_paths}"
+        )
+
     def _build_blank_ticket_template_html(self):
         template = self._load_pawn_ticket_template_html()
-        logo_path = Path(__file__).resolve().parent.parent / 'logo.png'
-        if not logo_path.exists():
-            logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
-        logo_src = logo_path.as_uri() if logo_path.exists() else ''
+        logo_path = None
+        for logo_name in ('logo.png', 'pms_logo.png'):
+            try:
+                logo_path = Path(self._resolve_ticket_asset_path(logo_name))
+                break
+            except FileNotFoundError:
+                continue
+        logo_src = logo_path.as_uri() if logo_path and logo_path.exists() else ''
         blank_rows = (
             '<tr class="empty-space-row" style="height: 30mm; font-size: 12px;">'
             '<td></td><td></td><td></td><td></td><td></td>'

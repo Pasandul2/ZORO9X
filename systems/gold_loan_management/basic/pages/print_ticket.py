@@ -414,21 +414,50 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         )
 
     def _load_pawn_ticket_template(self):
-        template_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'pawn_ticket_template.html')
-        )
+        template_path = self._resolve_ticket_asset_path('pawn_ticket_template.html')
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
     def _load_renew_pawn_ticket_template(self):
-        template_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), '..', 'pawn_ticket', 'renew_pawn_ticket_template.html')
-        )
+        template_path = self._resolve_ticket_asset_path('renew_pawn_ticket_template.html')
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
+    def _resolve_ticket_asset_path(self, filename):
+        module_base = Path(__file__).resolve().parent.parent
+        bundle_base = Path(getattr(sys, '_MEIPASS', '')) if getattr(sys, 'frozen', False) else None
+        exe_base = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else None
+        cwd_base = Path.cwd()
+
+        candidates = [
+            module_base / 'pawn_ticket' / filename,
+            module_base / filename,
+            cwd_base / 'pawn_ticket' / filename,
+        ]
+
+        if bundle_base:
+            candidates.extend([
+                bundle_base / 'pawn_ticket' / filename,
+                bundle_base / filename,
+            ])
+
+        if exe_base:
+            candidates.extend([
+                exe_base / 'pawn_ticket' / filename,
+                exe_base / filename,
+            ])
+
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+        searched_paths = '\n'.join(str(path) for path in candidates)
+        raise FileNotFoundError(
+            f"Ticket template asset not found: {filename}. Searched:\n{searched_paths}"
+        )
+
     def _get_logo_src(self):
-        logo_path = Path(__file__).resolve().parent.parent / 'pawn_ticket' / 'pms_logo.png'
+        logo_path = Path(self._resolve_ticket_asset_path('pms_logo.png'))
         if logo_path.exists():
             return logo_path.as_uri()
         return ''

@@ -8,7 +8,13 @@ a = Analysis(
     ['gold_loan_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('logo.png', '.')] if os.path.exists('logo.png') else [],
+    datas=(
+        ([('logo.png', '.')] if os.path.exists('logo.png') else [])
+        + ([('pawn_ticket/pawn_ticket_template.html', 'pawn_ticket')] if os.path.exists('pawn_ticket/pawn_ticket_template.html') else [])
+        + ([('pawn_ticket/renew_pawn_ticket_template.html', 'pawn_ticket')] if os.path.exists('pawn_ticket/renew_pawn_ticket_template.html') else [])
+        + ([('pawn_ticket/redeem_pawn_ticket_template.html', 'pawn_ticket')] if os.path.exists('pawn_ticket/redeem_pawn_ticket_template.html') else [])
+        + ([('pawn_ticket/pms_logo.png', 'pawn_ticket')] if os.path.exists('pawn_ticket/pms_logo.png') else [])
+    ),
     hiddenimports=['tkinter', 'sqlite3', 'requests', 'hashlib', 'platform', 'uuid'],
     hookspath=[],
     hooksconfig={},
