@@ -101,11 +101,17 @@ function findInstallerExecutable(systemFolder) {
 }
 
 function executeBuildScript(systemFolder, maxBufferMb = 20) {
-  const candidates = [
+  const windowsCandidates = [
     { script: 'BUILD.bat', command: 'cmd.exe', args: ['/c', 'BUILD.bat'] },
     { script: 'BUILD.cmd', command: 'cmd.exe', args: ['/c', 'BUILD.cmd'] },
     { script: 'BUILD.sh', command: 'bash', args: ['BUILD.sh'] },
   ];
+  const nonWindowsCandidates = [
+    { script: 'BUILD.sh', command: 'bash', args: ['BUILD.sh'] },
+    { script: 'BUILD.bat', command: 'cmd.exe', args: ['/c', 'BUILD.bat'] },
+    { script: 'BUILD.cmd', command: 'cmd.exe', args: ['/c', 'BUILD.cmd'] },
+  ];
+  const candidates = process.platform === 'win32' ? windowsCandidates : nonWindowsCandidates;
 
   for (const candidate of candidates) {
     const scriptPath = path.join(systemFolder, candidate.script);
@@ -119,6 +125,10 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
         encoding: 'utf8',
         maxBuffer: 1024 * 1024 * maxBufferMb,
       });
+
+      if (result.error && result.error.code === 'ENOENT') {
+        continue;
+      }
 
       return {
         attempted: `${candidate.command} ${candidate.args.join(' ')}`,
@@ -155,7 +165,11 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
           }
         );
 
-        if (appBuild.status !== 0) {
+        if (appBuild.error && appBuild.error.code === 'ENOENT') {
+          continue;
+        }
+
+        if (appBuild.error || appBuild.status !== 0) {
           return {
             attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec`,
             result: appBuild,
@@ -171,6 +185,10 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
             maxBuffer: 1024 * 1024 * maxBufferMb,
           }
         );
+
+        if (installerBuild.error && installerBuild.error.code === 'ENOENT') {
+          continue;
+        }
 
         return {
           attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec && ${pythonCmd} -m PyInstaller --noconfirm --clean installer.spec`,
@@ -211,12 +229,14 @@ function buildInstallerIfMissing(systemFolder, forceRebuild = false) {
 
   const { result, attempted } = buildExecution;
 
-  if (result.status !== 0) {
+  if (result.error || result.status !== 0) {
+    const errorMessage = result.error ? (result.error.message || String(result.error)) : '';
     console.error('Installer build failed:', {
       attempted,
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
+      error: errorMessage,
     });
     return null;
   }
@@ -262,13 +282,14 @@ function regenerateTierBuild(systemFolder, tier) {
 
     const { result, attempted } = buildExecution;
 
-    if (result.status !== 0) {
+    if (result.error || result.status !== 0) {
+      const spawnError = result.error ? (result.error.message || String(result.error)) : '';
       const stderr = (result.stderr || '').trim();
       const stdout = (result.stdout || '').trim();
       return {
         tier,
         status: 'failed',
-        message: `${attempted} failed: ${stderr || stdout || `status ${result.status}`}`,
+        message: `${attempted} failed: ${spawnError || stderr || stdout || `status ${result.status}`}`,
       };
     }
 
