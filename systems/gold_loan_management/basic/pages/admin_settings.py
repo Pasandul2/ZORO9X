@@ -1158,7 +1158,7 @@ class AdminSettingsPage:
             from database import DB_FILE
             import os
             db_path = os.path.dirname(DB_FILE)
-            self.backup_manager = get_backup_manager(db_path)
+            self.backup_manager = get_backup_manager(db_path, db_file=os.path.basename(DB_FILE))
         except Exception as e:
             messagebox.showerror('Error', f'Failed to initialize backup manager: {e}')
             return

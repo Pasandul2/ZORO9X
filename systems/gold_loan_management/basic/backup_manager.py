@@ -407,10 +407,19 @@ class BackupManager:
 _backup_manager = None
 
 
-def get_backup_manager(db_path: str = None) -> BackupManager:
-    """Get or create the global backup manager instance"""
+def get_backup_manager(db_path: str = None, db_file: str = 'gold_loan_basic_database.db') -> BackupManager:
+    """Get or create the global backup manager instance."""
     global _backup_manager
     if _backup_manager is None:
         assert db_path is not None, "db_path must be provided on first call"
-        _backup_manager = BackupManager(db_path)
+        _backup_manager = BackupManager(db_path, db_file=db_file)
+        return _backup_manager
+
+    if db_path is not None:
+        req_path = str(Path(db_path).resolve())
+        cur_path = str(_backup_manager.db_path.resolve())
+        req_file = (db_file or '').strip() or _backup_manager.db_file
+        if req_path != cur_path or req_file != _backup_manager.db_file:
+            _backup_manager = BackupManager(db_path, db_file=req_file)
+
     return _backup_manager

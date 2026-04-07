@@ -263,7 +263,10 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 "            window.evaluate_js('setTimeout(function(){window.print();}, 300);')\n"
                 "        except Exception:\n"
                 "            pass\n"
-                "webview.start(on_start)\n"
+                "try:\n"
+                "    webview.start(on_start)\n"
+                "except KeyboardInterrupt:\n"
+                "    pass\n"
             )
             proc = subprocess.Popen(
                 [sys.executable, '-c', script],

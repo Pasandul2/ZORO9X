@@ -9,13 +9,15 @@ from database import (get_customer_by_nic, create_customer, create_loan,
                       generate_ticket_no, get_market_rate, get_duration_rate,
                       get_all_duration_rates, add_audit_log, search_recent_purposes,
                  search_recent_descriptions, create_approval_request,
-              get_article_types, get_setting, search_recent_customer_jobs)
+                  get_article_types, get_setting, search_recent_customer_jobs,
+                  update_customer)
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                          calculate_interest, get_expire_date, ARTICLE_TYPES, CARAT_OPTIONS)
 
 
 # Persist new-ticket draft across page instances (tab/panel navigation).
 NEW_TICKET_DRAFT = {}
+HONORIFIC_TITLES = ('Mr.', 'Mrs.', 'Miss.', 'Rev.', 'Dr.', 'None')
 
 
 class NewTicketPage:
@@ -82,9 +84,31 @@ class NewTicketPage:
                             kind='ghost', width=10, pady=6)
         search_btn.grid(row=0, column=2, sticky='e')
 
-        fields = [('Name:', 'name'), ('Phone:', 'phone'), ('Address:', 'address')]
+        self.honorific_var = tk.StringVar(value=HONORIFIC_TITLES[0])
+
+        name_row = tk.Frame(cust_form, bg=self.theme.palette.bg_surface)
+        name_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(name_row, text='Name:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.honorific_combo = self.theme.make_combobox(
+            name_row,
+            variable=self.honorific_var,
+            values=list(HONORIFIC_TITLES),
+            width=8,
+        )
+        self.honorific_combo.pack(side=tk.LEFT, padx=(0, 8))
+
         self.cust_vars = {}
         self.cust_entries = {}
+
+        name_var = tk.StringVar()
+        self.cust_vars['name'] = name_var
+        name_entry = self.theme.make_entry(name_row, variable=name_var)
+        name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        name_entry.entry.bind('<Return>', lambda e: e.widget.tk_focusNext().focus_set() or 'break')
+        self.cust_entries['name'] = name_entry
+
+        fields = [('Phone:', 'phone'), ('Address:', 'address')]
         for label, key in fields:
             row = tk.Frame(cust_form, bg=self.theme.palette.bg_surface)
             row.pack(fill=tk.X, pady=(0, 6))
@@ -411,7 +435,9 @@ class NewTicketPage:
         customer = get_customer_by_nic(nic)
         if customer:
             self.customer_id = customer['id']
-            self.cust_vars['name'].set(customer['name'])
+            title, plain_name = self._split_customer_name(customer['name'])
+            self.honorific_var.set(title)
+            self.cust_vars['name'].set(plain_name)
             self.cust_vars['phone'].set(customer['phone'])
             self.cust_vars['birthday'].set(customer.get('birthday', '') or '')
             self.cust_vars['job'].set(customer.get('job', '') or '')
@@ -422,6 +448,32 @@ class NewTicketPage:
         else:
             self.customer_id = None
             self.cust_status.config(text='ℹ️ Customer not found. Will be created on save.', fg=self.theme.palette.info)
+
+    def _split_customer_name(self, full_name):
+        clean_name = (full_name or '').strip()
+        for honorific in HONORIFIC_TITLES:
+            if honorific == 'None':
+                continue
+            prefix = f'{honorific} '
+            if clean_name.startswith(prefix):
+                return honorific, clean_name[len(prefix):].strip()
+        return 'None', clean_name
+
+    def _compose_customer_name(self):
+        raw_name = self.cust_vars['name'].get().strip()
+        for honorific in HONORIFIC_TITLES:
+            if honorific == 'None':
+                continue
+            prefix = f'{honorific} '
+            if raw_name.startswith(prefix):
+                raw_name = raw_name[len(prefix):].strip()
+                break
+        if not raw_name:
+            return ''
+        honorific = (self.honorific_var.get() or '').strip()
+        if honorific == 'None':
+            return raw_name
+        return f'{honorific} {raw_name}'.strip() if honorific else raw_name
 
     def _render_birthday_row(self, parent):
         row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
@@ -970,6 +1022,7 @@ class NewTicketPage:
         """Auto-save draft on edits so tab switches keep recent input."""
         vars_to_track = []
         vars_to_track.append(self.nic_var)
+        vars_to_track.append(self.honorific_var)
         vars_to_track.extend(self.cust_vars.values())
         vars_to_track.append(self.loan_vars.get('purpose'))
         vars_to_track.append(self.duration_var)
@@ -987,6 +1040,7 @@ class NewTicketPage:
         """Save current form state for persistence across tab changes."""
         self._form_state = {
             'nic': self.nic_var.get() if hasattr(self, 'nic_var') else '',
+            'honorific': self.honorific_var.get() if hasattr(self, 'honorific_var') else HONORIFIC_TITLES[0],
             'name': self.cust_vars.get('name', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
             'phone': self.cust_vars.get('phone', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
             'birthday': self.cust_vars.get('birthday', tk.StringVar()).get() if hasattr(self, 'cust_vars') else '',
@@ -1013,6 +1067,8 @@ class NewTicketPage:
         
         if hasattr(self, 'nic_var'):
             self.nic_var.set(self._form_state.get('nic', ''))
+        if hasattr(self, 'honorific_var'):
+            self.honorific_var.set(self._form_state.get('honorific', HONORIFIC_TITLES[0]))
         if hasattr(self, 'cust_vars'):
             self.cust_vars.get('name', tk.StringVar()).set(self._form_state.get('name', ''))
             self.cust_vars.get('phone', tk.StringVar()).set(self._form_state.get('phone', ''))
@@ -1046,6 +1102,8 @@ class NewTicketPage:
         # Reset customer fields
         if hasattr(self, 'nic_var'):
             self.nic_var.set('')
+        if hasattr(self, 'honorific_var'):
+            self.honorific_var.set(HONORIFIC_TITLES[0])
         if hasattr(self, 'cust_vars'):
             for key in self.cust_vars:
                 self.cust_vars[key].set('')
@@ -1408,6 +1466,7 @@ class NewTicketPage:
         # Validate customer
         nic = self.nic_var.get().strip()
         name = self.cust_vars['name'].get().strip()
+        full_name = self._compose_customer_name()
         phone = self.cust_vars['phone'].get().strip()
         birthday = self.cust_vars['birthday'].get().strip()
         job = self.cust_vars['job'].get().strip()
@@ -1437,7 +1496,7 @@ class NewTicketPage:
         if not self.customer_id:
             cid, msg = create_customer(
                 nic=nic,
-                name=name,
+                name=full_name,
                 phone=phone,
                 address=address,
                 birthday=birthday,
@@ -1449,6 +1508,17 @@ class NewTicketPage:
                 messagebox.showerror('Customer', msg)
                 return
             self.customer_id = cid
+        else:
+            update_customer(
+                self.customer_id,
+                name=full_name,
+                phone=phone,
+                address=address,
+                birthday=birthday,
+                job=job,
+                marital_status=marital_status,
+                language=language,
+            )
 
         calc = self._get_calculations()
         if calc['is_other_bank_ticket']:

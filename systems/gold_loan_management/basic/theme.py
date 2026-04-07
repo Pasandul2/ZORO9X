@@ -330,7 +330,7 @@ class RoundedButton(tk.Canvas):
     def _draw(self, hover=False):
         width = max(self.winfo_width(), 2)
         height = max(self.winfo_height(), self._height)
-        current_state = (width, height, hover, self._state, self._text)
+        current_state = (width, height, hover, self._state, self._text, self._bg, self._hover_bg, self._fg)
         if getattr(self, '_last_render_state', None) == current_state:
             return
         self._last_render_state = current_state

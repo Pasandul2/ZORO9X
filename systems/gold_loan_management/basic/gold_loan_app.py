@@ -307,7 +307,7 @@ class GoldLoanSystemApp:
         # Initialize backup manager
         try:
             db_dir = os.path.dirname(self.db_file)
-            self.backup_manager = get_backup_manager(db_dir)
+            self.backup_manager = get_backup_manager(db_dir, db_file=os.path.basename(self.db_file))
             # Create initial backup on app start
             self.backup_manager.create_backup_and_queue()
             self.backup_manager.sync_pending_uploads()
@@ -899,6 +899,12 @@ class GoldLoanSystemApp:
             btn.pack(fill=tk.X, pady=3)
             self.nav_buttons[page] = btn
 
+        self._nav_base_bg = '#e6ebf5'
+        self._nav_base_hover = '#d9e2f2'
+        self._nav_active_bg = self.theme.palette.bg_sidebar_active
+        self._nav_active_hover = self.theme.palette.accent_hover
+        self._active_nav_page = None
+
         # Logout button
         logout_btn = self.theme.make_button(
             sidebar, text='🚪 Logout', command=self._logout,
@@ -906,15 +912,25 @@ class GoldLoanSystemApp:
         )
         logout_btn.pack(side=tk.BOTTOM, pady=14, padx=12, fill=tk.X)
 
-        developer_btn = self.theme.make_button(
-            sidebar,
+        developer_row = tk.Frame(sidebar, bg=self.theme.palette.bg_sidebar)
+        developer_row.pack(side=tk.BOTTOM, pady=(0, 6), padx=12, fill=tk.X)
+        tk.Label(
+            developer_row,
+            text='Developed by ',
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_sidebar,
+            fg=self.theme.palette.text_muted,
+        ).pack(side=tk.LEFT)
+        link_label = tk.Label(
+            developer_row,
             text='ZORO9X',
-            command=lambda: webbrowser.open('https://www.zoro9x.com'),
-            kind='ghost',
-            width=20,
-            pady=8,
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_sidebar,
+            fg=self.theme.palette.accent,
+            cursor='hand2',
         )
-        developer_btn.pack(side=tk.BOTTOM, pady=(0, 6), padx=12, fill=tk.X)
+        link_label.pack(side=tk.LEFT)
+        link_label.bind('<Button-1>', lambda _e: webbrowser.open('https://www.zoro9x.com'))
 
         # Content area
         content_outer = tk.Frame(self.root, bg=self.theme.palette.bg_app)
@@ -1003,6 +1019,7 @@ class GoldLoanSystemApp:
             'print_ticket': 'Print Ticket',
         }
         self.header_label.config(text=header_map.get(page_name, page_name.title()))
+        self._highlight_nav_for_page(page_name)
 
         if page_name == 'dashboard':
             from pages.dashboard import DashboardPage
@@ -1061,6 +1078,28 @@ class GoldLoanSystemApp:
 
         # Some pages resize async; enforce top position after geometry updates to avoid blank top gaps.
         self.root.after_idle(lambda: self.page_canvas.yview_moveto(0))
+
+    def _highlight_nav_for_page(self, page_name):
+        if not hasattr(self, 'nav_buttons'):
+            return
+
+        page_to_nav = {
+            'loan_detail': 'loan_list',
+            'loan_history': 'loan_list',
+            'renew_loan': 'loan_list',
+            'redeem_loan': 'loan_list',
+            'print_ticket': 'loan_list',
+        }
+        nav_page = page_to_nav.get(page_name, page_name)
+
+        for key, btn in self.nav_buttons.items():
+            is_active = key == nav_page
+            btn._bg = self._nav_active_bg if is_active else self._nav_base_bg
+            btn._hover_bg = self._nav_active_hover if is_active else self._nav_base_hover
+            btn._fg = self.theme.palette.text_inverse if is_active else self.theme.palette.text_primary
+            btn._draw()
+
+        self._active_nav_page = nav_page
 
     def _logout(self):
         if messagebox.askyesno("Logout", "Are you sure you want to logout?"):
