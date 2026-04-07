@@ -28,6 +28,7 @@
     }
 
     .ticket {
+      position: relative;
       border: 1px solid #c4cad6;
       background: #fff;
       overflow: hidden;
@@ -143,13 +144,14 @@
         /* ===== STAMP GUIDE ===== */
     .stamp-zone {
       position: absolute;
-      right: 175mm;
-      top: 82mm;
+      left: 60mm;
+      top: 70mm;
       width: 45mm;
       height: 14mm;
       border: 3.2px dotted rgba(255, 0, 0, 0.452);
       border-radius: 20px;
       transform: rotate(-20deg);
+      transform-origin: center center;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -157,6 +159,7 @@
       font-size: 7mm;
       font-weight: 700;
       color: rgba(255, 0, 0, 0.349);
+      z-index: 2;
       pointer-events: none;
     }
 

@@ -863,7 +863,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         interest_paid = float(renewal.get('interest_paid') or 0)
         payment_amount = float(renewal.get('payment_amount') or 0)
         other_charges = float(renewal.get('other_charges') or 0)
-        total_amount = payment_amount + other_charges
+        total_amount = float(renewal.get('new_loan_amount', loan.get('loan_amount', 0)) or 0)
 
         renew_date_raw = renewal.get('renewed_at') or ''
         renew_date = format_date(renew_date_raw)
