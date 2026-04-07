@@ -309,9 +309,19 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
         },
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       if (!response.ok || !data.success) {
-        throw new Error(data?.message || 'Failed to generate build');
+        const errorSummary = Array.isArray(data?.results)
+          ? data.results
+              .map((entry: any) => `${entry.tier}: ${entry.message || entry.status}`)
+              .join('\n')
+          : '';
+
+        throw new Error(
+          [data?.message || 'Failed to generate build', errorSummary]
+            .filter(Boolean)
+            .join('\n')
+        );
       }
 
       const resultSummary = Array.isArray(data.results)

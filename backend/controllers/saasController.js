@@ -1005,9 +1005,13 @@ exports.generateSystemBuildAdmin = async (req, res) => {
     }
 
     if (failed.length > 0) {
+      const failureSummary = failed
+        .map((entry) => `${entry.tier}: ${entry.message}`)
+        .join(' | ');
+
       return res.status(500).json({
         success: false,
-        message: 'Build generation failed for one or more tiers',
+        message: `Build generation failed for one or more tiers. ${failureSummary}`,
         results,
       });
     }
