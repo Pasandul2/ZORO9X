@@ -381,8 +381,14 @@ class RenewLoanPage:
             messagebox.showwarning('Renewal', 'Overdue penalty cannot be increased above the calculated penalty amount.')
             return
 
-        if breakdown['new_loan_amount'] <= 0:
-            messagebox.showwarning('Renewal', 'Loan principal is fully settled. Use redemption instead of renewal.')
+        if breakdown['new_loan_amount'] <= 0.009:
+            open_redeem = messagebox.askyesno(
+                'Renewal',
+                'Loan principal is fully settled. Use redemption instead of renewal.\n\n'
+                'Open Redemption page now?'
+            )
+            if open_redeem:
+                self.navigate('redeem_loan', self.loan_id)
             return
 
         default_overdue_penalty = breakdown['max_overdue_penalty_due']

@@ -30,6 +30,7 @@ class PrintTicketPage:
         self.theme = theme
         self.user = user
         self.navigate = navigate_fn
+        self.print_context = loan_id if isinstance(loan_id, dict) else {}
         if isinstance(loan_id, dict):
             self.loan_id = loan_id.get('loan_id')
             self.doc_type = loan_id.get('doc_type', 'ticket')
@@ -69,6 +70,7 @@ class PrintTicketPage:
         title_map = {
             'cash_credit': 'Cash Credit Slip',
             'renewal_ticket': 'Renewal Ticket',
+            'redeem_ticket': 'Redeem Ticket',
             'ticket': 'Ticket',
         }
         page_title = title_map.get(self.doc_type, 'Ticket')
@@ -301,6 +303,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 html_content = self._build_cash_credit_html('a4', Path(pdf_path).as_uri())
             elif self.doc_type == 'renewal_ticket':
                 html_content = self._build_renewal_ticket_html(Path(pdf_path).as_uri())
+            elif self.doc_type == 'redeem_ticket':
+                html_content = self._build_redeem_ticket_html(Path(pdf_path).as_uri())
             else:
                 html_content = self._build_pawn_ticket_html(Path(pdf_path).as_uri())
 
@@ -396,6 +400,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 html_content = self._build_cash_credit_html('a4', '')
             elif self.doc_type == 'renewal_ticket':
                 html_content = self._build_renewal_ticket_html('')
+            elif self.doc_type == 'redeem_ticket':
+                html_content = self._build_redeem_ticket_html('')
             else:
                 html_content = self._build_pawn_ticket_html('')
 
@@ -547,6 +553,11 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
     def _load_renew_pawn_ticket_template(self):
         template_path = self._resolve_ticket_asset_path('renew_pawn_ticket_template.html')
+        with open(template_path, 'r', encoding='utf-8') as template_file:
+            return template_file.read()
+
+    def _load_redeem_pawn_ticket_template(self):
+        template_path = self._resolve_ticket_asset_path('redeem_pawn_ticket_template.html')
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
@@ -849,6 +860,10 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         prepared_items = self._prepare_items_with_assessed_values(self.items or [])
         template = self._load_renew_pawn_ticket_template()
         amount_before_renewal = float(renewal.get('new_loan_amount') or 0) + float(renewal.get('principal_reduction') or 0)
+        interest_paid = float(renewal.get('interest_paid') or 0)
+        payment_amount = float(renewal.get('payment_amount') or 0)
+        other_charges = float(renewal.get('other_charges') or 0)
+        total_amount = payment_amount + other_charges
 
         renew_date_raw = renewal.get('renewed_at') or ''
         renew_date = format_date(renew_date_raw)
@@ -867,9 +882,14 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             '{{PAWNER_ADDRESS}}': html_escape.escape(str(loan.get('customer_address', ''))),
             '{{NIC}}': html_escape.escape(str(loan.get('customer_nic', ''))),
             '{{PHONE}}': html_escape.escape(str(loan.get('customer_phone', ''))),
+            '{{ADVANCED_AMOUNT}}': html_escape.escape(str(format_currency(amount_before_renewal))),
+            '{{INTEREST_AMOUNT}}': html_escape.escape(str(format_currency(interest_paid))),
+            '{{OTHER_CHARGES}}': html_escape.escape(str(format_currency(other_charges))),
+            '{{PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(payment_amount))),
+            '{{TOTAL}}': html_escape.escape(str(format_currency(total_amount))),
             '{{PREVIOUS_LOAN_AMOUNT}}': html_escape.escape(str(format_currency(amount_before_renewal))),
-            '{{RENEWAL_PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(renewal.get('payment_amount', 0)))),
-            '{{RENEWAL_INTEREST_PAID}}': html_escape.escape(str(format_currency(renewal.get('interest_paid', 0)))),
+            '{{RENEWAL_PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(payment_amount))),
+            '{{RENEWAL_INTEREST_PAID}}': html_escape.escape(str(format_currency(interest_paid))),
             '{{RENEWAL_PRINCIPAL_REDUCTION}}': html_escape.escape(str(format_currency(renewal.get('principal_reduction', 0)))),
             '{{NEW_LOAN_AMOUNT}}': html_escape.escape(str(format_currency(renewal.get('new_loan_amount', loan.get('loan_amount', 0))))),
             '{{NEW_INTEREST_RATE}}': html_escape.escape(str(f"{renewal.get('new_interest_rate', loan.get('interest_rate', 0))}%")),
@@ -877,6 +897,47 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             '{{RENEWAL_REMARKS}}': html_escape.escape(str(renewal.get('remarks') or '-')),
             '{{RENEWED_BY}}': html_escape.escape(str(renewal.get('renewed_by_name') or self.user.get('full_name', ''))),
             '{{ITEM_ROWS_RENEW}}': self._build_renew_item_rows_html(prepared_items),
+        }
+
+        html_content = template
+        for key, value in replacements.items():
+            html_content = html_content.replace(key, value)
+
+        return html_content
+
+    def _build_redeem_ticket_html(self, pdf_uri=''):
+        loan = self.loan
+        template = self._load_redeem_pawn_ticket_template()
+
+        now = datetime.now()
+        date_str = format_date(now.strftime('%Y-%m-%d %H:%M:%S'))
+        time_str = now.strftime('%H:%M')
+
+        amount_advanced = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+        normal_interest = float(self.print_context.get('redeem_normal_interest') or 0)
+        overdue_interest = float(self.print_context.get('redeem_overdue_interest') or 0)
+        other_charges = float(self.print_context.get('redeem_other_charges') or 0)
+        total_paid = float(
+            self.print_context.get('redeem_total_paid')
+            or (amount_advanced + normal_interest + overdue_interest + other_charges)
+        )
+
+        replacements = {
+            '{{LOGO_SRC}}': html_escape.escape(str(self._get_logo_src())),
+            '{{PDF_URI}}': html_escape.escape(str(pdf_uri)),
+            '{{BRANCH}}': html_escape.escape(str(get_setting('branch_name', 'Kolonna'))),
+            '{{PAWN_TICKET_NO}}': html_escape.escape(str(loan.get('ticket_no', ''))),
+            '{{DATE}}': html_escape.escape(str(date_str)),
+            '{{TIME}}': html_escape.escape(str(time_str)),
+            '{{PAWNER_NAME}}': html_escape.escape(str(loan.get('customer_name', ''))),
+            '{{PAWNER_ADDRESS}}': html_escape.escape(str(loan.get('customer_address', ''))),
+            '{{NIC}}': html_escape.escape(str(loan.get('customer_nic', ''))),
+            '{{PHONE}}': html_escape.escape(str(loan.get('customer_phone', ''))),
+            '{{ADVANCED_AMOUNT}}': html_escape.escape(str(format_currency(amount_advanced))),
+            '{{INTEREST_AMOUNT}}': html_escape.escape(str(format_currency(normal_interest + overdue_interest))),
+            '{{OTHER_CHARGES}}': html_escape.escape(str(format_currency(other_charges))),
+            '{{PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(total_paid))),
+            '{{TOTAL}}': html_escape.escape(str(format_currency(total_paid))),
         }
 
         html_content = template
@@ -904,6 +965,12 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
             if self.doc_type == 'renewal_ticket':
                 html = self._build_renewal_ticket_html('')
+                html_path = self._write_temp_html(html)
+                webbrowser.open(Path(html_path).as_uri())
+                return
+
+            if self.doc_type == 'redeem_ticket':
+                html = self._build_redeem_ticket_html('')
                 html_path = self._write_temp_html(html)
                 webbrowser.open(Path(html_path).as_uri())
                 return

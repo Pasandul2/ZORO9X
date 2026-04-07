@@ -363,7 +363,10 @@ class LoanDetailPage:
         history_btn.grid(row=1, column=0, padx=(0, 4), pady=(4, 0), sticky='ew')
 
         print_btn = self.theme.make_button(abf, text='🖨 Print', kind='ghost', width=13, pady=8,
-                                           command=lambda: self.navigate('print_ticket', self.loan_id))
+                                           command=lambda: self.navigate(
+                                               'print_ticket',
+                                               {'loan_id': self.loan_id, 'doc_type': 'redeem_ticket'} if effective_status == 'redeemed' else self.loan_id
+                                           ))
         print_btn.grid(row=1, column=1, padx=(4, 0), pady=(4, 0), sticky='ew')
 
         letter_btn = self.theme.make_button(abf, text='✉️ Send Letter', kind='secondary', width=13, pady=8,
