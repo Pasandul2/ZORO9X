@@ -138,6 +138,7 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
       if (error && error.code === 'ENOENT') {
         continue;
       }
+
       return {
         attempted: `${candidate.command} ${candidate.args.join(' ')}`,
         result: {
@@ -152,7 +153,8 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
   const appSpecPath = path.join(systemFolder, 'app.spec');
   const installerSpecPath = path.join(systemFolder, 'installer.spec');
   if (fs.existsSync(appSpecPath) && fs.existsSync(installerSpecPath)) {
-    const pythonCandidates = ['python3', 'python'];
+    const pythonCandidates = getPythonBuildCandidates();
+
     for (const pythonCmd of pythonCandidates) {
       try {
         const appBuild = spawnSync(
@@ -198,6 +200,7 @@ function executeBuildScript(systemFolder, maxBufferMb = 20) {
         if (error && error.code === 'ENOENT') {
           continue;
         }
+
         return {
           attempted: `${pythonCmd} -m PyInstaller ...`,
           result: {
@@ -261,15 +264,55 @@ function normalizeSystemPath(rawPath) {
   return normalized.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+function getPythonBuildCandidates() {
+  const unique = new Set();
+  const candidates = [];
+
+  const addCandidate = (candidate) => {
+    const value = String(candidate || '').trim();
+    if (!value || unique.has(value)) {
+      return;
+    }
+
+    if (value.includes('/') || value.includes('\\')) {
+      if (!fs.existsSync(value)) {
+        return;
+      }
+    }
+
+    unique.add(value);
+    candidates.push(value);
+  };
+
+  addCandidate(process.env.ZORO9X_BUILD_PYTHON);
+
+  const repoRoot = path.join(__dirname, '../../');
+  [
+    path.join(repoRoot, '.build-venv/bin/python3'),
+    path.join(repoRoot, '.build-venv/bin/python'),
+    path.join(repoRoot, '.venv/bin/python3'),
+    path.join(repoRoot, '.venv/bin/python'),
+    'python3',
+    'python',
+  ].forEach(addCandidate);
+
+  return candidates;
+}
+
 function getPyInstallerInstallHint() {
   if (process.platform === 'win32') {
     return 'Install command: py -m pip install --upgrade pip pyinstaller';
   }
+
+  const repoRoot = path.join(__dirname, '../../').replace(/\\/g, '/');
+
   return [
-    'Install commands:',
-    'python3 -m pip install --upgrade pip',
-    'python3 -m pip install pyinstaller',
-    'If your distro blocks system pip, use: python3 -m pip install --break-system-packages pyinstaller',
+    'Install commands (recommended virtual environment):',
+    `cd ${repoRoot}`,
+    'python3 -m venv .build-venv',
+    './.build-venv/bin/python -m pip install --upgrade pip',
+    './.build-venv/bin/python -m pip install pyinstaller',
+    'Set backend env variable: ZORO9X_BUILD_PYTHON=/absolute/path/to/.build-venv/bin/python',
   ].join('\n');
 }
 
