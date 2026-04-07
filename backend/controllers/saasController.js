@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
-const { spawnSync } = require('child_process');
+const { spawnSync, spawn } = require('child_process');
 const securityController = require('./securityController');
 const dbSync = require('../utils/databaseSync');
 const { generateInstaller } = require('../templates/installerTemplate');
@@ -95,6 +95,152 @@ function findInstallerExecutable(systemFolder) {
 
     if (installer) {
       return path.join(root, installer);
+    }
+  }
+
+  return null;
+}
+
+function findInstallerArtifact(systemFolder) {
+  if (!fs.existsSync(systemFolder)) {
+    return null;
+  }
+
+  const roots = [systemFolder, path.join(systemFolder, 'dist')];
+  for (const root of roots) {
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+      continue;
+    }
+
+    const files = fs.readdirSync(root).filter((name) => {
+      const lowered = name.toLowerCase();
+      return lowered.includes('installer') && !lowered.endsWith('.spec') && !lowered.endsWith('.py');
+    });
+
+    if (files.length > 0) {
+      return path.join(root, files[0]);
+    }
+  }
+
+  return null;
+}
+
+function runCommandAsync(command, args, cwd, maxBufferMb = 40) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let resolved = false;
+    const maxBytes = 1024 * 1024 * maxBufferMb;
+
+    const finish = (payload) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(payload);
+    };
+
+    try {
+      const child = spawn(command, args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+        if (stdout.length > maxBytes) {
+          stdout = stdout.slice(stdout.length - maxBytes);
+        }
+      });
+
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+        if (stderr.length > maxBytes) {
+          stderr = stderr.slice(stderr.length - maxBytes);
+        }
+      });
+
+      child.on('error', (error) => {
+        finish({ status: 1, stdout, stderr, error });
+      });
+
+      child.on('close', (code) => {
+        finish({ status: typeof code === 'number' ? code : 1, stdout, stderr, error: null });
+      });
+    } catch (error) {
+      finish({ status: 1, stdout, stderr, error });
+    }
+  });
+}
+
+async function executeBuildScriptAsync(systemFolder, maxBufferMb = 40) {
+  const windowsCandidates = [
+    { script: 'BUILD.bat', command: 'cmd.exe', args: ['/c', 'BUILD.bat'] },
+    { script: 'BUILD.cmd', command: 'cmd.exe', args: ['/c', 'BUILD.cmd'] },
+    { script: 'BUILD.sh', command: 'bash', args: ['BUILD.sh'] },
+  ];
+  const nonWindowsCandidates = [
+    { script: 'BUILD.sh', command: 'bash', args: ['BUILD.sh'] },
+    { script: 'BUILD.bat', command: 'cmd.exe', args: ['/c', 'BUILD.bat'] },
+    { script: 'BUILD.cmd', command: 'cmd.exe', args: ['/c', 'BUILD.cmd'] },
+  ];
+  const candidates = process.platform === 'win32' ? windowsCandidates : nonWindowsCandidates;
+
+  for (const candidate of candidates) {
+    const scriptPath = path.join(systemFolder, candidate.script);
+    if (!fs.existsSync(scriptPath)) {
+      continue;
+    }
+
+    const result = await runCommandAsync(candidate.command, candidate.args, systemFolder, maxBufferMb);
+    if (result.error && result.error.code === 'ENOENT') {
+      continue;
+    }
+
+    return {
+      attempted: `${candidate.command} ${candidate.args.join(' ')}`,
+      result,
+    };
+  }
+
+  const appSpecPath = path.join(systemFolder, 'app.spec');
+  const installerSpecPath = path.join(systemFolder, 'installer.spec');
+  if (fs.existsSync(appSpecPath) && fs.existsSync(installerSpecPath)) {
+    const pythonCandidates = getPythonBuildCandidates();
+    for (const pythonCmd of pythonCandidates) {
+      const appBuild = await runCommandAsync(
+        pythonCmd,
+        ['-m', 'PyInstaller', '--noconfirm', '--clean', 'app.spec'],
+        systemFolder,
+        maxBufferMb
+      );
+
+      if (appBuild.error && appBuild.error.code === 'ENOENT') {
+        continue;
+      }
+
+      if (appBuild.error || appBuild.status !== 0) {
+        return {
+          attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec`,
+          result: appBuild,
+        };
+      }
+
+      const installerBuild = await runCommandAsync(
+        pythonCmd,
+        ['-m', 'PyInstaller', '--noconfirm', '--clean', 'installer.spec'],
+        systemFolder,
+        maxBufferMb
+      );
+
+      if (installerBuild.error && installerBuild.error.code === 'ENOENT') {
+        continue;
+      }
+
+      return {
+        attempted: `${pythonCmd} -m PyInstaller --noconfirm --clean app.spec && ${pythonCmd} -m PyInstaller --noconfirm --clean installer.spec`,
+        result: installerBuild,
+      };
     }
   }
 
@@ -373,6 +519,71 @@ function regenerateTierBuild(systemFolder, tier) {
   }
 }
 
+async function regenerateTierBuildAsync(systemFolder, tier) {
+  const tierFolder = path.join(systemFolder, tier);
+  if (!fs.existsSync(tierFolder) || !fs.statSync(tierFolder).isDirectory()) {
+    return { tier, status: 'skipped', message: 'Tier folder not found' };
+  }
+
+  try {
+    clearBuildArtifacts(tierFolder);
+    updateInstallerSpecDatas(tierFolder);
+
+    const buildExecution = await executeBuildScriptAsync(tierFolder, 40);
+    if (!buildExecution) {
+      return {
+        tier,
+        status: 'failed',
+        message: 'No runnable build script found in tier folder (BUILD.bat/BUILD.cmd/BUILD.sh).',
+      };
+    }
+
+    const { result, attempted } = buildExecution;
+
+    if (result.error || result.status !== 0) {
+      const spawnError = result.error ? (result.error.message || String(result.error)) : '';
+      const stderr = (result.stderr || '').trim();
+      const stdout = (result.stdout || '').trim();
+      return {
+        tier,
+        status: 'failed',
+        message: `${attempted} failed: ${spawnError || stderr || stdout || `status ${result.status}`}`,
+      };
+    }
+
+    const installerPath = findInstallerExecutable(tierFolder);
+    if (!installerPath) {
+      const artifactPath = findInstallerArtifact(tierFolder);
+      if (artifactPath && process.platform !== 'win32') {
+        return {
+          tier,
+          status: 'failed',
+          message: `Build produced '${path.basename(artifactPath)}' but not a Windows .exe. Use a Windows build server/runner for EXE output.`,
+        };
+      }
+
+      return {
+        tier,
+        status: 'failed',
+        message: 'Build completed but installer EXE was not generated',
+      };
+    }
+
+    return {
+      tier,
+      status: 'success',
+      installer: path.basename(installerPath),
+      message: 'Build generated successfully',
+    };
+  } catch (error) {
+    return {
+      tier,
+      status: 'failed',
+      message: error instanceof Error ? error.message : 'Unknown build error',
+    };
+  }
+}
+
 function createSystemBuildJob(systemId) {
   const jobId = `build_${systemId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
   const job = {
@@ -428,7 +639,12 @@ async function buildSystemById(systemId) {
     throw folderError;
   }
 
-  const results = ['basic', 'premium'].map((tier) => regenerateTierBuild(systemFolder, tier));
+  const results = [];
+  for (const tier of ['basic', 'premium']) {
+    // Run tiers sequentially to avoid overloading low-resource VPS instances.
+    const tierResult = await regenerateTierBuildAsync(systemFolder, tier);
+    results.push(tierResult);
+  }
   const attempted = results.filter((entry) => entry.status !== 'skipped');
   const failed = results.filter((entry) => entry.status === 'failed');
 
