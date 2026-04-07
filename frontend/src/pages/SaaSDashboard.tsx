@@ -300,9 +300,13 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       return;
     }
 
+    const configuredApiBase = String(import.meta.env.VITE_API_URL || '').trim();
+    const sameDomainApi = configuredApiBase.includes('zoro9x.com') ? window.location.origin : configuredApiBase;
+    const apiBase = sameDomainApi || window.location.origin;
+
     try {
       setGeneratingBuildSystemId(systemId);
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${systemId}/generate-build`, {
+      const response = await fetch(`${apiBase}/api/saas/admin/systems/${systemId}/generate-build`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -336,25 +340,40 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
       }
 
       const pollIntervalMs = 3000;
-      const maxPollAttempts = 180; // 9 minutes
+      const maxPollAttempts = 320; // ~16 minutes
+      let transientFailures = 0;
 
       for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
         if (attempt > 0) {
           await new Promise((resolve) => window.setTimeout(resolve, pollIntervalMs));
         }
 
-        const statusResponse = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/saas/admin/systems/${systemId}/generate-build/${jobId}`,
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        let statusResponse: Response;
+        let statusData: any;
+        try {
+          statusResponse = await fetch(
+            `${apiBase}/api/saas/admin/systems/${systemId}/generate-build/${jobId}`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
 
-        const statusData = await statusResponse.json().catch(() => null);
+          statusData = await statusResponse.json().catch(() => null);
+        } catch {
+          transientFailures += 1;
+          continue;
+        }
+
         if (!statusResponse.ok || !statusData?.success) {
+          // While build is running, upstream proxies can return transient 5xx/timeout responses.
+          if (statusResponse.status >= 500 || statusResponse.status === 0) {
+            transientFailures += 1;
+            continue;
+          }
+
           throw new Error(statusData?.message || 'Failed to check build status');
         }
 
@@ -377,7 +396,11 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
         }
       }
 
-      throw new Error('Build is still running. Please check again in a moment.');
+      throw new Error(
+        transientFailures > 0
+          ? 'Build is still running. Temporary gateway timeouts occurred while polling status. Please wait and try again shortly.'
+          : 'Build is still running. Please check again in a moment.'
+      );
     } catch (error) {
       console.error('Error generating build:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate build');

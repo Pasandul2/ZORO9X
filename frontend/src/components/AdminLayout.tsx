@@ -33,11 +33,24 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, darkMode, setDarkMo
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const adminRole = (() => {
+    try {
+      const raw = localStorage.getItem('admin');
+      if (!raw) {
+        return 'admin';
+      }
+      const parsed = JSON.parse(raw);
+      return parsed?.role === 'super_admin' ? 'super_admin' : 'admin';
+    } catch {
+      return 'admin';
+    }
+  })();
+  const isSuperAdmin = adminRole === 'super_admin';
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
     { icon: Users, label: 'User Management', path: '/admin/users' },
-    { icon: Lock, label: 'Admin Management', path: '/admin/admins' },
+    ...(isSuperAdmin ? [{ icon: Lock, label: 'Admin Management', path: '/admin/admins' }] : []),
     { icon: BarChart3, label: 'SaaS Systems', path: '/admin/saas' },
     { icon: Briefcase, label: 'Portfolio', path: '/admin/portfolio' },
     { icon: UserCheck, label: 'Clients', path: '/admin/clients' },

@@ -25,6 +25,7 @@ const AdminManager: React.FC<AdminManagerProps> = ({ darkMode }) => {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(true);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -104,6 +105,17 @@ const AdminManager: React.FC<AdminManagerProps> = ({ darkMode }) => {
         return;
       }
 
+      const adminRaw = localStorage.getItem('admin');
+      const adminRole = adminRaw ? JSON.parse(adminRaw)?.role : null;
+      if (adminRole !== 'super_admin') {
+        setIsSuperAdmin(false);
+        setError('Only super admins can access Admin Management.');
+        setLoading(false);
+        return;
+      }
+
+      setIsSuperAdmin(true);
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/admin/admins`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -111,6 +123,12 @@ const AdminManager: React.FC<AdminManagerProps> = ({ darkMode }) => {
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          setIsSuperAdmin(false);
+          setError('Access denied. This account is not a super admin.');
+          setAdmins([]);
+          return;
+        }
         throw new Error(`API error: ${response.status}`);
       }
 
@@ -144,6 +162,17 @@ const AdminManager: React.FC<AdminManagerProps> = ({ darkMode }) => {
   useEffect(() => {
     fetchAdmins();
   }, []);
+
+  if (!isSuperAdmin) {
+    return (
+      <div className={`p-8 rounded-2xl border ${darkMode ? 'bg-gray-800/60 border-red-500/20 text-gray-100' : 'bg-white border-red-200 text-gray-800'}`}>
+        <h2 className="text-2xl font-bold mb-3">Admin Management</h2>
+        <p className={`${darkMode ? 'text-red-300' : 'text-red-600'}`}>
+          Access denied. Only super admin accounts can manage admins.
+        </p>
+      </div>
+    );
+  }
 
   const handleAdd = () => {
     setEditingId(null);
