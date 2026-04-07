@@ -1,6 +1,7 @@
 """Print Ticket Page for Gold Loan System."""
 
 import os
+import glob
 from pathlib import Path
 import shutil
 import subprocess
@@ -35,6 +36,7 @@ class PrintTicketPage:
         else:
             self.loan_id = loan_id
             self.doc_type = 'ticket'
+        self._webview_fallback_notice_shown = False
 
     def render(self):
         for w in self.container.winfo_children():
@@ -247,14 +249,58 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         except Exception as exc:
             messagebox.showerror('PDF Export', f'Could not save PDF:\n{exc}')
 
+    def _has_windows_webview2_runtime(self):
+        if sys.platform != 'win32':
+            return True
+
+        runtime_patterns = [
+            os.path.join(
+                os.environ.get('ProgramFiles(x86)', ''),
+                'Microsoft', 'EdgeWebView', 'Application', '*', 'msedgewebview2.exe'
+            ),
+            os.path.join(
+                os.environ.get('ProgramFiles', ''),
+                'Microsoft', 'EdgeWebView', 'Application', '*', 'msedgewebview2.exe'
+            ),
+        ]
+        for pattern in runtime_patterns:
+            if pattern and glob.glob(pattern):
+                return True
+        return False
+
+    def _open_browser_preview_with_notice(self, html_path, reason):
+        if not self._webview_fallback_notice_shown:
+            if reason == 'missing-webview-runtime':
+                messagebox.showwarning(
+                    'Print Preview',
+                    'PyWebView runtime is not available on this Windows device.\n'
+                    'Opening print preview in your default browser instead.'
+                )
+            elif reason in {'webview-launch-failed', 'webview-not-installed'}:
+                messagebox.showwarning(
+                    'Print Preview',
+                    'PyWebView could not start on this device.\n'
+                    'Opening print preview in your default browser instead.'
+                )
+            self._webview_fallback_notice_shown = True
+
+        webbrowser.open(Path(html_path).as_uri())
+
     def _try_open_webview(self, html_path, title, print_on_open=False):
-        """Try to open pywebview, returning True if successful."""
+        """Try to open pywebview.
+
+        Returns:
+            (success: bool, reason: str)
+        """
         if not WEBVIEW_AVAILABLE:
-            return False
+            return False, 'webview-not-installed'
+
+        if not self._has_windows_webview2_runtime():
+            return False, 'missing-webview-runtime'
 
         try:
             script = (
-                "import pathlib, webview\n"
+                "import pathlib, webview, traceback, sys\n"
                 f"window = webview.create_window({title!r}, pathlib.Path({html_path!r}).as_uri())\n"
                 f"print_on_open = {print_on_open!r}\n"
                 "def on_start():\n"
@@ -267,6 +313,9 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 "    webview.start(on_start)\n"
                 "except KeyboardInterrupt:\n"
                 "    pass\n"
+                "except Exception:\n"
+                "    traceback.print_exc()\n"
+                "    sys.exit(1)\n"
             )
             proc = subprocess.Popen(
                 [sys.executable, '-c', script],
@@ -274,16 +323,21 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 stderr=subprocess.PIPE,
                 text=True
             )
-            proc.poll()
-            if proc.returncode is None or proc.returncode == 0:
-                return True
 
-            stderr_output = proc.stderr.read() if proc.stderr else ''
+            # If process stays alive briefly, webview launch is considered successful.
+            try:
+                proc.wait(timeout=1.2)
+            except subprocess.TimeoutExpired:
+                return True, ''
+
+            stderr_output = ''
+            if proc.stderr:
+                stderr_output = proc.stderr.read()
             if stderr_output:
                 print(f"Warning: pywebview error: {stderr_output}")
-            return False
+            return False, 'webview-launch-failed'
         except Exception:
-            return False
+            return False, 'webview-launch-failed'
 
     def _open_preview_window(self, print_on_open=False):
         try:
@@ -300,10 +354,11 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             title = f"Print Preview - {self.loan.get('ticket_no', '')}"
 
-            if self._try_open_webview(html_path, title, print_on_open):
+            opened, reason = self._try_open_webview(html_path, title, print_on_open)
+            if opened:
                 return
 
-            webbrowser.open(Path(html_path).as_uri())
+            self._open_browser_preview_with_notice(html_path, reason)
         except Exception as exc:
             messagebox.showerror('Preview Error', f'Could not open preview window:\n{exc}')
 
@@ -395,10 +450,11 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             html_path = self._write_temp_html(html_content)
             title = f"Data Only Print - {self.loan.get('ticket_no', '')}"
 
-            if self._try_open_webview(html_path, title, print_on_open):
+            opened, reason = self._try_open_webview(html_path, title, print_on_open)
+            if opened:
                 return
 
-            webbrowser.open(Path(html_path).as_uri())
+            self._open_browser_preview_with_notice(html_path, reason)
         except Exception as exc:
             messagebox.showerror('Data Only Print', f'Could not open data-only print preview:\n{exc}')
 
