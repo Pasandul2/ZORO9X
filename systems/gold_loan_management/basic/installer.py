@@ -11,6 +11,7 @@ import json
 import shutil
 import urllib.request
 import urllib.error
+import tempfile
 from pathlib import Path
 import hashlib
 import base64
@@ -26,6 +27,7 @@ DEFAULT_LOGO_NAME = 'logo.png'
 API_URL = 'https://www.zoro9x.com'
 VALIDATE_ENDPOINT = '/api/saas/validate-key'
 CONFIG_SIGNING_SECRET = 'your_jwt_secret_key_change_this_in_production_12345678'
+WEBVIEW2_BOOTSTRAPPER_URL = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
 
 
 def is_remote_api_url(url):
@@ -752,6 +754,7 @@ By proceeding, you agree to these terms."""
 
         steps = [
             'Creating installation directory...',
+            'Checking WebView2 runtime...',
             'Copying application files...',
             'Copying branding assets...',
             'Applying company logo...',
@@ -768,6 +771,9 @@ By proceeding, you agree to these terms."""
 
                 if step_text == 'Copying application files...':
                     self.copy_application_files()
+
+                elif step_text == 'Checking WebView2 runtime...':
+                    self.ensure_webview2_runtime()
 
                 elif step_text == 'Copying branding assets...':
                     self.copy_branding_assets()
@@ -790,6 +796,68 @@ By proceeding, you agree to these terms."""
         except Exception as exc:
             messagebox.showerror('Installation Error', f'Failed to install: {exc}')
             self.root.quit()
+
+    def _has_webview2_runtime(self):
+        if sys.platform != 'win32':
+            return True
+
+        # Fast path: executable installed by Edge WebView2 runtime.
+        program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+        runtime_base = Path(program_files_x86) / 'Microsoft' / 'EdgeWebView' / 'Application'
+        if runtime_base.exists() and any(runtime_base.glob('*\msedgewebview2.exe')):
+            return True
+
+        # Registry checks (common machine + user locations).
+        try:
+            import winreg
+            reg_locations = [
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'),
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'),
+                (winreg.HKEY_CURRENT_USER, r'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'),
+            ]
+            for hive, key_path in reg_locations:
+                try:
+                    with winreg.OpenKey(hive, key_path):
+                        return True
+                except OSError:
+                    continue
+        except Exception:
+            pass
+
+        return False
+
+    def ensure_webview2_runtime(self):
+        if sys.platform != 'win32':
+            return
+
+        if self._has_webview2_runtime():
+            return
+
+        temp_dir = Path(tempfile.gettempdir())
+        installer_path = temp_dir / 'MicrosoftEdgeWebView2Setup.exe'
+
+        try:
+            urllib.request.urlretrieve(WEBVIEW2_BOOTSTRAPPER_URL, installer_path)
+            result = subprocess.run(
+                [str(installer_path), '/silent', '/install', '/norestart'],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if result.returncode not in (0, 3):
+                raise RuntimeError(result.stderr.strip() or f'Installer exit code: {result.returncode}')
+
+            if not self._has_webview2_runtime():
+                raise RuntimeError('WebView2 runtime installation did not complete successfully.')
+        except Exception as exc:
+            # Continue installation, but clearly explain print-preview limitation.
+            messagebox.showwarning(
+                'WebView2 Runtime',
+                'WebView2 runtime could not be installed automatically.\n'
+                'Print preview may open in browser fallback on this device.\n\n'
+                f'Details: {exc}'
+            )
 
     def copy_application_files(self):
         app_exe_src = os.path.join(self.bundle_dir, APP_EXE_NAME)
