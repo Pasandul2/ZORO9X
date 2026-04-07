@@ -601,7 +601,7 @@ const SaaSDashboard: React.FC<SaasDashboardProps> = ({ darkMode }) => {
               SaaS Systems Dashboard
             </h1>
             <p className={`mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-              Managet your SaaS systems, clients, and subscriptions
+              Manage your SaaS systems, clients, and subscriptions
             </p>
           </div>
           <motion.button
