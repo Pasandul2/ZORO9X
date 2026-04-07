@@ -204,6 +204,11 @@
       "backup_path": "D:\\GLB\\backup_20260407_232906.db",
       "backup_name": "backup_20260407_232906.db",
       "queued_at": "2026-04-07T23:29:06.279224"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260407_233058.db",
+      "backup_name": "backup_20260407_233058.db",
+      "queued_at": "2026-04-07T23:30:58.347364"
     }
   ]
 }
