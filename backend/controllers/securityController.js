@@ -186,102 +186,47 @@ exports.activateDevice = async (req, res) => {
             system_name: subscription.system_name
           }
         });
-      } else if (device.status === 'rejected') {
-        return res.status(403).json({
-          success: false,
-          message: 'Device activation was rejected by administrator'
-        });
-      } else if (device.status === 'pending') {
-        const [activeDevices] = await pool.execute(
-          `SELECT COUNT(*) as count FROM device_activations 
-           WHERE subscription_id = ? AND status = 'active'`,
-          [subscription.id]
+      } else if (device.status !== 'active') {
+        await pool.execute(
+          `UPDATE device_activations
+           SET status = 'active', approved_by = NULL, approved_at = NOW(),
+               rejection_reason = NULL, app_state = 'running', ip_address = ?
+           WHERE id = ?`,
+          [ip, device.id]
         );
 
-        if (activeDevices[0].count === 0) {
-          await pool.execute(
-            `UPDATE device_activations
-             SET status = 'active', approved_at = NOW(), app_state = 'running', ip_address = ?
-             WHERE id = ?`,
-            [ip, device.id]
-          );
+        const token = generateLicenseToken(subscription.id, device_fingerprint);
+        await pool.execute(
+          `INSERT INTO license_tokens 
+           (subscription_id, device_fingerprint, token, expires_at) 
+           VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+          [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
+        );
 
-          const token = generateLicenseToken(subscription.id, device_fingerprint);
-          await pool.execute(
-            `INSERT INTO license_tokens 
-             (subscription_id, device_fingerprint, token, expires_at) 
-             VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
-            [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
-          );
-
-          return res.json({
-            success: true,
-            message: 'Device activated successfully',
-            token,
-            grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
-            subscription: {
-              id: subscription.id,
-              company_name: subscription.company_name,
-              system_name: subscription.system_name
-            }
-          });
-        }
-
-        return res.status(202).json({
-          success: false,
-          message: 'Device activation is pending admin approval',
-          status: 'pending'
+        return res.json({
+          success: true,
+          message: 'Device activated successfully',
+          token,
+          grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
+          subscription: {
+            id: subscription.id,
+            company_name: subscription.company_name,
+            system_name: subscription.system_name
+          }
         });
       }
     }
 
-    // Check activation limit
-    const [activeDevices] = await pool.execute(
-      `SELECT COUNT(*) as count FROM device_activations 
-       WHERE subscription_id = ? AND status = 'active'`,
-      [subscription.id]
-    );
-
-    if (activeDevices[0].count >= subscription.max_activations) {
-      // Create security alert
-      await pool.execute(
-        `INSERT INTO security_alerts 
-         (subscription_id, alert_type, severity, details, device_fingerprint, ip_address) 
-         VALUES (?, 'device_limit_exceeded', 'high', ?, ?, ?)`,
-        [
-          subscription.id,
-          JSON.stringify({ 
-            message: 'Device limit exceeded',
-            current_count: activeDevices[0].count,
-            max_allowed: subscription.max_activations,
-            new_device: device_info
-          }),
-          device_fingerprint,
-          ip
-        ]
-      );
-
-      return res.status(403).json({
-        success: false,
-        message: `Device activation limit reached (${subscription.max_activations} devices maximum). Please contact support or deactivate an existing device.`
-      });
-    }
-
-    // Auto-approve first device, require approval for additional devices
-    const isFirstDevice = activeDevices[0].count === 0;
-    const activationStatus = isFirstDevice ? 'active' : 'pending';
-    
     // Create device activation
     await pool.execute(
       `INSERT INTO device_activations 
        (subscription_id, device_fingerprint, device_name, device_info, status, app_state, ip_address, first_activated) 
-       VALUES (?, ?, ?, ?, ?, 'running', ?, NOW())`,
+       VALUES (?, ?, ?, ?, 'active', 'running', ?, NOW())`,
       [
         subscription.id,
         device_fingerprint,
         device_info?.device_name || 'Unknown Device',
         JSON.stringify(device_info),
-        activationStatus,
         ip
       ]
     );
@@ -294,67 +239,34 @@ exports.activateDevice = async (req, res) => {
       [subscription.id]
     );
 
-    if (isFirstDevice) {
-      const token = generateLicenseToken(subscription.id, device_fingerprint);
-
-      await pool.execute(
-        `INSERT INTO license_tokens 
-         (subscription_id, device_fingerprint, token, expires_at) 
-         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
-        [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
-      );
-
-      await logAuditEvent({
-        subscriptionId: subscription.id,
-        deviceFingerprint: device_fingerprint,
-        eventType: 'activation_approved',
-        actor: 'system',
-        details: { message: 'First device auto-approved', device_info, company: subscription.company_name },
-        ipAddress: ip,
-      });
-
-      return res.json({
-        success: true,
-        message: 'Device activated successfully',
-        token,
-        grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
-        subscription: {
-          id: subscription.id,
-          company_name: subscription.company_name,
-          system_name: subscription.system_name
-        }
-      });
-    }
+    const token = generateLicenseToken(subscription.id, device_fingerprint);
 
     await pool.execute(
-      `INSERT INTO security_alerts 
-       (subscription_id, alert_type, severity, details, device_fingerprint, ip_address) 
-       VALUES (?, 'rapid_activations', 'medium', ?, ?, ?)`,
-      [
-        subscription.id,
-        JSON.stringify({
-          message: 'New device activation request',
-          device_info,
-          company: subscription.company_name
-        }),
-        device_fingerprint,
-        ip
-      ]
+      `INSERT INTO license_tokens 
+       (subscription_id, device_fingerprint, token, expires_at) 
+       VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+      [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
     );
 
     await logAuditEvent({
       subscriptionId: subscription.id,
       deviceFingerprint: device_fingerprint,
-      eventType: 'activation_pending',
+      eventType: 'activation_approved',
       actor: 'system',
-      details: { message: 'Additional device awaiting admin approval', device_info, company: subscription.company_name },
+      details: { message: 'Device auto-approved', device_info, company: subscription.company_name },
       ipAddress: ip,
     });
 
-    return res.status(202).json({
-      success: false,
-      message: 'Device activation request submitted. Awaiting admin approval.',
-      status: 'pending'
+    return res.json({
+      success: true,
+      message: 'Device activated successfully',
+      token,
+      grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
+      subscription: {
+        id: subscription.id,
+        company_name: subscription.company_name,
+        system_name: subscription.system_name
+      }
     });
 
   } catch (error) {
@@ -448,25 +360,13 @@ exports.validateApiKey = async (req, res) => {
       const device = devices[0];
 
       if (device.status !== 'active') {
-        if (device.status === 'pending') {
-          return res.status(403).json({
-            success: false,
-            valid: false,
-            message: 'Device activation is pending admin approval'
-          });
-        } else if (device.status === 'rejected') {
-          return res.status(403).json({
-            success: false,
-            valid: false,
-            message: 'Device has been rejected by administrator'
-          });
-        } else if (device.status === 'revoked') {
-          return res.status(403).json({
-            success: false,
-            valid: false,
-            message: 'Device access has been revoked'
-          });
-        }
+        await pool.execute(
+          `UPDATE device_activations
+           SET status = 'active', approved_by = NULL, approved_at = NOW(),
+               rejection_reason = NULL, app_state = 'running', ip_address = ?
+           WHERE id = ?`,
+          [ip, device.id]
+        );
       }
 
       // Update last seen
@@ -767,10 +667,13 @@ exports.heartbeat = async (req, res) => {
     }
 
     if (devices[0].status !== 'active') {
-      return res.status(403).json({
-        success: false,
-        message: `Device status is ${devices[0].status}`
-      });
+      await pool.execute(
+        `UPDATE device_activations
+         SET status = 'active', approved_by = NULL, approved_at = NOW(),
+             rejection_reason = NULL, app_state = 'running', ip_address = ?
+         WHERE id = ?`,
+        [ip, devices[0].id]
+      );
     }
 
     await ensureDeviceRuntimeColumns();
