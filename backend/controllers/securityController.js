@@ -14,6 +14,19 @@ const LICENSE_TOKEN_TTL_DAYS = Math.max(
   DEFAULT_OFFLINE_GRACE_DAYS,
   parseInt(process.env.OFFLINE_TOKEN_TTL_DAYS || String(DEFAULT_OFFLINE_GRACE_DAYS), 10)
 );
+
+const DEVICE_STATUS_PRIORITY_SQL = `
+  CASE status
+    WHEN 'active' THEN 0
+    WHEN 'pending' THEN 1
+    WHEN 'rejected' THEN 2
+    WHEN 'revoked' THEN 3
+    ELSE 4
+  END,
+  COALESCE(last_seen, first_activated) DESC,
+  id DESC
+`;
+
 let deviceApprovalColumnsReady = false;
 let deviceRuntimeColumnsReady = false;
 
@@ -142,7 +155,8 @@ exports.activateDevice = async (req, res) => {
     // Check if device already activated
     const [existingDevices] = await pool.execute(
       `SELECT * FROM device_activations 
-       WHERE subscription_id = ? AND device_fingerprint = ?`,
+       WHERE subscription_id = ? AND device_fingerprint = ?
+       ORDER BY ${DEVICE_STATUS_PRIORITY_SQL}`,
       [subscription.id, device_fingerprint]
     );
 
@@ -178,6 +192,41 @@ exports.activateDevice = async (req, res) => {
           message: 'Device activation was rejected by administrator'
         });
       } else if (device.status === 'pending') {
+        const [activeDevices] = await pool.execute(
+          `SELECT COUNT(*) as count FROM device_activations 
+           WHERE subscription_id = ? AND status = 'active'`,
+          [subscription.id]
+        );
+
+        if (activeDevices[0].count === 0) {
+          await pool.execute(
+            `UPDATE device_activations
+             SET status = 'active', approved_at = NOW(), app_state = 'running', ip_address = ?
+             WHERE id = ?`,
+            [ip, device.id]
+          );
+
+          const token = generateLicenseToken(subscription.id, device_fingerprint);
+          await pool.execute(
+            `INSERT INTO license_tokens 
+             (subscription_id, device_fingerprint, token, expires_at) 
+             VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+            [subscription.id, device_fingerprint, token, LICENSE_TOKEN_TTL_DAYS]
+          );
+
+          return res.json({
+            success: true,
+            message: 'Device activated successfully',
+            token,
+            grace_period_days: DEFAULT_OFFLINE_GRACE_DAYS,
+            subscription: {
+              id: subscription.id,
+              company_name: subscription.company_name,
+              system_name: subscription.system_name
+            }
+          });
+        }
+
         return res.status(202).json({
           success: false,
           message: 'Device activation is pending admin approval',
@@ -383,7 +432,8 @@ exports.validateApiKey = async (req, res) => {
       // Check if device is activated
       const [devices] = await pool.execute(
         `SELECT * FROM device_activations 
-         WHERE subscription_id = ? AND device_fingerprint = ?`,
+         WHERE subscription_id = ? AND device_fingerprint = ?
+         ORDER BY ${DEVICE_STATUS_PRIORITY_SQL}`,
         [subscription.id, device_fingerprint]
       );
 
@@ -708,7 +758,7 @@ exports.heartbeat = async (req, res) => {
       `SELECT id, status, app_state
        FROM device_activations
        WHERE subscription_id = ? AND device_fingerprint = ?
-       ORDER BY COALESCE(last_seen, first_activated) DESC, id DESC`,
+       ORDER BY ${DEVICE_STATUS_PRIORITY_SQL}`,
       [subscriptionId, device_fingerprint]
     );
 

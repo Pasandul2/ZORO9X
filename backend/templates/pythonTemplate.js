@@ -283,19 +283,38 @@ class ${className}App:
                 config = json.load(f)
 
             device_fp = get_device_fingerprint()
-            if not verify_config_signature(config, device_fp):
-                messagebox.showerror(
-                    'Configuration Tampered',
-                    'Local configuration signature is invalid.\\nPlease reinstall or re-run activation.'
-                )
-                return {}
 
-            config['api_key'] = get_config_value(config, 'api_key_encrypted', device_fp)
-            config['company_name'] = get_config_value(config, 'company_name_encrypted', device_fp, 'My Business')
-            config['contact_email'] = get_config_value(config, 'contact_email_encrypted', device_fp)
-            config['contact_phone'] = get_config_value(config, 'contact_phone_encrypted', device_fp)
-            config['business_address'] = get_config_value(config, 'business_address_encrypted', device_fp)
-            config['logo_url'] = get_config_value(config, 'logo_url_encrypted', device_fp)
+            def _decode_values(source):
+                return {
+                    'api_key': get_config_value(source, 'api_key_encrypted', device_fp),
+                    'company_name': get_config_value(source, 'company_name_encrypted', device_fp, 'My Business'),
+                    'contact_email': get_config_value(source, 'contact_email_encrypted', device_fp),
+                    'contact_phone': get_config_value(source, 'contact_phone_encrypted', device_fp),
+                    'business_address': get_config_value(source, 'business_address_encrypted', device_fp),
+                    'logo_url': get_config_value(source, 'logo_url_encrypted', device_fp),
+                }
+
+            if not verify_config_signature(config, device_fp):
+                recovered = _decode_values(config)
+                if not recovered.get('api_key'):
+                    recovered['api_key'] = str(config.get('api_key', '') or '').strip()
+                    recovered['company_name'] = str(config.get('company_name', recovered['company_name']) or '').strip() or 'My Business'
+                    recovered['contact_email'] = str(config.get('contact_email', recovered['contact_email']) or '').strip()
+                    recovered['contact_phone'] = str(config.get('contact_phone', recovered['contact_phone']) or '').strip()
+                    recovered['business_address'] = str(config.get('business_address', recovered['business_address']) or '').strip()
+                    recovered['logo_url'] = str(config.get('logo_url', recovered['logo_url']) or '').strip()
+
+                if not recovered.get('api_key'):
+                    messagebox.showerror(
+                        'Configuration Tampered',
+                        'Local configuration signature is invalid.\\nPlease reinstall or re-run activation.'
+                    )
+                    return {}
+
+                config.update(recovered)
+                return config
+
+            config.update(_decode_values(config))
             return config
         return {}
     
