@@ -1274,16 +1274,24 @@ exports.requestBusinessInfoUpdate = async (req, res) => {
       [existing.client_id, subscriptionId, JSON.stringify(requestedData)]
     );
 
-    await pool.execute(
-      `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
-       VALUES (?, 'business_info_change_requested', ?, ?, ?)`,
-      [
-        subscriptionId,
-        String(userId),
-        JSON.stringify({ message: 'Client requested business information update approval.' }),
-        req.ip,
-      ]
-    );
+    try {
+      await pool.execute(
+        `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+         VALUES (?, 'approval', ?, ?, ?)`,
+        [
+          subscriptionId,
+          String(userId),
+          JSON.stringify({
+            message: 'Client requested business information update approval.',
+            context: 'business_info_change',
+            action: 'request',
+          }),
+          req.ip,
+        ]
+      );
+    } catch (auditError) {
+      console.error('Audit logging failed for business info request:', auditError.message);
+    }
 
     res.json({ success: true, message: 'Business information update request submitted for admin approval' });
   } catch (error) {
@@ -1415,17 +1423,25 @@ exports.reviewBusinessInfoRequest = async (req, res) => {
       );
     }
 
-    await connection.execute(
-      `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        request.subscription_id,
-        action === 'approve' ? 'business_info_change_approved' : 'business_info_change_rejected',
-        String(adminUserId),
-        JSON.stringify({ message: admin_note || (action === 'approve' ? 'Approved by admin' : 'Rejected by admin') }),
-        req.ip,
-      ]
-    );
+    try {
+      await connection.execute(
+        `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          request.subscription_id,
+          action === 'approve' ? 'approval' : 'rejection',
+          String(adminUserId),
+          JSON.stringify({
+            message: admin_note || (action === 'approve' ? 'Approved by admin' : 'Rejected by admin'),
+            context: 'business_info_change',
+            action,
+          }),
+          req.ip,
+        ]
+      );
+    } catch (auditError) {
+      console.error('Audit logging failed for business info review:', auditError.message);
+    }
 
     await connection.commit();
 
