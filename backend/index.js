@@ -30,7 +30,12 @@ const invoiceRoutes = require('./routes/invoices');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const DEFAULT_FRONTEND_ORIGINS = ['https://www.zoro9x.com', 'https://zoro9x.com'];
+const DEFAULT_FRONTEND_ORIGINS = [
+  'https://www.zoro9x.com',
+  'https://zoro9x.com',
+  'https://188.166.219.195',
+  'http://188.166.219.195',
+];
 const FRONTEND_ORIGINS = process.env.FRONTEND_URL
   ? process.env.FRONTEND_URL.split(',').map((origin) => origin.trim()).filter(Boolean)
   : DEFAULT_FRONTEND_ORIGINS;
