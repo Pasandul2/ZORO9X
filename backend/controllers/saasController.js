@@ -1277,7 +1277,7 @@ exports.requestBusinessInfoUpdate = async (req, res) => {
     try {
       await pool.execute(
         `INSERT INTO audit_logs (subscription_id, event_type, actor, details, ip_address)
-         VALUES (?, 'approval', ?, ?, ?)`,
+         VALUES (?, 'business_info_change_requested', ?, ?, ?)`,
         [
           subscriptionId,
           String(userId),
@@ -1290,7 +1290,7 @@ exports.requestBusinessInfoUpdate = async (req, res) => {
         ]
       );
     } catch (auditError) {
-      console.error('Audit logging failed for business info request:', auditError.message);
+      console.warn('Business info request audit log skipped:', auditError.message);
     }
 
     res.json({ success: true, message: 'Business information update request submitted for admin approval' });
@@ -1429,7 +1429,7 @@ exports.reviewBusinessInfoRequest = async (req, res) => {
          VALUES (?, ?, ?, ?, ?)`,
         [
           request.subscription_id,
-          action === 'approve' ? 'approval' : 'rejection',
+          action === 'approve' ? 'business_info_change_approved' : 'business_info_change_rejected',
           String(adminUserId),
           JSON.stringify({
             message: admin_note || (action === 'approve' ? 'Approved by admin' : 'Rejected by admin'),
@@ -1440,7 +1440,7 @@ exports.reviewBusinessInfoRequest = async (req, res) => {
         ]
       );
     } catch (auditError) {
-      console.error('Audit logging failed for business info review:', auditError.message);
+      console.warn('Business info review audit log skipped:', auditError.message);
     }
 
     await connection.commit();
