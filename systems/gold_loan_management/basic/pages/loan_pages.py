@@ -615,6 +615,20 @@ class LoanHistoryPage:
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(row, text=val or '-', font=self.theme.fonts.body_bold,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+
+        summary_btn_row = tk.Frame(summary_card.inner, bg=self.theme.palette.bg_surface)
+        summary_btn_row.pack(fill=tk.X, padx=14, pady=(6, 2))
+        self.theme.make_button(
+            summary_btn_row,
+            text='🖨 Print Create Ticket',
+            kind='ghost',
+            width=20,
+            pady=6,
+            command=lambda: self.navigate('print_ticket', {
+                'loan_id': self.loan_id,
+                'doc_type': 'ticket',
+            }),
+        ).pack(side=tk.LEFT)
         tk.Frame(summary_card.inner, height=8, bg=self.theme.palette.bg_surface).pack()
 
         # Full renewal details
@@ -650,18 +664,34 @@ class LoanHistoryPage:
                              bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
                     tk.Label(row, text=val, anchor='w', font=self.theme.fonts.small,
                              bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+
+                btn_row = tk.Frame(block, bg=self.theme.palette.bg_surface_alt)
+                btn_row.pack(fill=tk.X, padx=8, pady=(4, 6))
+                self.theme.make_button(
+                    btn_row,
+                    text='🖨 Print Renewal Ticket',
+                    kind='ghost',
+                    width=22,
+                    pady=6,
+                    command=lambda rid=ren.get('id'): self.navigate('print_ticket', {
+                        'loan_id': self.loan_id,
+                        'doc_type': 'renewal_ticket',
+                        'renewal_id': rid,
+                    }),
+                ).pack(side=tk.LEFT)
         else:
             tk.Label(renewal_card.inner, text='No renewal records found.', font=self.theme.fonts.body,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 10))
 
         # Full payment details
+        display_payments = self._build_display_payments(payments, renewals)
         payment_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
         payment_card.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(payment_card.inner, text=f'Payment History ({len(payments)})', font=self.theme.fonts.h3,
+        tk.Label(payment_card.inner, text=f'Payment History ({len(display_payments)})', font=self.theme.fonts.h3,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
 
-        if payments:
-            for pay in payments:
+        if display_payments:
+            for pay in display_payments:
                 block = tk.Frame(payment_card.inner, bg=self.theme.palette.bg_surface_alt)
                 block.pack(fill=tk.X, padx=14, pady=4)
                 details = [
@@ -679,6 +709,92 @@ class LoanHistoryPage:
                              bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
                     tk.Label(row, text=val, anchor='w', font=self.theme.fonts.small,
                              bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+
+                payment_type = (pay.get('payment_type') or '').lower()
+                btn_row = tk.Frame(block, bg=self.theme.palette.bg_surface_alt)
+                btn_row.pack(fill=tk.X, padx=8, pady=(4, 6))
+                if payment_type == 'redemption':
+                    self.theme.make_button(
+                        btn_row,
+                        text='🖨 Print Redeem Ticket',
+                        kind='ghost',
+                        width=22,
+                        pady=6,
+                        command=lambda pid=pay.get('id'): self.navigate('print_ticket', {
+                            'loan_id': self.loan_id,
+                            'doc_type': 'redeem_ticket',
+                            'payment_id': pid,
+                        }),
+                    ).pack(side=tk.LEFT)
+                elif payment_type == 'renewal':
+                    self.theme.make_button(
+                        btn_row,
+                        text='🖨 Print Renewal Ticket',
+                        kind='ghost',
+                        width=22,
+                        pady=6,
+                        command=lambda rid=pay.get('renewal_id'): self.navigate('print_ticket', {
+                            'loan_id': self.loan_id,
+                            'doc_type': 'renewal_ticket',
+                            'renewal_id': rid,
+                        }),
+                    ).pack(side=tk.LEFT)
+                elif payment_type in ('interest', 'partial', 'penalty') and renewals:
+                    match_renewal = self._match_renewal_for_payment(pay, renewals)
+                    self.theme.make_button(
+                        btn_row,
+                        text='🖨 Print Renewal Ticket',
+                        kind='ghost',
+                        width=22,
+                        pady=6,
+                        command=lambda rid=match_renewal.get('id') if match_renewal else None: self.navigate('print_ticket', {
+                            'loan_id': self.loan_id,
+                            'doc_type': 'renewal_ticket',
+                            'renewal_id': rid,
+                        }),
+                    ).pack(side=tk.LEFT)
         else:
             tk.Label(payment_card.inner, text='No payment records found.', font=self.theme.fonts.body,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 10))
+
+    def _build_display_payments(self, payments, renewals):
+        renewal_entries = []
+        for ren in renewals:
+            renewal_entries.append({
+                'id': f"renewal-{ren.get('id')}",
+                'payment_date': ren.get('renewed_at'),
+                'payment_type': 'renewal',
+                'amount': ren.get('payment_amount', ren.get('interest_paid', 0)),
+                'received_by_name': ren.get('renewed_by_name') or '-',
+                'paid_by_customer': '-',
+                'remarks': ren.get('remarks') or 'Renewal payment',
+                'renewal_id': ren.get('id'),
+            })
+
+        other_entries = [
+            pay for pay in payments
+            if not self._is_renewal_component_payment(pay)
+        ]
+
+        combined = renewal_entries + other_entries
+        combined.sort(key=lambda p: str(p.get('payment_date') or ''), reverse=True)
+        return combined
+
+    def _is_renewal_component_payment(self, payment):
+        payment_type = (payment.get('payment_type') or '').lower()
+        remarks = (payment.get('remarks') or '').lower()
+        return payment_type in ('interest', 'partial', 'penalty') and 'renewal' in remarks
+
+    def _match_renewal_for_payment(self, payment, renewals):
+        payment_dt = str(payment.get('payment_date') or '')
+        payment_day = payment_dt.split(' ')[0] if payment_dt else ''
+        payment_amount = float(payment.get('amount') or 0)
+
+        for ren in renewals:
+            renewal_dt = str(ren.get('renewed_at') or '')
+            renewal_day = renewal_dt.split(' ')[0] if renewal_dt else ''
+            renewal_amount = float(ren.get('payment_amount') or ren.get('interest_paid') or 0)
+            if payment_day and renewal_day and payment_day == renewal_day and abs(payment_amount - renewal_amount) < 0.01:
+                return ren
+
+        return renewals[0] if renewals else None

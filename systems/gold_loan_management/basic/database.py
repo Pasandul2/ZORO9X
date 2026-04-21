@@ -137,6 +137,10 @@ def init_database(db_path=None):
         loan_id INTEGER NOT NULL,
         payment_type TEXT NOT NULL CHECK(payment_type IN ('interest','redemption','partial','penalty')),
         amount REAL NOT NULL,
+        principal_amount REAL NOT NULL DEFAULT 0,
+        interest_amount REAL NOT NULL DEFAULT 0,
+        overdue_interest_amount REAL NOT NULL DEFAULT 0,
+        other_charges_amount REAL NOT NULL DEFAULT 0,
         paid_by_customer TEXT,
         received_by INTEGER,
         payment_date TEXT DEFAULT (datetime('now','localtime')),
@@ -357,6 +361,10 @@ def init_database(db_path=None):
     duration_cols = {row['name'] for row in c.execute("PRAGMA table_info(duration_rates)").fetchall()}
     if 'max_interest_months' not in duration_cols:
         c.execute("ALTER TABLE duration_rates ADD COLUMN max_interest_months INTEGER DEFAULT 3")
+    
+    # Add duration_unit column to support days and months
+    if 'duration_unit' not in duration_cols:
+        c.execute("ALTER TABLE duration_rates ADD COLUMN duration_unit TEXT DEFAULT 'months'")
 
     # Seed default admin user
     admin_exists = c.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
@@ -482,6 +490,7 @@ def init_database(db_path=None):
     ensure_users_updated_at_column(db_path)
     ensure_duration_rates_other_charges_columns(db_path)
     ensure_loan_renewals_other_charges_column(db_path)
+    ensure_loan_payments_redemption_details_columns(db_path)
     ensure_legacy_renewed_status_compatibility(db_path)
 
 
@@ -542,6 +551,31 @@ def ensure_loan_renewals_other_charges_column(db_path=None):
         if 'overdue_penalty_interest' not in columns:
             c.execute("ALTER TABLE loan_renewals ADD COLUMN overdue_penalty_interest REAL NOT NULL DEFAULT 0")
         
+        conn.commit()
+    except Exception as e:
+        print(f"Migration info: {e}")
+    finally:
+        conn.close()
+
+
+def ensure_loan_payments_redemption_details_columns(db_path=None):
+    """Add redemption detail columns to loan_payments table if they don't exist (migration)."""
+    conn = get_connection(db_path)
+    c = conn.cursor()
+
+    try:
+        c.execute("PRAGMA table_info(loan_payments)")
+        columns = [row[1] for row in c.fetchall()]
+
+        if 'principal_amount' not in columns:
+            c.execute("ALTER TABLE loan_payments ADD COLUMN principal_amount REAL NOT NULL DEFAULT 0")
+        if 'interest_amount' not in columns:
+            c.execute("ALTER TABLE loan_payments ADD COLUMN interest_amount REAL NOT NULL DEFAULT 0")
+        if 'overdue_interest_amount' not in columns:
+            c.execute("ALTER TABLE loan_payments ADD COLUMN overdue_interest_amount REAL NOT NULL DEFAULT 0")
+        if 'other_charges_amount' not in columns:
+            c.execute("ALTER TABLE loan_payments ADD COLUMN other_charges_amount REAL NOT NULL DEFAULT 0")
+
         conn.commit()
     except Exception as e:
         print(f"Migration info: {e}")
@@ -877,10 +911,10 @@ def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
     return True, "Loan renewed successfully"
 
 
-def redeem_loan(loan_id, total_paid, user_id, remarks='', other_charges=0, db_path=None):
+def redeem_loan(loan_id, total_paid, user_id, remarks='', principal_amount=0, interest_amount=0, overdue_interest_amount=0, other_charges_amount=0, db_path=None):
     conn = get_connection(db_path)
-    conn.execute('''INSERT INTO loan_payments (loan_id, payment_type, amount, received_by, remarks)
-        VALUES (?,?,?,?,?)''', (loan_id, 'redemption', total_paid, user_id, remarks))
+    conn.execute('''INSERT INTO loan_payments (loan_id, payment_type, amount, principal_amount, interest_amount, overdue_interest_amount, other_charges_amount, received_by, remarks)
+        VALUES (?,?,?,?,?,?,?,?,?)''', (loan_id, 'redemption', total_paid, principal_amount, interest_amount, overdue_interest_amount, other_charges_amount, user_id, remarks))
     conn.execute("UPDATE loans SET status='redeemed', updated_at=datetime('now','localtime') WHERE id=?", (loan_id,))
     conn.commit()
     conn.close()
@@ -1003,13 +1037,13 @@ def get_duration_rate(months, carat=22, db_path=None):
     return dict(row) if row else None
 
 
-def set_duration_rate(months, carat, assessed_pct, interest_rate, overdue_rate, max_interest_months=3, other_charges_renewal=0, other_charges_redeem=0, db_path=None):
+def set_duration_rate(months, carat, assessed_pct, interest_rate, overdue_rate, max_interest_months=3, other_charges_renewal=0, other_charges_redeem=0, duration_unit='months', db_path=None):
     conn = get_connection(db_path)
-    conn.execute('''INSERT INTO duration_rates (carat, duration_months, assessed_percentage, interest_rate, overdue_interest_rate, max_interest_months, other_charges_renewal, other_charges_redeem)
-        VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(carat, duration_months) DO UPDATE SET assessed_percentage=?, interest_rate=?, overdue_interest_rate=?, max_interest_months=?, other_charges_renewal=?, other_charges_redeem=?,
+    conn.execute('''INSERT INTO duration_rates (carat, duration_months, assessed_percentage, interest_rate, overdue_interest_rate, max_interest_months, other_charges_renewal, other_charges_redeem, duration_unit)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(carat, duration_months) DO UPDATE SET assessed_percentage=?, interest_rate=?, overdue_interest_rate=?, max_interest_months=?, other_charges_renewal=?, other_charges_redeem=?, duration_unit=?,
         is_active=1, updated_at=datetime('now','localtime')''',
-                 (carat, months, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem))
+                 (carat, months, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem, duration_unit, assessed_pct, interest_rate, overdue_rate, max_interest_months, other_charges_renewal, other_charges_redeem, duration_unit))
     conn.commit()
     conn.close()
 

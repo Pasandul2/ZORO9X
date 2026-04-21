@@ -195,29 +195,37 @@ class AdminSettingsPage:
         grid = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
         grid.pack(fill=tk.X, padx=14, pady=(0, 10))
 
-        headers = ['Duration', 'Assessed %', 'Interest %/month', 'Overdue %/month', 'Max Months Cap', 'Action']
+        headers = ['Duration', 'Unit', 'Assessed %', 'Interest %/month', 'Overdue %/month', 'Max Months Cap', 'Action']
         for i, h in enumerate(headers):
-            tk.Label(grid, text=h, font=self.theme.fonts.body_bold, width=12,
+            tk.Label(grid, text=h, font=self.theme.fonts.body_bold, width=10,
                      bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted,
                      anchor='w').grid(row=0, column=i, padx=3, pady=4, sticky='w')
 
         for idx, rate in enumerate(rates):
             row = idx + 1
-            tk.Label(grid, text=f"{rate['duration_months']} month(s)", font=self.theme.fonts.body,
-                     width=12, bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
+            duration_unit = rate.get('duration_unit', 'months')
+            duration_display = f"{rate['duration_months']} {duration_unit}"
+            tk.Label(grid, text=f"{rate['duration_months']}", font=self.theme.fonts.body,
+                     width=10, bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
                      anchor='w').grid(row=row, column=0, padx=3, pady=3, sticky='w')
+            
+            # Unit dropdown
+            unit_var = tk.StringVar(value=duration_unit)
+            unit_cb = self.theme.make_combobox(grid, variable=unit_var, values=['days', 'months'], width=8)
+            unit_cb.grid(row=row, column=1, padx=3, pady=3, sticky='w')
 
             vars_ = {}
-            for col, key in [(1, 'assessed_percentage'), (2, 'interest_rate'), (3, 'overdue_interest_rate'), (4, 'max_interest_months')]:
+            vars_['duration_unit'] = unit_var
+            for col, key in [(2, 'assessed_percentage'), (3, 'interest_rate'), (4, 'overdue_interest_rate'), (5, 'max_interest_months')]:
                 var = tk.StringVar(value=str(rate[key]) if key in rate else ('3' if key == 'max_interest_months' else ''))
                 vars_[key] = var
-                self.theme.make_entry(grid, variable=var, width=10).grid(row=row, column=col, padx=3, pady=3, sticky='w')
+                self.theme.make_entry(grid, variable=var, width=8).grid(row=row, column=col, padx=3, pady=3, sticky='w')
 
             self.dur_widgets.append((rate['duration_months'], vars_))
 
             del_lbl = tk.Label(grid, text='🗑️', font=self.theme.fonts.body, cursor='hand2',
                                bg=self.theme.palette.bg_surface, fg=self.theme.palette.danger)
-            del_lbl.grid(row=row, column=5, padx=3, pady=3)
+            del_lbl.grid(row=row, column=6, padx=3, pady=3)
             del_lbl.bind('<Button-1>', lambda e, m=rate['duration_months']: self._delete_duration(m))
 
         # Add new
@@ -227,8 +235,11 @@ class AdminSettingsPage:
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         self.new_dur_var = tk.StringVar()
         self.theme.make_entry(add_frame, variable=self.new_dur_var, width=8).pack(side=tk.LEFT, padx=(8, 4))
-        tk.Label(add_frame, text='month(s)', font=self.theme.fonts.body,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(0, 8))
+        
+        # Unit selector dropdown
+        self.new_unit_var = tk.StringVar(value='months')
+        self.theme.make_combobox(add_frame, variable=self.new_unit_var, values=['days', 'months'], width=8).pack(side=tk.LEFT, padx=(0, 8))
+        
         self.new_pct_var = tk.StringVar(value='85')
         self.theme.make_entry(add_frame, variable=self.new_pct_var, width=8).pack(side=tk.LEFT, padx=(0, 4))
         tk.Label(add_frame, text='%', font=self.theme.fonts.body,
@@ -262,10 +273,11 @@ class AdminSettingsPage:
                 ir = float(vars_['interest_rate'].get())
                 od = float(vars_['overdue_interest_rate'].get())
                 max_int_months = int(vars_['max_interest_months'].get()) if 'max_interest_months' in vars_ else 3
+                unit = vars_.get('duration_unit').get() if 'duration_unit' in vars_ else 'months'
                 for ct in target_carats:
-                    set_duration_rate(months, ct, pct, ir, od, max_int_months)
+                    set_duration_rate(months, ct, pct, ir, od, max_int_months, duration_unit=unit)
             except ValueError:
-                messagebox.showwarning('Error', f'Invalid values for {months} month(s).')
+                messagebox.showwarning('Error', f'Invalid values for {months}.')
                 return
         messagebox.showinfo('Success', 'Duration rates updated.')
 
@@ -276,6 +288,7 @@ class AdminSettingsPage:
             ir = float(self.new_int_var.get())
             od = float(self.new_over_var.get())
             max_int_months = int(self.new_max_int_var.get())
+            unit = self.new_unit_var.get()
         except ValueError:
             messagebox.showwarning('Error', 'Please enter valid values.')
             return
@@ -283,9 +296,9 @@ class AdminSettingsPage:
         selected = self.duration_carat_var.get()
         target_carats = [16, 17, 18, 19, 20, 21, 22, 23, 24] if selected == "All Carats" else [int(selected.replace('K', ''))]
         for ct in target_carats:
-            set_duration_rate(months, ct, pct, ir, od, max_int_months)
+            set_duration_rate(months, ct, pct, ir, od, max_int_months, duration_unit=unit)
             
-        messagebox.showinfo('Success', f'{months} month duration added.')
+        messagebox.showinfo('Success', f'{months} {unit} duration added.')
         self._show_duration_rates(selected)
 
     def _delete_duration(self, months):

@@ -716,7 +716,16 @@ class RedeemLoanPage:
             )
             messagebox.showinfo('Approval Required', 'Redemption charges require Admin approval.\nTicket sent for review.')
 
-        ok, msg = redeem_loan(self.loan_id, total_paid, self.user['id'], self.remarks_var.get(), other_charges=other_charges_paid)
+        ok, msg = redeem_loan(
+            self.loan_id,
+            total_paid,
+            self.user['id'],
+            self.remarks_var.get(),
+            principal_amount=self.payable['loan_amount'],
+            interest_amount=self.payable['interest'],
+            overdue_interest_amount=overdue_paid,
+            other_charges_amount=other_charges_paid,
+        )
         add_audit_log(self.user['id'], 'REDEEM_LOAN', 'loan', self.loan_id, msg)
         if ok:
             if messagebox.askyesno('Success', f'{msg}\nGold articles returned to customer.\n\nWould you like to print a Redeem Ticket for customer?'):

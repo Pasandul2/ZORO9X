@@ -18,7 +18,7 @@ try:
     WEBVIEW_AVAILABLE = True
 except ImportError:
     WEBVIEW_AVAILABLE = False
-from database import get_loan, get_loan_items, get_setting, get_loan_renewals
+from database import get_loan, get_loan_items, get_setting, get_loan_renewals, get_loan_payments
 from utils import format_currency, format_date, get_status_text
 
 
@@ -50,10 +50,21 @@ class PrintTicketPage:
         self.loan = loan
         self.items = get_loan_items(self.loan_id)
         renewals = get_loan_renewals(self.loan_id)
-        self.latest_renewal = renewals[0] if renewals else None
+        requested_renewal_id = self.print_context.get('renewal_id')
+        if requested_renewal_id is not None:
+            self.latest_renewal = next((r for r in renewals if str(r.get('id')) == str(requested_renewal_id)), None)
+        else:
+            self.latest_renewal = renewals[0] if renewals else None
+
+        requested_payment_id = self.print_context.get('payment_id')
+        self.latest_redemption = self._get_latest_redemption_payment(requested_payment_id)
 
         if self.doc_type == 'renewal_ticket' and not self.latest_renewal:
             messagebox.showwarning('Renewal Ticket', 'No renewal record found for this loan.')
+            self.navigate('loan_detail', self.loan_id)
+            return
+        if self.doc_type == 'redeem_ticket' and not self.latest_redemption:
+            messagebox.showwarning('Redeem Ticket', 'No redemption record found for this loan.')
             self.navigate('loan_detail', self.loan_id)
             return
 
@@ -561,6 +572,25 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         with open(template_path, 'r', encoding='utf-8') as template_file:
             return template_file.read()
 
+    def _get_latest_redemption_payment(self, payment_id=None):
+        payments = get_loan_payments(self.loan_id)
+        for payment in payments:
+            if payment.get('payment_type') != 'redemption':
+                continue
+            if payment_id is not None and str(payment.get('id')) != str(payment_id):
+                continue
+            return payment
+
+        if payment_id is not None:
+            for payment in payments:
+                if payment.get('payment_type') == 'redemption':
+                    return payment
+
+        for payment in payments:
+            if payment.get('payment_type') == 'redemption':
+                return payment
+        return None
+
     def _resolve_ticket_asset_path(self, filename):
         module_base = Path(__file__).resolve().parent.parent
         bundle_base = Path(getattr(sys, '_MEIPASS', '')) if getattr(sys, 'frozen', False) else None
@@ -908,19 +938,34 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
     def _build_redeem_ticket_html(self, pdf_uri=''):
         loan = self.loan
         template = self._load_redeem_pawn_ticket_template()
+        redemption = self.latest_redemption or {}
 
-        now = datetime.now()
-        date_str = format_date(now.strftime('%Y-%m-%d %H:%M:%S'))
-        time_str = now.strftime('%H:%M')
+        redeem_date_raw = redemption.get('payment_date') or self.print_context.get('redeem_date') or ''
+        if not redeem_date_raw:
+            redeem_date_raw = loan.get('updated_at') or loan.get('created_at') or ''
+        if redeem_date_raw:
+            date_str = format_date(redeem_date_raw)
+            time_str = redeem_date_raw.split(' ', 1)[1][:5] if isinstance(redeem_date_raw, str) and ' ' in redeem_date_raw else ''
+        else:
+            now = datetime.now()
+            date_str = format_date(now.strftime('%Y-%m-%d %H:%M:%S'))
+            time_str = now.strftime('%H:%M')
 
-        amount_advanced = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
-        normal_interest = float(self.print_context.get('redeem_normal_interest') or 0)
-        overdue_interest = float(self.print_context.get('redeem_overdue_interest') or 0)
-        other_charges = float(self.print_context.get('redeem_other_charges') or 0)
+        amount_advanced = float(redemption.get('principal_amount') or loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+        normal_interest = float(redemption.get('interest_amount') or self.print_context.get('redeem_normal_interest') or 0)
+        overdue_interest = float(redemption.get('overdue_interest_amount') or self.print_context.get('redeem_overdue_interest') or 0)
+        other_charges = float(redemption.get('other_charges_amount') or self.print_context.get('redeem_other_charges') or 0)
         total_paid = float(
-            self.print_context.get('redeem_total_paid')
+            redemption.get('amount')
+            or self.print_context.get('redeem_total_paid')
             or (amount_advanced + normal_interest + overdue_interest + other_charges)
         )
+        total_interest = normal_interest + overdue_interest
+
+        # Backward compatibility: older redemption rows may not have interest split values.
+        if total_interest <= 0 and total_paid > 0:
+            inferred_interest = total_paid - amount_advanced - other_charges
+            total_interest = max(0.0, inferred_interest)
 
         replacements = {
             '{{LOGO_SRC}}': html_escape.escape(str(self._get_logo_src())),
@@ -934,7 +979,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
             '{{NIC}}': html_escape.escape(str(loan.get('customer_nic', ''))),
             '{{PHONE}}': html_escape.escape(str(loan.get('customer_phone', ''))),
             '{{ADVANCED_AMOUNT}}': html_escape.escape(str(format_currency(amount_advanced))),
-            '{{INTEREST_AMOUNT}}': html_escape.escape(str(format_currency(normal_interest + overdue_interest))),
+            '{{INTEREST_AMOUNT}}': html_escape.escape(str(format_currency(total_interest))),
             '{{OTHER_CHARGES}}': html_escape.escape(str(format_currency(other_charges))),
             '{{PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(total_paid))),
             '{{TOTAL}}': html_escape.escape(str(format_currency(total_paid))),

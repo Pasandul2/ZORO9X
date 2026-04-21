@@ -247,7 +247,7 @@ class NewTicketPage:
         dur_row.pack(fill=tk.X, pady=(0, 6))
         tk.Label(dur_row, text='Duration:', font=self.theme.fonts.body_bold, width=12, anchor='w',
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
-        dur_options = [f"{d['duration_months']} month(s)" for d in self.duration_rates]
+        dur_options = [f"{d['duration_months']} {d.get('duration_unit', 'months').rstrip('s')}(s)" for d in self.duration_rates]
         self.duration_var = tk.StringVar(value='')
         dur_combo = self.theme.make_combobox(dur_row, variable=self.duration_var, values=dur_options, width=14)
         dur_combo.pack(side=tk.LEFT)
@@ -1325,7 +1325,7 @@ class NewTicketPage:
         part2 = [
             ('Assessed Value', format_currency(calc['assessed_value']) if has_duration else "-"),
             ('Rate of Interest Monthly', f"{calc['interest_rate']}%" if has_duration else "-"),
-            ('Duration', f"{calc['duration_months']} month(s)" if has_duration else "-"),
+            ('Duration', self.duration_var.get().strip() if has_duration else "-"),
             ('Interest Principal', format_currency(calc['interest_principal_amount']) if has_duration else "-"),
             ('Interest Amount', format_currency(calc['interest']) if has_duration else "-"),
             ('Redeem Balance', format_currency(calc['interest_principal_amount'] + calc['interest']) if has_duration else "-"),

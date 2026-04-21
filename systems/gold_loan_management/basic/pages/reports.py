@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-from database import get_connection, get_dashboard_stats
+from database import get_connection, get_dashboard_stats, get_duration_rate
 from utils import format_currency, format_date, get_status_text
+from utils import calculate_total_payable
 
 
 class ReportsPage:
@@ -24,6 +25,7 @@ class ReportsPage:
         today = datetime.now().date()
         self._date_to_var = tk.StringVar(value=today.strftime('%Y-%m-%d'))
         self._date_from_var = tk.StringVar(value=(today - timedelta(days=90)).strftime('%Y-%m-%d'))
+        self._gold_inventory_scope_var = tk.StringVar(value='active')
 
     def render(self):
         for w in self.container.winfo_children():
@@ -117,6 +119,7 @@ class ReportsPage:
             ('Overdue Analysis', lambda: self._set_active_report(self._show_overdue)),
             ('Renewal Report', lambda: self._set_active_report(self._show_renewals)),
             ('Payment Report', lambda: self._set_active_report(self._show_payments)),
+            ('Interest Report', lambda: self._set_active_report(self._show_interest_report)),
             ('Customer Report', lambda: self._set_active_report(self._show_customers)),
             ('Gold Inventory', lambda: self._set_active_report(self._show_gold_inventory)),
             ('Operations', lambda: self._set_active_report(self._show_operations)),
@@ -1045,6 +1048,161 @@ class ReportsPage:
             ])
         self._render_table(card.inner, columns, table_rows, ticket_col=1)
 
+    def _show_interest_report(self):
+        self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
+
+        loans = self._query(
+            '''SELECT l.id, l.ticket_no, l.customer_id, c.name AS customer_name,
+                      l.status, l.loan_amount, l.interest_principal_amount,
+                      l.interest_rate, l.overdue_interest_rate, l.duration_months,
+                      l.issue_date, l.renew_date, l.expire_date,
+                      COALESCE(SUM(CASE
+                        WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='interest' THEN lp.amount
+                        WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='penalty' THEN lp.amount
+                        WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='redemption' THEN COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)
+                        ELSE 0 END), 0) AS collected_interest
+               FROM loans l
+               JOIN customers c ON l.customer_id=c.id
+               LEFT JOIN loan_payments lp ON lp.loan_id=l.id
+                    WHERE date(l.issue_date) <= ?
+                      AND (
+                          date(l.issue_date) BETWEEN ? AND ?
+                          OR EXISTS (
+                                SELECT 1 FROM loan_payments lp2
+                                WHERE lp2.loan_id=l.id AND date(lp2.payment_date) BETWEEN ? AND ?
+                          )
+                          OR l.status='active'
+                      )
+               GROUP BY l.id
+               ORDER BY l.id DESC''',
+                (date_from, date_to, date_from, date_to, date_from, date_to, date_to, date_from, date_to, date_from, date_to),
+        )
+
+        total_collected_interest = 0.0
+        total_current_interest = 0.0
+        detail_rows = []
+
+        for loan in loans:
+            principal_base = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+            collected_interest = float(loan.get('collected_interest') or 0)
+
+            current_interest = 0.0
+            overdue_interest = 0.0
+            if loan.get('status') == 'active':
+                accrual_start = loan.get('renew_date') or loan.get('issue_date')
+                dur_rate = get_duration_rate(loan.get('duration_months') or 1)
+                max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
+                payable = self._calculate_total_payable_as_of(
+                    date_to,
+                    principal_base,
+                    loan.get('interest_rate') or 0,
+                    loan.get('duration_months') or 1,
+                    loan.get('overdue_interest_rate') or 0,
+                    loan.get('expire_date') or '',
+                    accrual_start,
+                    max_interest_months,
+                )
+                current_interest = float(payable.get('interest') or 0)
+                overdue_interest = float(payable.get('overdue_interest') or 0)
+
+            current_total = current_interest + overdue_interest
+            all_interest = collected_interest + current_total
+
+            total_collected_interest += collected_interest
+            total_current_interest += current_total
+
+            detail_rows.append([
+                loan.get('ticket_no') or '-',
+                loan.get('customer_name') or '-',
+                get_status_text(loan.get('status') or 'active', loan.get('expire_date') or ''),
+                format_currency(principal_base),
+                format_currency(collected_interest),
+                format_currency(current_interest),
+                format_currency(overdue_interest),
+                format_currency(all_interest),
+                format_date(loan.get('issue_date') or ''),
+                format_date(loan.get('expire_date') or ''),
+            ])
+
+        total_all_interest = total_collected_interest + total_current_interest
+
+        card = self._make_card('Interest Report')
+        self._render_kpis(
+            card.inner,
+            [
+                ('Loans (Filtered)', str(len(loans)), self.theme.palette.text_primary),
+                ('Collected Interest', format_currency(total_collected_interest), self.theme.palette.success),
+                (f'Current Interest (As Of {date_to})', format_currency(total_current_interest), self.theme.palette.warning),
+                ('All Interest', format_currency(total_all_interest), self.theme.palette.accent),
+            ],
+            columns=4,
+        )
+
+        columns = [
+            ('Ticket', 10),
+            ('Customer', 15),
+            ('Status', 12),
+            ('Principal', 11),
+            ('Collected Int', 12),
+            ('Current Int', 12),
+            ('Overdue Int', 12),
+            ('All Int', 11),
+            ('Issue', 10),
+            ('Expire', 10),
+        ]
+        self._render_table(card.inner, columns, detail_rows, ticket_col=0)
+
+    def _calculate_total_payable_as_of(self, as_of_date_str, loan_amount, interest_rate, duration_months, overdue_rate, expire_date_str, issue_date_str, max_interest_months=3):
+        """Calculate payable snapshot as of a specific date (YYYY-MM-DD)."""
+        try:
+            issue = datetime.strptime(str(issue_date_str).split(' ')[0], '%Y-%m-%d')
+            expire = datetime.strptime(str(expire_date_str).split(' ')[0], '%Y-%m-%d')
+            as_of = datetime.strptime(str(as_of_date_str).split(' ')[0], '%Y-%m-%d')
+
+            total_days = max(0, (as_of - issue).days)
+            overdue_days = max(0, (as_of - expire).days)
+
+            daily_rate = float(interest_rate) / 30.0
+            overdue_daily_rate = float(overdue_rate) / 30.0
+
+            if overdue_days <= 0:
+                interest = round(float(loan_amount) * (daily_rate / 100.0) * total_days, 2)
+                overdue_base_interest = 0.0
+                overdue_penalty_interest = 0.0
+                overdue_interest = 0.0
+            else:
+                days_until_expire = max(0, (expire - issue).days)
+                interest = round(float(loan_amount) * (daily_rate / 100.0) * min(total_days, days_until_expire), 2)
+                overdue_base_interest = round(float(loan_amount) * (daily_rate / 100.0) * overdue_days, 2)
+                overdue_penalty_interest = round(float(loan_amount) * (overdue_daily_rate / 100.0) * overdue_days, 2)
+                overdue_interest = round(overdue_base_interest + overdue_penalty_interest, 2)
+
+            total = float(loan_amount) + interest + overdue_interest
+            return {
+                'loan_amount': float(loan_amount),
+                'interest': interest,
+                'overdue_days': overdue_days,
+                'overdue_base_interest': overdue_base_interest,
+                'overdue_penalty_interest': overdue_penalty_interest,
+                'overdue_interest': overdue_interest,
+                'total': round(total, 2),
+                'days_passed': total_days,
+                'overdue_months': round(overdue_days / 30.0, 2) if overdue_days > 0 else 0,
+                'effective_overdue_months': 1 if overdue_days > 0 else 0,
+            }
+        except Exception:
+            return {
+                'loan_amount': float(loan_amount),
+                'interest': 0,
+                'overdue_days': 0,
+                'overdue_base_interest': 0,
+                'overdue_penalty_interest': 0,
+                'overdue_interest': 0,
+                'total': float(loan_amount),
+                'days_passed': 0,
+            }
+
     def _show_customers(self):
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
@@ -1112,34 +1270,35 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
 
-        active_items = self._query(
-            '''SELECT li.article_type, COUNT(*) AS item_count,
-                      COALESCE(SUM(li.quantity),0) AS total_qty,
-                      COALESCE(SUM(li.total_weight),0) AS total_item_weight,
-                      COALESCE(SUM(li.gold_weight),0) AS total_gold_weight,
-                      COALESCE(SUM(li.estimated_value),0) AS total_est_value,
-                      ROUND(AVG(li.carat), 2) AS avg_carat
-               FROM loan_items li
-               JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active'
-               AND date(l.issue_date) BETWEEN ? AND ?
-               GROUP BY li.article_type
-               ORDER BY total_gold_weight DESC'''
-             ,(date_from, date_to),
-        )
+        scope = (self._gold_inventory_scope_var.get() or 'active').strip().lower()
+        status_filter_sql = "AND l.status='active'" if scope == 'active' else ''
 
-        item_details = self._query(
-            '''SELECT l.ticket_no, c.name AS customer_name, li.article_type,
-                      li.description, li.quantity, li.total_weight,
-                      li.gold_weight, li.carat, li.estimated_value
-               FROM loan_items li
-               JOIN loans l ON li.loan_id=l.id
-               JOIN customers c ON l.customer_id=c.id
-               WHERE l.status='active'
-               AND date(l.issue_date) BETWEEN ? AND ?
-               ORDER BY li.id DESC'''
-             ,(date_from, date_to),
-        )
+        summary_sql = f'''SELECT li.article_type, COUNT(*) AS item_count,
+                COALESCE(SUM(li.quantity),0) AS total_qty,
+                COALESCE(SUM(li.total_weight),0) AS total_item_weight,
+                COALESCE(SUM(li.gold_weight),0) AS total_gold_weight,
+                COALESCE(SUM(li.estimated_value),0) AS total_est_value,
+                ROUND(AVG(li.carat), 2) AS avg_carat
+            FROM loan_items li
+            JOIN loans l ON li.loan_id=l.id
+            WHERE date(l.issue_date) BETWEEN ? AND ?
+            {status_filter_sql}
+            GROUP BY li.article_type
+            ORDER BY total_gold_weight DESC'''
+
+        active_items = self._query(summary_sql, (date_from, date_to))
+
+        detail_sql = f'''SELECT l.ticket_no, c.name AS customer_name, li.article_type,
+                li.description, li.quantity, li.total_weight,
+                li.gold_weight, li.carat, li.estimated_value, l.status AS loan_status
+            FROM loan_items li
+            JOIN loans l ON li.loan_id=l.id
+            JOIN customers c ON l.customer_id=c.id
+            WHERE date(l.issue_date) BETWEEN ? AND ?
+            {status_filter_sql}
+            ORDER BY li.id DESC'''
+
+        item_details = self._query(detail_sql, (date_from, date_to))
 
         total_items = sum(int(r['item_count'] or 0) for r in active_items)
         total_gold_weight = sum(float(r['total_gold_weight'] or 0) for r in active_items)
@@ -1147,10 +1306,39 @@ class ReportsPage:
         total_est_value = sum(float(r['total_est_value'] or 0) for r in active_items)
 
         card = self._make_card('Gold Inventory and Article Report')
+
+        filter_row = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        filter_row.pack(fill=tk.X, padx=14, pady=(0, 8))
+        tk.Label(
+            filter_row,
+            text='Inventory Scope:',
+            font=self.theme.fonts.body_bold,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+        ).pack(side=tk.LEFT)
+        scope_combo = tk.OptionMenu(
+            filter_row,
+            self._gold_inventory_scope_var,
+            'active',
+            'all',
+            command=lambda _v: self._show_gold_inventory(),
+        )
+        scope_combo.config(width=14)
+        scope_combo.pack(side=tk.LEFT, padx=(8, 8))
+        scope_label = 'Active Items Only' if scope == 'active' else 'All Items (Active + Redeemed + Others)'
+        tk.Label(
+            filter_row,
+            text=scope_label,
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+        ).pack(side=tk.LEFT)
+
+        item_entry_title = 'Active Item Entries' if scope == 'active' else 'All Item Entries'
         self._render_kpis(
             card.inner,
             [
-                ('Active Item Entries', str(total_items), self.theme.palette.text_primary),
+                (item_entry_title, str(total_items), self.theme.palette.text_primary),
                 ('Total Gold Weight (g)', f'{total_gold_weight:.3f}', self.theme.palette.warning),
                 ('Total Item Weight (g)', f'{total_item_weight:.3f}', self.theme.palette.info),
                 ('Total Estimated Value', format_currency(total_est_value), self.theme.palette.accent),
@@ -1190,7 +1378,7 @@ class ReportsPage:
 
         tk.Label(
             card.inner,
-            text='Active Item Details',
+            text='Item Details' if scope == 'all' else 'Active Item Details',
             font=self.theme.fonts.body_bold,
             bg=self.theme.palette.bg_surface,
             fg=self.theme.palette.text_primary,
@@ -1201,6 +1389,7 @@ class ReportsPage:
             ('Customer', 12),
             ('Type', 10),
             ('Description', 16),
+            ('Status', 9),
             ('Qty', 6),
             ('Gold(g)', 9),
             ('Carat', 7),
@@ -1213,6 +1402,7 @@ class ReportsPage:
                 r['customer_name'] or '-',
                 r['article_type'] or '-',
                 r['description'] or '-',
+                (r.get('loan_status') or '-').upper(),
                 str(r['quantity'] or 0),
                 f"{float(r['gold_weight'] or 0):.3f}",
                 str(r['carat'] or '-'),
