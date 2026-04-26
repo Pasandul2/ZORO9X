@@ -475,6 +475,17 @@ class LoanDetailPage:
                           loan['duration_months'], loan['overdue_interest_rate'],
                           loan['expire_date'], accrual_start, max_interest_months)
 
+        redeem_date_display = ''
+        if (loan.get('status') or '').lower() == 'redeemed':
+            redemption_payments = [
+                p for p in get_loan_payments(self.loan_id)
+                if (p.get('payment_type') or '').lower() == 'redemption'
+            ]
+            if redemption_payments:
+                redeem_date_display = format_date(redemption_payments[0].get('payment_date') or '')
+            else:
+                redeem_date_display = format_date(loan.get('updated_at') or '')
+
         assessed_pct = (loan['assessed_value'] / loan['market_value'] * 100) if loan['market_value'] else 0
         
         fin_data = [
@@ -487,6 +498,7 @@ class LoanDetailPage:
             ('Duration', f"{loan['duration_months']} month(s)"),
             ('Issue Date', format_date(loan['issue_date'])),
             ('Renew Date', format_date(loan.get('renew_date') or '')),
+            ('Redeem Date', redeem_date_display or '-') if redeem_date_display else None,
             ('Expire Date', format_date(loan['expire_date'])),
             ('Total Weight', f"{loan['total_item_weight']} g"),
             ('Deduction Wt', f"{loan['total_item_weight'] - loan['total_gold_weight']:.2f} g"),
@@ -498,6 +510,7 @@ class LoanDetailPage:
             ('Overdue Interest', format_currency(payable['overdue_interest'])),
             ('Total Outstanding', format_currency(payable['total'])),
         ]
+        fin_data = [row for row in fin_data if row is not None]
 
         if loan.get('is_other_bank_ticket'):
             fin_data[4:4] = [

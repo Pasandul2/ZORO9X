@@ -89,6 +89,14 @@ class ReportsPage:
             width=12,
             pady=6,
         ).pack(side=tk.LEFT, padx=(8, 0))
+        self.theme.make_button(
+            filters,
+            text='Today',
+            command=self._set_today_range,
+            kind='ghost',
+            width=10,
+            pady=6,
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
         export_wrap = tk.Frame(view, bg=self.theme.palette.bg_app)
         export_wrap.pack(fill=tk.X, pady=(0, 6))
@@ -140,6 +148,12 @@ class ReportsPage:
         today = datetime.now().date()
         self._date_to_var.set(today.strftime('%Y-%m-%d'))
         self._date_from_var.set((today - timedelta(days=90)).strftime('%Y-%m-%d'))
+        self._refresh_active_report()
+
+    def _set_today_range(self):
+        today = datetime.now().date().strftime('%Y-%m-%d')
+        self._date_from_var.set(today)
+        self._date_to_var.set(today)
         self._refresh_active_report()
 
     def _get_date_range(self, show_error=True):
@@ -721,6 +735,71 @@ class ReportsPage:
             'SELECT COALESCE(SUM(amount), 0) FROM loan_payments WHERE date(payment_date) BETWEEN ? AND ?',
             (date_from, date_to),
         )
+        total_interest_collected = self._scalar(
+            '''SELECT COALESCE(SUM(CASE
+                    WHEN lp.payment_type='interest' THEN lp.amount
+                    WHEN lp.payment_type='penalty' THEN lp.amount
+                    WHEN lp.payment_type='redemption' THEN
+                        CASE
+                            WHEN (COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)) > 0
+                                THEN COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)
+                            ELSE MAX(
+                                0,
+                                COALESCE(lp.amount,0)
+                                - COALESCE(NULLIF(lp.principal_amount,0), COALESCE(l.interest_principal_amount, l.loan_amount, 0))
+                                - COALESCE(lp.other_charges_amount,0)
+                            )
+                        END
+                    ELSE 0 END), 0)
+               FROM loan_payments lp
+               JOIN loans l ON l.id=lp.loan_id
+               WHERE date(lp.payment_date) BETWEEN ? AND ?''',
+            (date_from, date_to),
+        )
+
+        active_interest_rows = self._query(
+            '''SELECT id, loan_amount, interest_principal_amount, interest_rate,
+                      overdue_interest_rate, duration_months, issue_date,
+                      renew_date, expire_date
+               FROM loans
+               WHERE status='active' AND date(created_at) BETWEEN ? AND ?''',
+            (date_from, date_to),
+        )
+        active_collections = self._query(
+            '''SELECT loan_id,
+                      COALESCE(SUM(CASE
+                        WHEN payment_type='interest' THEN amount
+                        WHEN payment_type='penalty' THEN amount
+                        ELSE 0 END), 0) AS collected_interest
+               FROM loan_payments
+               WHERE date(payment_date) <= ?
+               GROUP BY loan_id''',
+            (date_to,),
+        )
+        collected_by_loan = {
+            int(r.get('loan_id')): float(r.get('collected_interest') or 0)
+            for r in active_collections
+            if r.get('loan_id') is not None
+        }
+
+        total_current_active_interest_non_collected = 0.0
+        for loan in active_interest_rows:
+            principal_base = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+            dur_rate = get_duration_rate(loan.get('duration_months') or 1)
+            max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
+            payable = self._calculate_total_payable_as_of(
+                date_to,
+                principal_base,
+                loan.get('interest_rate') or 0,
+                loan.get('duration_months') or 1,
+                loan.get('overdue_interest_rate') or 0,
+                loan.get('expire_date') or '',
+                loan.get('renew_date') or loan.get('issue_date') or '',
+                max_interest_months,
+            )
+            accrued_interest = float(payable.get('interest') or 0) + float(payable.get('overdue_interest') or 0)
+            collected_interest = float(collected_by_loan.get(int(loan.get('id') or 0), 0))
+            total_current_active_interest_non_collected += max(0.0, accrued_interest - collected_interest)
         total_renewals = self._scalar(
             'SELECT COUNT(*) FROM loan_renewals WHERE date(renewed_at) BETWEEN ? AND ?',
             (date_from, date_to),
@@ -767,6 +846,8 @@ class ReportsPage:
                 ('Today Revenue', format_currency(today_revenue), self.theme.palette.success),
                 ('Today Loans', str(today_loans), self.theme.palette.accent),
                 ('Total Payments Collected', format_currency(total_payments), self.theme.palette.success),
+                ('Total Interest Collected', format_currency(total_interest_collected), self.theme.palette.success),
+                ('Current Active Interests', format_currency(total_current_active_interest_non_collected), self.theme.palette.warning),
                 ('Total Renewals', str(total_renewals), self.theme.palette.info),
                 ('Renewal Collections', format_currency(total_renewal_collections), self.theme.palette.warning),
                 ('Principal Reduction', format_currency(total_principal_reduction), self.theme.palette.accent),
@@ -791,6 +872,8 @@ class ReportsPage:
             ['Today Revenue', format_currency(today_revenue)],
             ['Today Loans', str(today_loans)],
             ['Total Payments Collected', format_currency(total_payments)],
+            ['Total Interest Collected', format_currency(total_interest_collected)],
+            ['Current Active Interests (Non-Collected)', format_currency(total_current_active_interest_non_collected)],
             ['Total Renewals', str(total_renewals)],
             ['Renewal Collections', format_currency(total_renewal_collections)],
             ['Principal Reduction', format_currency(total_principal_reduction)],
@@ -1060,7 +1143,17 @@ class ReportsPage:
                       COALESCE(SUM(CASE
                         WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='interest' THEN lp.amount
                         WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='penalty' THEN lp.amount
-                        WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='redemption' THEN COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)
+                        WHEN date(lp.payment_date) BETWEEN ? AND ? AND lp.payment_type='redemption' THEN
+                            CASE
+                                WHEN (COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)) > 0
+                                    THEN COALESCE(lp.interest_amount,0) + COALESCE(lp.overdue_interest_amount,0)
+                                ELSE MAX(
+                                    0,
+                                    COALESCE(lp.amount,0)
+                                    - COALESCE(NULLIF(lp.principal_amount,0), COALESCE(l.interest_principal_amount, l.loan_amount, 0))
+                                    - COALESCE(lp.other_charges_amount,0)
+                                )
+                            END
                         ELSE 0 END), 0) AS collected_interest
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
@@ -1289,8 +1382,13 @@ class ReportsPage:
         active_items = self._query(summary_sql, (date_from, date_to))
 
         detail_sql = f'''SELECT l.ticket_no, c.name AS customer_name, li.article_type,
-                li.description, li.quantity, li.total_weight,
-                li.gold_weight, li.carat, li.estimated_value, l.status AS loan_status
+            li.description, li.quantity, li.total_weight,
+            li.gold_weight, li.carat, li.estimated_value,
+            l.status AS loan_status, l.issue_date, l.updated_at,
+            l.advance_amount, l.loan_amount,
+            (SELECT MAX(lp.payment_date)
+             FROM loan_payments lp
+             WHERE lp.loan_id=l.id AND lp.payment_type='redemption') AS redeem_date
             FROM loan_items li
             JOIN loans l ON li.loan_id=l.id
             JOIN customers c ON l.customer_id=c.id
@@ -1304,6 +1402,36 @@ class ReportsPage:
         total_gold_weight = sum(float(r['total_gold_weight'] or 0) for r in active_items)
         total_item_weight = sum(float(r['total_item_weight'] or 0) for r in active_items)
         total_est_value = sum(float(r['total_est_value'] or 0) for r in active_items)
+
+        def _is_redeemed_in_range(row):
+            loan_status = (row.get('loan_status') or '').lower()
+            redeem_day = str(row.get('redeem_date') or '')[:10]
+            return loan_status == 'redeemed' and bool(redeem_day) and date_from <= redeem_day <= date_to
+
+        def _is_active_in_range(row):
+            loan_status = (row.get('loan_status') or '').lower()
+            redeem_day = str(row.get('redeem_date') or '')[:10]
+            if loan_status == 'active':
+                return True
+            if loan_status == 'redeemed':
+                return (not redeem_day) or (redeem_day > date_to)
+            return False
+
+        active_item_weight = sum(
+            float(r.get('total_weight') or 0)
+            for r in item_details
+            if _is_active_in_range(r)
+        )
+        redeemed_item_weight = sum(
+            float(r.get('total_weight') or 0)
+            for r in item_details
+            if _is_redeemed_in_range(r)
+        )
+        active_gold_weight = sum(
+            float(r.get('gold_weight') or 0)
+            for r in item_details
+            if _is_active_in_range(r)
+        )
 
         card = self._make_card('Gold Inventory and Article Report')
 
@@ -1335,14 +1463,20 @@ class ReportsPage:
         ).pack(side=tk.LEFT)
 
         item_entry_title = 'Active Item Entries' if scope == 'active' else 'All Item Entries'
+        kpi_items = [
+            (item_entry_title, str(total_items), self.theme.palette.text_primary),
+            ('Total Gold Weight (g)', f'{total_gold_weight:.3f}', self.theme.palette.warning),
+            ('Total Item Weight (g)', f'{total_item_weight:.3f}', self.theme.palette.info),
+            ('Total Estimated Value', format_currency(total_est_value), self.theme.palette.accent),
+        ]
+        if scope == 'all':
+            kpi_items.append(('Active Item Weight (g)', f'{active_item_weight:.3f}', self.theme.palette.info))
+            kpi_items.append(('Active Gold Weight (g)', f'{active_gold_weight:.3f}', self.theme.palette.success))
+            kpi_items.append(('Redeemed Item Weight (g)', f'{redeemed_item_weight:.3f}', self.theme.palette.warning))
+
         self._render_kpis(
             card.inner,
-            [
-                (item_entry_title, str(total_items), self.theme.palette.text_primary),
-                ('Total Gold Weight (g)', f'{total_gold_weight:.3f}', self.theme.palette.warning),
-                ('Total Item Weight (g)', f'{total_item_weight:.3f}', self.theme.palette.info),
-                ('Total Estimated Value', format_currency(total_est_value), self.theme.palette.accent),
-            ],
+            kpi_items,
             columns=4,
         )
 
@@ -1389,25 +1523,71 @@ class ReportsPage:
             ('Customer', 12),
             ('Type', 10),
             ('Description', 16),
-            ('Status', 9),
+        ]
+        if scope == 'all':
+            detail_columns.extend([
+                ('Issue Date', 10),
+                ('Range Status', 18),
+                ('Current Status', 11),
+                ('Redeem Date', 11),
+            ])
+        else:
+            detail_columns.append(('Current Status', 11))
+        detail_columns.extend([
             ('Qty', 6),
+            ('Item(g)', 9),
             ('Gold(g)', 9),
             ('Carat', 7),
+            ('Advanced', 11),
             ('Est Value', 11),
-        ]
+        ])
         detail_rows = []
         for r in item_details:
-            detail_rows.append([
+            row_values = [
                 r['ticket_no'],
                 r['customer_name'] or '-',
                 r['article_type'] or '-',
                 r['description'] or '-',
-                (r.get('loan_status') or '-').upper(),
+            ]
+
+            if scope == 'all':
+                issue_day = str(r.get('issue_date') or '')[:10]
+                status_day = str(r.get('redeem_date') or r.get('updated_at') or '')[:10]
+                loan_status = (r.get('loan_status') or '').lower()
+                redeem_date = str(r.get('redeem_date') or '')[:10]
+
+                if loan_status == 'redeemed':
+                    if status_day and status_day < date_from:
+                        day_status = f"Redeemed before range ({status_day})"
+                    elif status_day and date_from <= status_day <= date_to:
+                        day_status = f"Redeemed"
+                    elif status_day and status_day > date_to:
+                        day_status = 'Active'
+                    else:
+                        day_status = 'Redeemed'
+                elif loan_status == 'active':
+                    day_status = 'Active'
+                else:
+                    day_status = f"{(r.get('loan_status') or '-').upper()}"
+
+                row_values.extend([
+                    format_date(issue_day) if issue_day else '-',
+                    day_status,
+                    (r.get('loan_status') or '-').upper(),
+                    format_date(redeem_date) if redeem_date else '-',
+                ])
+            else:
+                row_values.append((r.get('loan_status') or '-').upper())
+
+            row_values.extend([
                 str(r['quantity'] or 0),
+                f"{float(r['total_weight'] or 0):.3f}",
                 f"{float(r['gold_weight'] or 0):.3f}",
                 str(r['carat'] or '-'),
+                format_currency(r.get('advance_amount') if r.get('advance_amount') is not None else r.get('loan_amount', 0)),
                 format_currency(r['estimated_value']),
             ])
+            detail_rows.append(row_values)
         self._render_table(card.inner, detail_columns, detail_rows, ticket_col=0)
 
     def _show_operations(self):

@@ -1076,7 +1076,7 @@ def get_dashboard_stats(db_path=None):
     stats['total_renewed'] = conn.execute("SELECT COUNT(*) FROM loans WHERE status='renewed'").fetchone()[0]
     stats['total_loans'] = conn.execute("SELECT COUNT(*) FROM loans").fetchone()[0]
     stats['total_customers'] = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
-    r = conn.execute("SELECT COALESCE(SUM(loan_amount),0) FROM loans WHERE status='active'").fetchone()
+    r = conn.execute("SELECT COALESCE(SUM(COALESCE(advance_amount, loan_amount)),0) FROM loans WHERE status='active'").fetchone()
     stats['active_loan_amount'] = r[0]
     r = conn.execute("SELECT COUNT(*) FROM loans WHERE status='active' AND expire_date < ?", (today,)).fetchone()
     stats['overdue_count'] = r[0]
