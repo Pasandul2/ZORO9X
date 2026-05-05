@@ -13,7 +13,7 @@ const net = require('net');
 require('dotenv').config();
 const passport = require('./config/passport');
 const { initializeDatabase } = require('./config/database');
-const { createUserTable, createPortfolioTable } = require('./config/schema');
+const { createUserTable, createPortfolioTable, createLeadsTable } = require('./config/schema');
 const { createAdminTable } = require('./config/adminSchema');
 const { initializeClientTables } = require('./config/clientSchema');
 const { migrate } = require('./migrations/add_admin_columns');
@@ -22,6 +22,7 @@ const { initializeSaaSTables, seedInitialSystems, seedInitialPlans } = require('
 const authRoutes = require('./routes/auth');
 const oauthRoutes = require('./routes/oauth');
 const adminRoutes = require('./routes/admin');
+const leadsRoutes = require('./routes/leads');
 const portfolioRoutes = require('./routes/portfolio');
 const saasRoutes = require('./routes/saas');
 const clientRoutes = require('./routes/clients');
@@ -155,6 +156,8 @@ app.use('/api/oauth', oauthRoutes);
 
 // Admin routes (admin login, admin dashboard)
 app.use('/api/admin', adminRoutes);
+// Admin leads management
+app.use('/api/admin/leads', leadsRoutes);
 
 // Portfolio routes (public and admin)
 app.use('/api/portfolio', portfolioRoutes);
@@ -225,6 +228,9 @@ async function startServer() {
 
     // Step 4: Create portfolio table if not exists
     await createPortfolioTable();
+
+    // Step 4.5: Create leads table if not exists
+    await createLeadsTable();
 
     // Step 5: Initialize client, quotation, and invoice tables
     await initializeClientTables();

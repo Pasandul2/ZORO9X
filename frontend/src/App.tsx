@@ -20,6 +20,7 @@ import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import UserManagement from './pages/UserManagement';
 import AdminManager from './pages/AdminManager';
+import LeadsManager from './pages/LeadsManager';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import SaaSDashboard from './pages/SaaSDashboard';
@@ -105,6 +106,7 @@ function AppContent() {
                 <Route path="/admin/dashboard" element={<AdminDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/users" element={<UserManagement />} />
                 <Route path="/admin/admins" element={<AdminManager darkMode={adminDarkMode} />} />
+                <Route path="/admin/leads" element={<LeadsManager />} />
                 <Route path="/admin/saas" element={<SaaSDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/saas/subscriptions/:subscriptionId" element={<AdminSubscriptionDashboard darkMode={adminDarkMode} />} />
                 <Route path="/admin/portfolio" element={<PortfolioManagement darkMode={adminDarkMode} />} />

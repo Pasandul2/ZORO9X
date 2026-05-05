@@ -16,6 +16,7 @@ import {
   FileText,
   TrendingUp,
   Database,
+  MapPin,
   Lock,
   UserCheck,
   Receipt
@@ -54,6 +55,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, darkMode, setDarkMo
     { icon: BarChart3, label: 'SaaS Systems', path: '/admin/saas' },
     { icon: Briefcase, label: 'Portfolio', path: '/admin/portfolio' },
     { icon: UserCheck, label: 'Clients', path: '/admin/clients' },
+    { icon: MapPin, label: 'Leads', path: '/admin/leads' },
     { icon: FileText, label: 'Quotations', path: '/admin/quotations' },
     { icon: Receipt, label: 'Invoices', path: '/admin/invoices' },
     { icon: TrendingUp, label: 'Analytics', path: '/admin/analytics' },
