@@ -13,8 +13,12 @@ import win32con
 from database import (get_all_market_rates, set_market_rate, get_all_duration_rates,
                       set_duration_rate, delete_duration_rate, get_all_users,
                       create_user, update_user, get_setting, set_setting, get_duration_rate,
-                      get_article_types, set_article_types, set_other_charges)
-from utils import format_currency
+                      get_article_types, set_article_types, set_other_charges,
+                      search_loans, get_market_rate, create_customer, get_customer_by_nic,
+                      create_loan, delete_loan, generate_ticket_no, add_audit_log,
+                      update_customer)
+from utils import (format_currency, calculate_market_value, calculate_assessed_value,
+                   calculate_interest, get_expire_date)
 from backup_manager import get_backup_manager, BackupManager
 
 
@@ -59,6 +63,8 @@ class AdminSettingsPage:
             ('� Other Charges', self._show_other_charges),
             ('💍 Article Types', self._show_article_types),
             ('👤 User Management', self._show_users),
+            ('🗑️ Loan Add / Delete', self._show_loan_admin_tools),
+            ('🏦 Bank Details', self._show_bank_details),
             ('🖨 Printer Settings', self._show_printer_settings),
             ('🏢 Company Settings', self._show_company_settings),
             (' Backup & Restore', self._show_backup_restore),
@@ -308,6 +314,498 @@ class AdminSettingsPage:
             for ct in target_carats:
                 delete_duration_rate(months, ct)
             self._show_duration_rates(selected)
+
+    # ── Loan Admin Tools ──
+    def _show_loan_admin_tools(self):
+        self._clear_tab()
+
+        card = self.theme.make_card(self.tab_content, bg=self.theme.palette.bg_surface)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(card.inner, text='Loan Add / Delete', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 4))
+        tk.Label(card.inner, text='Password required for both actions: 0000', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.danger).pack(anchor='w', padx=14, pady=(0, 4))
+        tk.Label(card.inner, text='Use this section to add a historical loan by issue date, or search and delete an existing loan.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 12))
+
+        body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_columnconfigure(1, weight=1)
+
+        add_card = self.theme.make_card(body, bg=self.theme.palette.bg_surface)
+        add_card.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
+        tk.Label(add_card.inner, text='➕ Add Historical Loan', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(10, 4))
+        tk.Label(add_card.inner, text='The ticket number is assigned automatically as the next sequence number.',
+                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=12, pady=(0, 10))
+
+        form = tk.Frame(add_card.inner, bg=self.theme.palette.bg_surface)
+        form.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        self.loan_admin_vars = {
+            'nic': tk.StringVar(),
+            'name': tk.StringVar(),
+            'phone': tk.StringVar(),
+            'address': tk.StringVar(),
+            'issue_date': tk.StringVar(value=datetime.now().strftime('%Y-%m-%d')),
+            'duration_months': tk.StringVar(value='6'),
+            'carat': tk.StringVar(value='22'),
+            'article_type': tk.StringVar(value='Other'),
+            'description': tk.StringVar(),
+            'quantity': tk.StringVar(value='1'),
+            'gold_weight': tk.StringVar(value='0'),
+            'market_rate': tk.StringVar(value=str(get_market_rate(22) or 0)),
+            'assessed_pct': tk.StringVar(value='85'),
+            'interest_rate': tk.StringVar(value='2.5'),
+            'overdue_rate': tk.StringVar(value='5.0'),
+            'advance_amount': tk.StringVar(value=''),
+        }
+
+        self.loan_admin_vars['carat'].trace_add('write', lambda *_: self._sync_admin_loan_defaults())
+        self.loan_admin_vars['duration_months'].trace_add('write', lambda *_: self._sync_admin_loan_defaults())
+        self.loan_admin_vars['gold_weight'].trace_add('write', lambda *_: self._refresh_admin_loan_preview())
+        self.loan_admin_vars['market_rate'].trace_add('write', lambda *_: self._refresh_admin_loan_preview())
+        self.loan_admin_vars['assessed_pct'].trace_add('write', lambda *_: self._refresh_admin_loan_preview())
+        self.loan_admin_vars['advance_amount'].trace_add('write', lambda *_: self._refresh_admin_loan_preview())
+
+        fields = [
+            ('NIC', 'nic'),
+            ('Name', 'name'),
+            ('Phone', 'phone'),
+            ('Address', 'address'),
+            ('Issue Date', 'issue_date'),
+            ('Duration Months', 'duration_months'),
+            ('Carat', 'carat'),
+            ('Article Type', 'article_type'),
+            ('Description', 'description'),
+            ('Quantity', 'quantity'),
+            ('Gold Weight (g)', 'gold_weight'),
+            ('Market Rate / 8g', 'market_rate'),
+            ('Assessed %', 'assessed_pct'),
+            ('Interest % / month', 'interest_rate'),
+            ('Overdue % / month', 'overdue_rate'),
+            ('Advance Amount', 'advance_amount'),
+        ]
+
+        for label, key in fields:
+            row = tk.Frame(form, bg=self.theme.palette.bg_surface)
+            row.pack(fill=tk.X, pady=(0, 6))
+            tk.Label(row, text=f'{label}:', font=self.theme.fonts.body_bold, width=18, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            var = self.loan_admin_vars[key]
+            width = 14 if key not in ('description', 'address', 'name') else 22
+            if key == 'article_type':
+                self.theme.make_combobox(row, variable=var, values=['Chain', 'Ring', 'Bracelet', 'Necklace', 'Earrings', 'Pendant', 'Bangle', 'Anklet', 'Brooch', 'Coin', 'Bar', 'Other'], width=18).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            else:
+                self.theme.make_entry(row, variable=var, width=width).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        preview = tk.Frame(add_card.inner, bg=self.theme.palette.bg_surface_alt)
+        preview.pack(fill=tk.X, padx=12, pady=(0, 12))
+        self.admin_preview_vars = {
+            'market_value': tk.StringVar(value='Rs. 0.00'),
+            'assessed_value': tk.StringVar(value='Rs. 0.00'),
+            'expire_date': tk.StringVar(value=''),
+            'loan_amount': tk.StringVar(value='Rs. 0.00'),
+            'interest_preview': tk.StringVar(value='Rs. 0.00'),
+        }
+        for label, key in [
+            ('Market Value', 'market_value'),
+            ('Assessed Value', 'assessed_value'),
+            ('Expire Date', 'expire_date'),
+            ('Loan Amount', 'loan_amount'),
+            ('Interest Preview', 'interest_preview'),
+        ]:
+            row = tk.Frame(preview, bg=self.theme.palette.bg_surface_alt)
+            row.pack(fill=tk.X, padx=10, pady=2)
+            tk.Label(row, text=f'{label}:', font=self.theme.fonts.body_bold, width=18, anchor='w',
+                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            tk.Label(row, textvariable=self.admin_preview_vars[key], font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.accent).pack(side=tk.LEFT)
+
+        self.theme.make_button(add_card.inner, text='💾 Add Loan', command=self._add_admin_loan,
+                               kind='primary', width=18, pady=8).pack(anchor='w', padx=12, pady=(0, 12))
+
+        del_card = self.theme.make_card(body, bg=self.theme.palette.bg_surface)
+        del_card.grid(row=0, column=1, sticky='nsew', padx=(8, 0))
+        tk.Label(del_card.inner, text='🗑️ Delete Loan by Search', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(10, 4))
+        tk.Label(del_card.inner, text='Search by ticket number, customer name, or NIC before deleting.',
+                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=12, pady=(0, 10))
+
+        del_search = tk.Frame(del_card.inner, bg=self.theme.palette.bg_surface)
+        del_search.pack(fill=tk.X, padx=12, pady=(0, 10))
+        self.loan_admin_search_var = tk.StringVar()
+        self.theme.make_entry(del_search, variable=self.loan_admin_search_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+        self.theme.make_button(del_search, text='Search', command=self._search_admin_loans_for_delete,
+                               kind='ghost', width=10, pady=6).pack(side=tk.LEFT)
+
+        self.loan_admin_delete_list = tk.Listbox(
+            del_card.inner,
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface_alt,
+            fg=self.theme.palette.text_primary,
+            selectbackground=self.theme.palette.accent,
+            selectforeground='white',
+            activestyle='none',
+            height=14,
+        )
+        self.loan_admin_delete_list.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 10))
+        self.loan_admin_delete_list.bind('<<ListboxSelect>>', self._on_admin_loan_select)
+
+        self.loan_admin_delete_results = []
+        self.loan_admin_selected_loan = None
+
+        self.theme.make_button(del_card.inner, text='🗑️ Delete Selected Loan', command=self._delete_admin_loan,
+                               kind='danger', width=22, pady=8).pack(anchor='w', padx=12, pady=(0, 12))
+
+        self._sync_admin_loan_defaults()
+        self._refresh_admin_loan_preview()
+        self._search_admin_loans_for_delete()
+
+    def _prompt_loan_admin_password(self, title):
+        win = tk.Toplevel(self.container)
+        win.title(title)
+        win.configure(bg=self.theme.palette.bg_app)
+        win.resizable(False, False)
+        win.grab_set()
+
+        result = {'value': None}
+
+        tk.Label(win, text=title, font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(padx=20, pady=(18, 8))
+        tk.Label(win, text='Enter admin password to continue.', font=self.theme.fonts.body,
+                 bg=self.theme.palette.bg_app, fg=self.theme.palette.text_muted).pack(padx=20, pady=(0, 12))
+
+        entry_row = tk.Frame(win, bg=self.theme.palette.bg_app)
+        entry_row.pack(fill=tk.X, padx=20, pady=(0, 16))
+        tk.Label(entry_row, text='Password:', font=self.theme.fonts.body_bold, width=10, anchor='w',
+                 bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        pwd_var = tk.StringVar()
+        pwd_entry = self.theme.make_entry(entry_row, variable=pwd_var, masked=True, width=18)
+        pwd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        btn_row = tk.Frame(win, bg=self.theme.palette.bg_app)
+        btn_row.pack(fill=tk.X, padx=20, pady=(0, 18))
+
+        def submit():
+            result['value'] = pwd_var.get().strip()
+            win.destroy()
+
+        def cancel():
+            result['value'] = None
+            win.destroy()
+
+        self.theme.make_button(btn_row, text='Cancel', command=cancel,
+                               kind='ghost', width=10, pady=6).pack(side=tk.RIGHT, padx=(8, 0))
+        self.theme.make_button(btn_row, text='OK', command=submit,
+                               kind='primary', width=10, pady=6).pack(side=tk.RIGHT)
+
+        win.bind('<Return>', lambda _e: submit())
+        win.bind('<Escape>', lambda _e: cancel())
+        pwd_entry.entry.focus_set()
+        win.wait_window()
+        return result['value']
+
+    def _sync_admin_loan_defaults(self):
+        if not hasattr(self, 'loan_admin_vars'):
+            return
+
+        try:
+            carat = int(self.loan_admin_vars['carat'].get() or 22)
+        except ValueError:
+            carat = 22
+        try:
+            duration = int(self.loan_admin_vars['duration_months'].get() or 1)
+        except ValueError:
+            duration = 1
+
+        rate = get_market_rate(carat)
+        if rate:
+            self.loan_admin_vars['market_rate'].set(str(rate))
+
+        dur_rate = get_duration_rate(duration, carat)
+        if dur_rate:
+            self.loan_admin_vars['assessed_pct'].set(str(dur_rate.get('assessed_percentage', 85)))
+            self.loan_admin_vars['interest_rate'].set(str(dur_rate.get('interest_rate', 2.5)))
+            self.loan_admin_vars['overdue_rate'].set(str(dur_rate.get('overdue_interest_rate', 5.0)))
+
+        self._refresh_admin_loan_preview()
+
+    def _refresh_admin_loan_preview(self):
+        if not hasattr(self, 'admin_preview_vars') or not hasattr(self, 'loan_admin_vars'):
+            return
+
+        try:
+            gold_weight = float((self.loan_admin_vars['gold_weight'].get() or '0').replace(',', ''))
+        except ValueError:
+            gold_weight = 0.0
+        try:
+            market_rate = float((self.loan_admin_vars['market_rate'].get() or '0').replace(',', ''))
+        except ValueError:
+            market_rate = 0.0
+        try:
+            assessed_pct = float((self.loan_admin_vars['assessed_pct'].get() or '0').replace(',', ''))
+        except ValueError:
+            assessed_pct = 0.0
+        try:
+            interest_rate = float((self.loan_admin_vars['interest_rate'].get() or '0').replace(',', ''))
+        except ValueError:
+            interest_rate = 0.0
+        try:
+            duration = int(self.loan_admin_vars['duration_months'].get() or 1)
+        except ValueError:
+            duration = 1
+        issue_date = (self.loan_admin_vars['issue_date'].get() or datetime.now().strftime('%Y-%m-%d')).strip()
+
+        market_value = calculate_market_value(gold_weight, market_rate) if gold_weight and market_rate else 0.0
+        assessed_value = calculate_assessed_value(market_value, assessed_pct) if market_value else 0.0
+        try:
+            advance_amount = float((self.loan_admin_vars['advance_amount'].get() or '').replace(',', ''))
+        except ValueError:
+            advance_amount = assessed_value
+        if advance_amount <= 0 and assessed_value > 0:
+            advance_amount = assessed_value
+
+        loan_amount = min(advance_amount, assessed_value) if assessed_value > 0 else advance_amount
+        expire_date = get_expire_date(issue_date, duration)
+        interest_preview = calculate_interest(loan_amount, interest_rate, duration) if loan_amount else 0.0
+
+        self.admin_preview_vars['market_value'].set(format_currency(market_value))
+        self.admin_preview_vars['assessed_value'].set(format_currency(assessed_value))
+        self.admin_preview_vars['expire_date'].set(expire_date)
+        self.admin_preview_vars['loan_amount'].set(format_currency(loan_amount))
+        self.admin_preview_vars['interest_preview'].set(format_currency(interest_preview))
+
+    def _add_admin_loan(self):
+        password = self._prompt_loan_admin_password('Add Loan Password')
+        if password is None:
+            return
+        if password != '0000':
+            messagebox.showwarning('Validation', 'Password 0000 is required for this action.')
+            return
+
+        try:
+            nic = self.loan_admin_vars['nic'].get().strip()
+            name = self.loan_admin_vars['name'].get().strip()
+            phone = self.loan_admin_vars['phone'].get().strip()
+            address = self.loan_admin_vars['address'].get().strip()
+            issue_date = self.loan_admin_vars['issue_date'].get().strip() or datetime.now().strftime('%Y-%m-%d')
+            duration_months = int(self.loan_admin_vars['duration_months'].get())
+            carat = int(self.loan_admin_vars['carat'].get())
+            article_type = self.loan_admin_vars['article_type'].get().strip() or 'Other'
+            description = self.loan_admin_vars['description'].get().strip()
+            quantity = int(self.loan_admin_vars['quantity'].get() or 1)
+            gold_weight = float(self.loan_admin_vars['gold_weight'].get() or 0)
+            market_rate = float(self.loan_admin_vars['market_rate'].get() or 0)
+            assessed_pct = float(self.loan_admin_vars['assessed_pct'].get() or 0)
+            interest_rate = float(self.loan_admin_vars['interest_rate'].get() or 0)
+            overdue_rate = float(self.loan_admin_vars['overdue_rate'].get() or 0)
+        except ValueError:
+            messagebox.showwarning('Validation', 'Please enter valid loan values.')
+            return
+
+        if not nic or not name or not phone:
+            messagebox.showwarning('Validation', 'NIC, name, and phone are required.')
+            return
+        if gold_weight <= 0 or market_rate <= 0 or assessed_pct <= 0:
+            messagebox.showwarning('Validation', 'Gold weight, market rate, and assessed percentage must be greater than zero.')
+            return
+
+        market_value = calculate_market_value(gold_weight, market_rate)
+        assessed_value = calculate_assessed_value(market_value, assessed_pct)
+        try:
+            requested_advance = float((self.loan_admin_vars['advance_amount'].get() or '').replace(',', ''))
+        except ValueError:
+            requested_advance = assessed_value
+        if requested_advance <= 0:
+            requested_advance = assessed_value
+        loan_amount = min(requested_advance, assessed_value) if assessed_value > 0 else requested_advance
+        expire_date = get_expire_date(issue_date, duration_months)
+
+        if not expire_date:
+            messagebox.showwarning('Validation', 'Issue date must be in YYYY-MM-DD format.')
+            return
+
+        existing_customer = get_customer_by_nic(nic)
+        if existing_customer:
+            customer_id = existing_customer['id']
+            update_customer(customer_id, name, phone, address or existing_customer.get('address', ''),
+                            existing_customer.get('birthday', '') or '',
+                            existing_customer.get('job', '') or '',
+                            existing_customer.get('marital_status', 'Unmarried') or 'Unmarried',
+                            existing_customer.get('language', 'Sinhala') or 'Sinhala')
+        else:
+            customer_id, msg = create_customer(nic, name, phone, address)
+            if not customer_id:
+                messagebox.showerror('Error', msg)
+                return
+
+        ticket_no = generate_ticket_no()
+        loan_data = {
+            'ticket_no': ticket_no,
+            'customer_id': customer_id,
+            'purpose': '',
+            'advance_amount': loan_amount,
+            'loan_amount': loan_amount,
+            'interest_principal_amount': loan_amount,
+            'is_other_bank_ticket': 0,
+            'other_bank_paid_amount': 0,
+            'service_charge_rate': 0,
+            'service_charge_amount': 0,
+            'service_charge_payment_mode': 'balance',
+            'customer_balance_amount': loan_amount,
+            'assessed_value': assessed_value,
+            'market_value': market_value,
+            'interest_rate': interest_rate,
+            'overdue_interest_rate': overdue_rate,
+            'duration_months': duration_months,
+            'issue_date': issue_date,
+            'expire_date': expire_date,
+            'total_gold_weight': gold_weight,
+            'total_item_weight': gold_weight,
+            'remarks': f'Historical loan added by admin. {description}'.strip(),
+            'created_by': self.user['id'],
+        }
+        items = [{
+            'article_type': article_type,
+            'description': description,
+            'quantity': quantity,
+            'total_weight': gold_weight,
+            'gold_weight': gold_weight,
+            'carat': carat,
+            'estimated_value': market_value,
+        }]
+
+        try:
+            loan_id = create_loan(loan_data, items)
+        except Exception as exc:
+            messagebox.showerror('Error', f'Could not add loan.\n\n{exc}')
+            return
+
+        add_audit_log(self.user['id'], 'CREATE_LOAN', 'loan', loan_id,
+                      f'Admin historical add: {ticket_no} ({issue_date})')
+        messagebox.showinfo('Success', f'Loan {ticket_no} added successfully.')
+        self._search_admin_loans_for_delete()
+
+    def _search_admin_loans_for_delete(self):
+        if not hasattr(self, 'loan_admin_delete_list'):
+            return
+
+        query = (self.loan_admin_search_var.get() or '').strip() if hasattr(self, 'loan_admin_search_var') else ''
+        loans = search_loans(query)
+        self.loan_admin_delete_results = loans
+        self.loan_admin_delete_list.delete(0, tk.END)
+        for loan in loans:
+            self.loan_admin_delete_list.insert(
+                tk.END,
+                f"{loan['ticket_no']} | {loan['customer_name']} | {loan['customer_nic']} | {format_currency(loan['loan_amount'])} | {loan['issue_date']} | {loan['status']}"
+            )
+        self.loan_admin_selected_loan = None
+
+    def _on_admin_loan_select(self, _event=None):
+        sel = self.loan_admin_delete_list.curselection()
+        if not sel:
+            self.loan_admin_selected_loan = None
+            return
+        idx = sel[0]
+        if idx < len(self.loan_admin_delete_results):
+            self.loan_admin_selected_loan = self.loan_admin_delete_results[idx]
+
+    def _delete_admin_loan(self):
+        password = self._prompt_loan_admin_password('Delete Loan Password')
+        if password is None:
+            return
+        if password != '0000':
+            messagebox.showwarning('Validation', 'Password 0000 is required for this action.')
+            return
+
+        loan = getattr(self, 'loan_admin_selected_loan', None)
+        if not loan:
+            messagebox.showwarning('Validation', 'Select a loan to delete first.')
+            return
+
+        if not messagebox.askyesno('Delete Loan', f"Delete {loan['ticket_no']} for {loan['customer_name']}? This cannot be undone."):
+            return
+
+        ok, msg = delete_loan(loan['id'])
+        if not ok:
+            messagebox.showerror('Error', msg)
+            return
+
+        add_audit_log(self.user['id'], 'DELETE_LOAN', 'loan', loan['id'],
+                      f"Deleted {loan['ticket_no']} ({loan['customer_nic']})")
+        messagebox.showinfo('Success', msg)
+        self._search_admin_loans_for_delete()
+
+    # ── Bank Details ──
+    def _show_bank_details(self):
+        self._clear_tab()
+        card = self.theme.make_card(self.tab_content, bg=self.theme.palette.bg_surface)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(card.inner, text='Bank Transfer Details', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 4))
+        tk.Label(card.inner, text='Edit the bank details shown in client renewal instructions.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 12))
+
+        form = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        form.pack(fill=tk.X, padx=14, pady=(0, 14))
+
+        # Load existing settings
+        bank_name = get_setting('renewal_bank_name', '')
+        bank_account = get_setting('renewal_bank_account', '')
+        bank_branch = get_setting('renewal_bank_branch', '')
+        bank_swift = get_setting('renewal_bank_swift', '')
+        bank_instructions = get_setting('renewal_bank_instructions', '')
+
+        self.bank_name_var = tk.StringVar(value=bank_name)
+        self.bank_account_var = tk.StringVar(value=bank_account)
+        self.bank_branch_var = tk.StringVar(value=bank_branch)
+        self.bank_swift_var = tk.StringVar(value=bank_swift)
+        self.bank_instructions_var = tk.StringVar(value=bank_instructions)
+
+        rows = [
+            ('Bank Name', self.bank_name_var),
+            ('Account Number', self.bank_account_var),
+            ('Account Name', self.bank_branch_var),
+            ('Branch / IFSC', self.bank_swift_var),
+        ]
+
+        for label, var in rows:
+            r = tk.Frame(form, bg=self.theme.palette.bg_surface)
+            r.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(r, text=f'{label}:', font=self.theme.fonts.body_bold, width=18, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            self.theme.make_entry(r, variable=var, width=36).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Instructions multi-line
+        instr_frame = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        instr_frame.pack(fill=tk.BOTH, pady=(6, 12))
+        tk.Label(instr_frame, text='Transfer Instructions:', font=self.theme.fonts.body_bold, width=18, anchor='nw',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        instr_text = tk.Text(instr_frame, height=6, width=56, bg=self.theme.palette.bg_surface_alt,
+                             fg=self.theme.palette.text_primary, wrap='word')
+        instr_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        instr_text.insert('1.0', bank_instructions)
+
+        def _save_bank_details():
+            set_setting('renewal_bank_name', self.bank_name_var.get().strip())
+            set_setting('renewal_bank_account', self.bank_account_var.get().strip())
+            set_setting('renewal_bank_branch', self.bank_branch_var.get().strip())
+            set_setting('renewal_bank_swift', self.bank_swift_var.get().strip())
+            set_setting('renewal_bank_instructions', instr_text.get('1.0', 'end').strip())
+            messagebox.showinfo('Success', 'Bank details updated.')
+
+        btn_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        btn_frame.pack(fill=tk.X, padx=14, pady=(0, 14))
+        self.theme.make_button(btn_frame, text='💾 Save Bank Details', command=_save_bank_details,
+                               kind='primary', width=20, pady=8).pack(side=tk.LEFT)
 
     # ── Other Charges ──
     def _show_other_charges(self):

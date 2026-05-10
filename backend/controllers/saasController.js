@@ -1106,14 +1106,37 @@ exports.getMySubscriptions = async (req, res) => {
       };
     });
 
+    // Try to read admin-configured bank details from backend/config/bank_details.json
+    let bankDetails = {
+      account_no: '2002342027',
+      account_name: 'Pamith Pasandul',
+      bank_name: 'HNB',
+      branch: null,
+      swift: null,
+      instructions: null,
+    };
+    try {
+      const cfgPath = path.join(__dirname, '..', 'config', 'bank_details.json');
+      if (fs.existsSync(cfgPath)) {
+        const raw = fs.readFileSync(cfgPath, 'utf8');
+        const parsed = JSON.parse(raw || '{}');
+        bankDetails = {
+          account_no: parsed.account_no || bankDetails.account_no,
+          account_name: parsed.account_name || bankDetails.account_name,
+          bank_name: parsed.bank_name || bankDetails.bank_name,
+          branch: parsed.branch || bankDetails.branch,
+          swift: parsed.swift || bankDetails.swift,
+          instructions: parsed.instructions || bankDetails.instructions,
+        };
+      }
+    } catch (err) {
+      console.warn('Could not load bank details config, using defaults:', err.message || err);
+    }
+
     res.json({
       success: true,
       subscriptions: enriched,
-      bank_details: {
-        account_no: '2002342027',
-        account_name: 'Pamith Pasandul',
-        bank_name: 'HNB',
-      },
+      bank_details: bankDetails,
     });
   } catch (error) {
     console.error('Error fetching subscriptions:', error);

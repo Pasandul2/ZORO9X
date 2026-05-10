@@ -860,6 +860,31 @@ def search_loans(query='', status='all', db_path=None):
     return [dict(r) for r in rows]
 
 
+def delete_loan(loan_id, db_path=None):
+    conn = get_connection(db_path)
+    try:
+        loan = conn.execute(
+            'SELECT id, ticket_no FROM loans WHERE id=?',
+            (loan_id,)
+        ).fetchone()
+        if not loan:
+            return False, 'Loan not found'
+
+        conn.execute('DELETE FROM customer_letters WHERE loan_id=?', (loan_id,))
+        conn.execute('DELETE FROM loan_approval_requests WHERE loan_id=?', (loan_id,))
+        conn.execute('DELETE FROM loan_payments WHERE loan_id=?', (loan_id,))
+        conn.execute('DELETE FROM loan_renewals WHERE loan_id=?', (loan_id,))
+        conn.execute('DELETE FROM loan_items WHERE loan_id=?', (loan_id,))
+        conn.execute('DELETE FROM loans WHERE id=?', (loan_id,))
+        conn.commit()
+        return True, f"Loan {loan['ticket_no']} deleted successfully"
+    except Exception as exc:
+        conn.rollback()
+        return False, str(exc)
+    finally:
+        conn.close()
+
+
 def update_loan_status(loan_id, status, db_path=None):
     conn = get_connection(db_path)
     conn.execute("UPDATE loans SET status=?, updated_at=datetime('now','localtime') WHERE id=?", (status, loan_id))

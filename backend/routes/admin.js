@@ -63,6 +63,32 @@ const upload = multer({
   }
 });
 
+// Simple JSON-backed bank details storage (fallback if DB not used)
+const configDir = path.join(__dirname, '..', 'config');
+if (!fs.existsSync(configDir)) {
+  fs.mkdirSync(configDir, { recursive: true });
+}
+const bankConfigPath = path.join(configDir, 'bank_details.json');
+const _readBankConfig = () => {
+  try {
+    if (!fs.existsSync(bankConfigPath)) return null;
+    const raw = fs.readFileSync(bankConfigPath, 'utf8');
+    return JSON.parse(raw || '{}');
+  } catch (err) {
+    console.error('Failed to read bank details config:', err);
+    return null;
+  }
+};
+const _writeBankConfig = (data) => {
+  try {
+    fs.writeFileSync(bankConfigPath, JSON.stringify(data || {}, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Failed to write bank details config:', err);
+    return false;
+  }
+};
+
 /**
  * @route   POST /api/admin/login
  * @desc    Admin login with email and password
@@ -167,4 +193,43 @@ router.delete('/generated-systems/:id', verifyToken, deleteGeneratedSystem);
  */
 router.post('/generated-systems/:id/regenerate', verifyToken, regenerateSystem);
 
+/**
+ * GET /api/admin/bank-details
+ * Return configured bank transfer details for client renewal page
+ */
+router.get('/bank-details', verifyToken, (req, res) => {
+  try {
+    const cfg = _readBankConfig() || {};
+    return res.json({ success: true, bank_details: cfg });
+  } catch (err) {
+    console.error('Error reading bank details:', err);
+    return res.status(500).json({ success: false, message: 'Failed to read bank details' });
+  }
+});
+
+/**
+ * PUT /api/admin/bank-details
+ * Save bank transfer details (admin only)
+ */
+router.put('/bank-details', verifyToken, express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const cfg = {
+      bank_name: (body.bank_name || '').toString(),
+      account_no: (body.account_no || '').toString(),
+      account_name: (body.account_name || '').toString(),
+      branch: (body.branch || '').toString(),
+      swift: (body.swift || '').toString(),
+      instructions: (body.instructions || '').toString(),
+    };
+    const ok = _writeBankConfig(cfg);
+    if (!ok) return res.status(500).json({ success: false, message: 'Failed to save bank details' });
+    return res.json({ success: true, message: 'Bank details saved', bank_details: cfg });
+  } catch (err) {
+    console.error('Error saving bank details:', err);
+    return res.status(500).json({ success: false, message: 'Failed to save bank details' });
+  }
+});
+
 module.exports = router;
+

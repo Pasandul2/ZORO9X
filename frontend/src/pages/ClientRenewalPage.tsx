@@ -36,6 +36,9 @@ interface BankDetails {
   account_no: string;
   account_name: string;
   bank_name: string;
+  branch?: string | null;
+  swift?: string | null;
+  instructions?: string | null;
 }
 
 const statusBadgeClass = (status: string) => {
@@ -258,6 +261,19 @@ const ClientRenewalPage: React.FC<ClientRenewalPageProps> = ({ darkMode }) => {
               <p className="font-semibold">{bankDetails?.account_name || 'Pamith Pasandul'}</p>
             </div>
           </div>
+
+          { (bankDetails?.branch || bankDetails?.swift) && (
+            <div className="grid md:grid-cols-2 gap-3 text-sm mb-5">
+              <div className={`rounded-lg p-3 border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+                <p className="text-gray-400">Branch / IFSC</p>
+                <p className="font-semibold">{bankDetails?.branch || bankDetails?.swift || '-'}</p>
+              </div>
+              <div className={`rounded-lg p-3 border ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+                <p className="text-gray-400">Instructions</p>
+                <p className="font-semibold">{bankDetails?.instructions || '-'}</p>
+              </div>
+            </div>
+          )}
 
           <div className="grid md:grid-cols-2 gap-4 mb-4">
             <div>
