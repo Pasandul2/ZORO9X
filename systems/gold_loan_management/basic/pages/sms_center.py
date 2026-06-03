@@ -1,8 +1,14 @@
-"""Admin SMS center for Text.lk messaging — rebuilt with improved UI/UX."""
+"""Modern SMS Center for Text.lk messaging — premium UI/UX with glassmorphism & rich features."""
 
 import tkinter as tk
-from tkinter import messagebox, ttk
-from datetime import datetime
+from tkinter import messagebox, ttk, filedialog
+from datetime import datetime, timedelta
+import csv
+import io
+import os
+import json
+import math
+import re
 
 from database import (
     delete_sms_template,
@@ -29,66 +35,102 @@ from sms_service import build_sms_context, render_template, send_sms
 from sms_service import normalize_phone_number
 
 
+# ── Modern Color Palette ──────────────────────────────────────────────────────
+
+class ModernColors:
+    primary = '#6366f1'       # Indigo
+    primary_dark = '#4f46e5'
+    primary_light = '#a5b4fc'
+    secondary = '#0ea5e9'     # Sky
+    success = '#10b981'       # Emerald
+    warning = '#f59e0b'       # Amber
+    danger = '#ef4444'        # Red
+    info = '#8b5cf6'          # Violet
+    surface = '#ffffff'
+    surface_alt = '#f8fafc'
+    surface_dim = '#f1f5f9'
+    bg = '#f0f2f5'
+    text = '#0f172a'
+    text_muted = '#64748b'
+    text_dim = '#94a3b8'
+    border = '#e2e8f0'
+    border_focus = '#6366f1'
+    gradient_start = '#6366f1'
+    gradient_end = '#8b5cf6'
+    card_shadow = '#d4dce9'
+    glass_bg = 'rgba(255,255,255,0.85)'
+
+
 # ── Placeholders ──────────────────────────────────────────────────────────────
 
 SMS_PLACEHOLDERS = [
-    ('Customer Name', '{{customer_name}}'),
-    ('Customer NIC', '{{customer_nic}}'),
-    ('Customer Phone', '{{customer_phone}}'),
-    ('Ticket No', '{{ticket_no}}'),
-    ('Loan Amount', '{{loan_amount}}'),
-    ('Market Value', '{{market_value}}'),
-    ('Assessed Value', '{{assessed_value}}'),
-    ('Interest Rate', '{{interest_rate}}'),
-    ('Duration', '{{duration}}'),
-    ('Issue Date', '{{issue_date}}'),
-    ('Renew Date', '{{renew_date}}'),
-    ('Expire Date', '{{expire_date}}'),
-    ('Loan Status', '{{loan_status}}'),
-    ('Total Payable', '{{total_payable}}'),
-    ('Birthday Date', '{{birthday_date}}'),
-    ('Company Name', '{{company_name}}'),
-    ('Company Phone', '{{company_phone}}'),
-    ('Company Address', '{{company_address}}'),
-    ('Current Date', '{{date}}'),
-    ('Current Time', '{{time}}'),
-    ('Message', '{{message}}'),
+    ('👤 Customer Name', '{{customer_name}}'),
+    ('🆔 Customer NIC', '{{customer_nic}}'),
+    ('📞 Customer Phone', '{{customer_phone}}'),
+    ('🎫 Ticket No', '{{ticket_no}}'),
+    ('💰 Loan Amount', '{{loan_amount}}'),
+    ('📊 Market Value', '{{market_value}}'),
+    ('📋 Assessed Value', '{{assessed_value}}'),
+    ('📈 Interest Rate', '{{interest_rate}}'),
+    ('⏱ Duration', '{{duration}}'),
+    ('📅 Issue Date', '{{issue_date}}'),
+    ('🔄 Renew Date', '{{renew_date}}'),
+    ('⏳ Expire Date', '{{expire_date}}'),
+    ('📌 Loan Status', '{{loan_status}}'),
+    ('💵 Total Payable', '{{total_payable}}'),
+    ('🎂 Birthday Date', '{{birthday_date}}'),
+    ('🏢 Company Name', '{{company_name}}'),
+    ('📞 Company Phone', '{{company_phone}}'),
+    ('📍 Company Address', '{{company_address}}'),
+    ('📆 Current Date', '{{date}}'),
+    ('🕐 Current Time', '{{time}}'),
+    ('💬 Message', '{{message}}'),
 ]
 
 AUTO_EVENTS = [
-    ('sms_auto_new_loan', 'New Loan SMS', 'auto_new_loan',
+    ('sms_auto_new_loan', '🆕 New Loan SMS', 'auto_new_loan',
      'Send SMS automatically when a new loan is created.'),
-    ('sms_auto_renewal', 'Renewal SMS', 'auto_renewal',
+    ('sms_auto_renewal', '🔄 Renewal SMS', 'auto_renewal',
      'Send SMS when a loan is renewed.'),
-    ('sms_auto_redemption', 'Redemption SMS', 'auto_redemption',
+    ('sms_auto_redemption', '✅ Redemption SMS', 'auto_redemption',
      'Send SMS when a loan is redeemed.'),
-    ('sms_auto_reminder', 'Reminder SMS', 'auto_reminder',
+    ('sms_auto_reminder', '⏰ Reminder SMS', 'auto_reminder',
      'Send SMS reminder for upcoming loan expiry.'),
 ]
 
-# Category labels for display
 CATEGORY_LABELS = {
-    'custom': 'Custom',
-    'auto': 'Auto',
-    'auto_new_loan': 'New Loan',
-    'auto_renewal': 'Renewal',
-    'auto_redemption': 'Redemption',
-    'auto_reminder': 'Reminder',
-    'promotion': 'Promotion',
-    'birthday': 'Birthday',
-    'order_status': 'Loan Status',
-    'other': 'Other',
+    'custom': 'Custom', 'auto': 'Auto',
+    'auto_new_loan': 'New Loan', 'auto_renewal': 'Renewal',
+    'auto_redemption': 'Redemption', 'auto_reminder': 'Reminder',
+    'promotion': 'Promotion', 'birthday': 'Birthday',
+    'order_status': 'Loan Status', 'other': 'Other',
 }
 
 STATUS_COLORS = {
-    'sent': '#14b8a6',
-    'failed': '#ef4444',
-    'pending': '#f97316',
+    'sent': '#10b981', 'failed': '#ef4444',
+    'pending': '#f59e0b', 'scheduled': '#6366f1',
+}
+
+# ── SVG-style icon set using Unicode & styled labels ─────────────────────────
+
+ICONS = {
+    'send': '➤', 'template': '📄', 'settings': '⚙️', 'history': '📊',
+    'analytics': '📈', 'birthday': '🎂', 'promotion': '📢', 'auto': '⚡',
+    'custom': '✉️', 'failed': '❌', 'scheduled': '📅', 'queue': '📋',
+    'search': '🔍', 'add': '➕', 'remove': '✕', 'edit': '✏️',
+    'save': '💾', 'delete': '🗑️', 'refresh': '🔄', 'export': '📤',
+    'import': '📥', 'preview': '👁️', 'credit': '💳', 'check': '✓',
+    'close': '✕', 'back': '◀', 'forward': '▶', 'download': '⬇',
+    'upload': '⬆', 'filter': '🔽', 'sort': '↕', 'more': '⋯',
+    'customer': '👤', 'phone': '📞', 'message': '💬', 'warning': '⚠️',
+    'info': 'ℹ️', 'success': '✅', 'error': '❌', 'time': '🕐',
+    'date': '📅', 'star': '⭐', 'heart': '❤️', 'gift': '🎁',
+    'celebration': '🎉', 'rocket': '🚀', 'zap': '⚡', 'globe': '🌐',
 }
 
 
 class SmsCenterPage:
-    """Rebuilt SMS Center with 7 tabs and improved UI/UX."""
+    """Premium SMS Center with glassmorphism design, 9 tabs, and rich features."""
 
     def __init__(self, container, theme, user, navigate_fn):
         self.container = container
@@ -99,11 +141,11 @@ class SmsCenterPage:
         self.customers = []
         self.selected_customer = None
         self.selected_loan = None
+        self.MC = ModernColors
 
-    # ── Helpers ────────────────────────────────────────────────────────────
+    # ── Modern UI Helpers ──────────────────────────────────────────────────
 
     def _check_internet(self):
-        """Check if internet is connected. Show error dialog if not connected."""
         import socket
         try:
             socket.setdefaulttimeout(2.0)
@@ -112,7 +154,7 @@ class SmsCenterPage:
             s.close()
             return True
         except OSError:
-            messagebox.showerror('No Internet Connection', 'Please check your internet connection and try again.')
+            self._toast('No Internet Connection', 'Please check your connection and try again.', 'error')
             return False
 
     def _clear(self, parent):
@@ -126,74 +168,116 @@ class SmsCenterPage:
         widget.delete('1.0', tk.END)
         widget.insert('1.0', value or '')
 
+    def _toast(self, title, message, kind='info'):
+        """Modern toast notification."""
+        colors = {'info': self.MC.info, 'success': self.MC.success,
+                  'warning': self.MC.warning, 'error': self.MC.danger}
+        icons = {'info': 'ℹ️', 'success': '✅', 'warning': '⚠️', 'error': '❌'}
+        c = colors.get(kind, self.MC.info)
+        msg = f"{icons.get(kind, '')}  {title}\n{message}" if message else f"{icons.get(kind, '')}  {title}"
+        if kind == 'error':
+            messagebox.showerror(title, message)
+        elif kind == 'warning':
+            messagebox.showwarning(title, message)
+        else:
+            messagebox.showinfo(title, message)
+
+    def _modern_button(self, parent, text, command, kind='primary', width=None, pady=8, icon=None):
+        """Create a modern styled button using theme's make_button with icon prefix."""
+        display = f"{icon}  {text}" if icon else text
+        kind_map = {'primary': 'primary', 'secondary': 'secondary', 'danger': 'danger',
+                    'ghost': 'ghost', 'success': 'primary'}
+        return self.theme.make_button(
+            parent, text=display, command=command,
+            kind=kind_map.get(kind, 'primary'),
+            width=width or 14, pady=pady
+        )
+
     def _message_box(self, parent, height=8):
+        """Modern styled text editor."""
         text = tk.Text(
             parent, height=height, wrap='word',
-            bg=self.theme.palette.bg_surface_alt,
-            fg=self.theme.palette.text_primary,
-            insertbackground=self.theme.palette.text_primary,
-            relief='flat', bd=0, padx=10, pady=8,
-            font=self.theme.fonts.body,
+            bg=self.MC.surface_alt, fg=self.MC.text,
+            insertbackground=self.MC.text,
+            relief='flat', bd=0, padx=12, pady=10,
+            font=('Segoe UI', 10),
             highlightthickness=1,
-            highlightbackground=self.theme.palette.border,
-            highlightcolor=self.theme.palette.accent,
+            highlightbackground=self.MC.border,
+            highlightcolor=self.MC.border_focus,
         )
         return text
 
     def _section_label(self, parent, text, icon=''):
         lbl = tk.Label(
             parent, text=f'{icon}  {text}' if icon else text,
-            font=self.theme.fonts.h3,
-            bg=parent['bg'], fg=self.theme.palette.text_primary,
+            font=('Segoe UI', 15, 'bold'),
+            bg=parent['bg'], fg=self.MC.text,
         )
         return lbl
 
     def _desc_label(self, parent, text):
         return tk.Label(
-            parent, text=text, font=self.theme.fonts.small,
-            bg=parent['bg'], fg=self.theme.palette.text_muted,
-            wraplength=600, justify='left',
+            parent, text=text, font=('Segoe UI', 9),
+            bg=parent['bg'], fg=self.MC.text_muted,
+            wraplength=650, justify='left',
         )
 
-    def _badge(self, parent, text, color):
-        """Create a small colored badge label."""
+    def _badge(self, parent, text, color, text_color='#ffffff'):
         lbl = tk.Label(
-            parent, text=f'  {text}  ', font=self.theme.fonts.small,
-            bg=color, fg='#ffffff',
+            parent, text=f'  {text}  ', font=('Segoe UI', 8, 'bold'),
+            bg=color, fg=text_color, padx=4, pady=2,
         )
         return lbl
 
-    def _stat_card(self, parent, title, value, color=None):
-        """Create a compact stat card with title and big number."""
-        bg = self.theme.palette.bg_surface_alt
+    def _stat_card(self, parent, title, value, color=None, icon=''):
+        """Modern stat card with icon."""
+        bg = self.MC.surface
         card = tk.Frame(parent, bg=bg, highlightthickness=1,
-                        highlightbackground=self.theme.palette.border, padx=16, pady=12)
-        tk.Label(card, text=title, font=self.theme.fonts.small,
-                 bg=bg, fg=self.theme.palette.text_muted).pack(anchor='w')
-        tk.Label(card, text=str(value), font=('Segoe UI', 22, 'bold'),
-                 bg=bg, fg=color or self.theme.palette.text_primary).pack(anchor='w', pady=(2, 0))
+                        highlightbackground=self.MC.border, padx=16, pady=14)
+        top = tk.Frame(card, bg=bg)
+        top.pack(fill=tk.X)
+        tk.Label(top, text=icon, font=('Segoe UI', 14), bg=bg).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Label(top, text=title, font=('Segoe UI', 9), bg=bg,
+                 fg=self.MC.text_muted).pack(side=tk.LEFT)
+        tk.Label(card, text=str(value), font=('Segoe UI', 24, 'bold'),
+                 bg=bg, fg=color or self.MC.text, anchor='w').pack(anchor='w', pady=(4, 0))
+        return card
+
+    def _glass_card(self, parent):
+        """Create a glassmorphism card frame."""
+        card = tk.Frame(parent, bg=self.MC.surface,
+                        highlightthickness=1, highlightbackground=self.MC.border)
         return card
 
     def _placeholder_panel(self, parent, text_widget):
-        """Build the placeholder insertion sidebar."""
-        frame = tk.Frame(parent, bg=self.theme.palette.bg_surface_alt,
-                         highlightthickness=1, highlightbackground=self.theme.palette.border)
+        """Modern placeholder insertion sidebar with search."""
+        frame = tk.Frame(parent, bg=self.MC.surface_alt,
+                         highlightthickness=1, highlightbackground=self.MC.border)
 
-        header = tk.Frame(frame, bg=self.theme.palette.bg_surface_alt)
+        header = tk.Frame(frame, bg=self.MC.surface_alt)
         header.pack(fill=tk.X, padx=10, pady=(8, 4))
-        tk.Label(header, text='📋 Placeholders', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w')
-        tk.Label(header, text='Click to insert', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(anchor='w')
+        tk.Label(header, text='📋 Placeholders', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w')
+        tk.Label(header, text='Click to insert', font=('Segoe UI', 8),
+                 bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(anchor='w')
 
-        list_frame = tk.Frame(frame, bg=self.theme.palette.bg_surface_alt)
+        # Search
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(
+            frame, textvariable=search_var, font=('Segoe UI', 9),
+            bg=self.MC.surface, fg=self.MC.text, relief='flat',
+            highlightthickness=1, highlightbackground=self.MC.border
+        )
+        search_entry.pack(fill=tk.X, padx=8, pady=(4, 4))
+        search_entry.insert(0, '🔍 Search placeholders...')
+        search_entry.bind('<FocusIn>', lambda e: search_entry.delete(0, tk.END) if search_entry.get() == '🔍 Search placeholders...' else None)
+
+        list_frame = tk.Frame(frame, bg=self.MC.surface_alt)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
 
-        canvas = tk.Canvas(list_frame, bg=self.theme.palette.bg_surface_alt,
-                           highlightthickness=0, bd=0)
+        canvas = tk.Canvas(list_frame, bg=self.MC.surface_alt, highlightthickness=0, bd=0)
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
-        inner = tk.Frame(canvas, bg=self.theme.palette.bg_surface_alt)
-
+        inner = tk.Frame(canvas, bg=self.MC.surface_alt)
         canvas.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -201,17 +285,25 @@ class SmsCenterPage:
         inner.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
 
-        for label, placeholder in SMS_PLACEHOLDERS:
-            btn = tk.Label(
-                inner, text=f'  {label}', font=self.theme.fonts.body,
-                bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.accent,
-                anchor='w', cursor='hand2', pady=3,
-            )
-            btn.pack(fill=tk.X, padx=6)
-            btn.bind('<Enter>', lambda e, b=btn: b.configure(bg=self.theme.palette.border))
-            btn.bind('<Leave>', lambda e, b=btn: b.configure(bg=self.theme.palette.bg_surface_alt))
-            btn.bind('<Button-1>', lambda e, p=placeholder: self._insert_placeholder(text_widget, p))
+        def filter_items(*_):
+            q = search_var.get().lower()
+            for w in inner.winfo_children():
+                w.destroy()
+            for label, placeholder in SMS_PLACEHOLDERS:
+                if q and q not in label.lower() and q not in placeholder.lower():
+                    continue
+                btn = tk.Label(
+                    inner, text=f'  {label}', font=('Segoe UI', 9),
+                    bg=self.MC.surface_alt, fg=self.MC.primary,
+                    anchor='w', cursor='hand2', pady=3,
+                )
+                btn.pack(fill=tk.X, padx=6)
+                btn.bind('<Enter>', lambda e, b=btn: b.configure(bg=self.MC.border))
+                btn.bind('<Leave>', lambda e, b=btn: b.configure(bg=self.MC.surface_alt))
+                btn.bind('<Button-1>', lambda e, p=placeholder: self._insert_placeholder(text_widget, p))
 
+        search_var.trace_add('write', filter_items)
+        filter_items()
         return frame
 
     def _insert_placeholder(self, text_widget, placeholder):
@@ -220,15 +312,17 @@ class SmsCenterPage:
             text_widget.focus_set()
 
     def _char_counter(self, parent, text_widget):
-        """Attach a live character counter below a text widget."""
+        """Live character counter with SMS part estimation."""
         var = tk.StringVar(value='0 chars')
-        lbl = tk.Label(parent, textvariable=var, font=self.theme.fonts.small,
-                       bg=parent['bg'], fg=self.theme.palette.text_muted, anchor='e')
+        lbl = tk.Label(parent, textvariable=var, font=('Segoe UI', 8),
+                       bg=parent['bg'], fg=self.MC.text_muted, anchor='e')
 
         def _update(*_):
             content = text_widget.get('1.0', 'end-1c')
             length = len(content)
             sms_parts = max(1, (length + 159) // 160)
+            color = self.MC.warning if length > 150 else self.MC.text_muted
+            lbl.configure(fg=color if length > 150 else self.MC.text_muted)
             var.set(f'{length} chars  •  ~{sms_parts} SMS part{"s" if sms_parts > 1 else ""}')
 
         text_widget.bind('<KeyRelease>', _update, add='+')
@@ -242,6 +336,17 @@ class SmsCenterPage:
             return tpl['body']
         return fallback
 
+    def _create_gradient_header(self, parent, title, subtitle='', icon=''):
+        """Create a gradient-style header bar."""
+        hdr = tk.Frame(parent, bg=self.MC.primary)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text=f'{icon}  {title}', font=('Segoe UI', 18, 'bold'),
+                 bg=self.MC.primary, fg='#ffffff').pack(anchor='w')
+        if subtitle:
+            tk.Label(hdr, text=subtitle, font=('Segoe UI', 9),
+                     bg=self.MC.primary, fg='#c7d2fe').pack(anchor='w', pady=(2, 0))
+        return hdr
+
     # ── Main Render ────────────────────────────────────────────────────────
 
     def render(self):
@@ -249,56 +354,95 @@ class SmsCenterPage:
 
         if self.user['role'] != 'admin':
             tk.Label(self.container, text='⛔ Access Denied - Admin Only',
-                     font=self.theme.fonts.h1, bg=self.theme.palette.bg_app,
-                     fg=self.theme.palette.danger).pack(pady=40)
+                     font=('Segoe UI', 20, 'bold'), bg=self.MC.bg,
+                     fg=self.MC.danger).pack(pady=40)
             return
 
         self.templates = {tpl['category']: tpl for tpl in list_sms_templates()}
 
-        view = tk.Frame(self.container, bg=self.theme.palette.bg_app)
-        view.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
+        # Main container with subtle gradient feel
+        view = tk.Frame(self.container, bg=self.MC.bg)
+        view.pack(fill=tk.BOTH, expand=True)
 
-        # Header
-        hdr = tk.Frame(view, bg=self.theme.palette.bg_app)
-        hdr.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(hdr, text='📨 SMS Center', font=self.theme.fonts.h1,
-                 bg=self.theme.palette.bg_app, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        # ── Premium Header with status bar ──
+        hdr = tk.Frame(view, bg=self.MC.surface, highlightthickness=0,
+                       highlightbackground=self.MC.border)
+        hdr.pack(fill=tk.X, padx=0, pady=(0, 1))
 
-        # Gateway status indicator
+        # Top bar with gradient accent line
+        accent_line = tk.Frame(hdr, bg=self.MC.primary, height=3)
+        accent_line.pack(fill=tk.X)
+
+        hdr_inner = tk.Frame(hdr, bg=self.MC.surface)
+        hdr_inner.pack(fill=tk.X)
+
+        # Left: Title + subtitle
+        title_frame = tk.Frame(hdr_inner, bg=self.MC.surface)
+        title_frame.pack(side=tk.LEFT)
+        tk.Label(title_frame, text='📨  SMS Command Center', font=('Segoe UI', 22, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w')
+        tk.Label(title_frame, text='Enterprise-grade SMS management • Text.lk Gateway',
+                 font=('Segoe UI', 9), bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w')
+
+        # Right: Gateway status + quick actions
+        status_frame = tk.Frame(hdr_inner, bg=self.MC.surface)
+        status_frame.pack(side=tk.RIGHT)
+
         sms_enabled = get_setting('sms_enabled', '0') == '1'
-        status_text = '● Connected' if sms_enabled else '○ Disabled'
-        status_color = self.theme.palette.success if sms_enabled else self.theme.palette.text_muted
-        tk.Label(hdr, text=status_text, font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_app, fg=status_color).pack(side=tk.RIGHT, padx=(0, 8))
-        tk.Label(hdr, text='Text.lk Gateway', font=self.theme.fonts.body,
-                 bg=self.theme.palette.bg_app, fg=self.theme.palette.text_muted).pack(side=tk.RIGHT)
+        token_ok = bool(get_setting('sms_gateway_token', '').strip())
 
-        # Notebook
+        # Status indicator
+        status_bg = self.MC.surface_alt
+        status_card = tk.Frame(status_frame, bg=status_bg,
+                               highlightthickness=1, highlightbackground=self.MC.border,
+                               padx=14, pady=8)
+        status_card.pack(side=tk.RIGHT)
+
+        dot_color = self.MC.success if (sms_enabled and token_ok) else (self.MC.warning if sms_enabled else self.MC.text_muted)
+        status_text = '●  Connected' if (sms_enabled and token_ok) else ('●  Enabled (no token)' if sms_enabled else '○  Disabled')
+
+        tk.Label(status_card, text=status_text, font=('Segoe UI', 10, 'bold'),
+                 bg=status_bg, fg=dot_color).pack(anchor='w')
+        tk.Label(status_card, text='Text.lk Gateway', font=('Segoe UI', 8),
+                 bg=status_bg, fg=self.MC.text_muted).pack(anchor='w')
+
+        # ── Notebook with modern styling ──
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure('TNotebook', background=self.MC.bg, borderwidth=0)
+        style.configure('TNotebook.Tab', background=self.MC.surface_dim,
+                        foreground=self.MC.text_muted, padding=(16, 8),
+                        font=('Segoe UI', 9, 'bold'), borderwidth=0)
+        style.map('TNotebook.Tab', background=[('selected', self.MC.surface)],
+                  foreground=[('selected', self.MC.primary)],
+                  borderwidth=[('selected', 0)])
+
         notebook = ttk.Notebook(view)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
 
         tabs = {
-            '📝 Custom SMS': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '⚡ Auto SMS': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '📢 Promotions': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '🎂 Birthday': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '❌ Failed': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '📋 Templates': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '📊 History': tk.Frame(notebook, bg=self.theme.palette.bg_app),
-            '📈 Analytics': tk.Frame(notebook, bg=self.theme.palette.bg_app),
+            '✉️  Custom SMS': tk.Frame(notebook, bg=self.MC.bg),
+            '⚡  Auto SMS': tk.Frame(notebook, bg=self.MC.bg),
+            '📢  Promotions': tk.Frame(notebook, bg=self.MC.bg),
+            '🎂  Birthday': tk.Frame(notebook, bg=self.MC.bg),
+            '📅  Scheduled': tk.Frame(notebook, bg=self.MC.bg),
+            '❌  Failed': tk.Frame(notebook, bg=self.MC.bg),
+            '📋  Templates': tk.Frame(notebook, bg=self.MC.bg),
+            '📊  History': tk.Frame(notebook, bg=self.MC.bg),
+            '📈  Analytics': tk.Frame(notebook, bg=self.MC.bg),
         }
         for name, frame in tabs.items():
             notebook.add(frame, text=name)
 
-        self.custom_tab = tabs['📝 Custom SMS']
-        self.auto_tab = tabs['⚡ Auto SMS']
-        self.promo_tab = tabs['📢 Promotions']
-        self.birthday_tab = tabs['🎂 Birthday']
-        self.scheduled_tab = tk.Frame(notebook, bg=self.theme.palette.bg_app)
-        self.failed_tab = tabs['❌ Failed']
-        self.templates_tab = tabs['📋 Templates']
-        self.history_tab = tabs['📊 History']
-        self.analytics_tab = tabs['📈 Analytics']
+        self.custom_tab = tabs['✉️  Custom SMS']
+        self.auto_tab = tabs['⚡  Auto SMS']
+        self.promo_tab = tabs['📢  Promotions']
+        self.birthday_tab = tabs['🎂  Birthday']
+        self.scheduled_tab = tabs['📅  Scheduled']
+        self.failed_tab = tabs['❌  Failed']
+        self.templates_tab = tabs['📋  Templates']
+        self.history_tab = tabs['📊  History']
+        self.analytics_tab = tabs['📈  Analytics']
 
         self._build_custom_tab()
         self._build_auto_tab()
@@ -311,125 +455,126 @@ class SmsCenterPage:
         self._build_analytics_tab()
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 1 — Custom SMS
+    # TAB 1 — Custom SMS (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_custom_tab(self):
         self._clear(self.custom_tab)
-        card = self.theme.make_card(self.custom_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.custom_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        # Header
-        self._section_label(card.inner, 'Send Custom SMS', '📝').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Search and select customers, compose your message with placeholders, and send.').pack(anchor='w', padx=14, pady=(0, 8))
+        # ── Header ──
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Send Custom SMS', '✉️').pack(side=tk.LEFT)
+        self._desc_label(hdr, 'Select recipients, compose with placeholders, preview & send.').pack(anchor='w', padx=16, pady=(0, 8))
 
-        # ── TOP ROW: Recipients (left) + Selected Recipients display (right) ──
-        top_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        top_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 6))
-        top_frame.grid_columnconfigure(0, weight=3)
-        top_frame.grid_columnconfigure(1, weight=2)
-        top_frame.grid_rowconfigure(0, weight=1)
+        # ── Main body: 2-column layout ──
+        body = tk.Frame(card, bg=self.MC.surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
+        body.grid_rowconfigure(0, weight=1)
 
-        # ── Left: Customer search + list ──
-        left = tk.Frame(top_frame, bg=self.theme.palette.bg_surface)
-        left.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
+        # ═══ LEFT COLUMN: Recipients ═══
+        left = tk.Frame(body, bg=self.MC.surface)
+        left.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
 
-        tk.Label(left, text='👤 Select Recipients', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 4))
-
-        # Search bar
-        search_row = tk.Frame(left, bg=self.theme.palette.bg_surface)
-        search_row.pack(fill=tk.X, pady=(0, 4))
+        # Search bar with icon
+        search_row = tk.Frame(left, bg=self.MC.surface)
+        search_row.pack(fill=tk.X, pady=(0, 6))
         self.custom_search_var = tk.StringVar()
         search_entry = self.theme.make_entry(search_row, variable=self.custom_search_var)
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         search_entry.entry.bind('<KeyRelease>', lambda _: self._refresh_custom_customers())
-        self.theme.make_button(search_row, text='Search', command=self._refresh_custom_customers,
-                               kind='ghost', width=8, pady=6).pack(side=tk.LEFT)
+        self._modern_button(search_row, 'Search', self._refresh_custom_customers,
+                            kind='ghost', width=8, pady=6, icon='🔍').pack(side=tk.LEFT)
 
-        # Select All + count
-        ctrl_row = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        # Controls row
+        ctrl_row = tk.Frame(left, bg=self.MC.surface)
         ctrl_row.pack(fill=tk.X, pady=(0, 4))
         self.custom_select_all_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             ctrl_row, text='Select All', variable=self.custom_select_all_var,
             command=self._toggle_custom_select_all,
-            bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-            selectcolor=self.theme.palette.bg_surface, font=self.theme.fonts.body,
-            activebackground=self.theme.palette.bg_surface,
+            bg=self.MC.surface, fg=self.MC.text,
+            selectcolor=self.MC.surface, font=('Segoe UI', 9, 'bold'),
+            activebackground=self.MC.surface,
         ).pack(side=tk.LEFT)
         self.custom_count_var = tk.StringVar(value='0 selected')
-        tk.Label(ctrl_row, textvariable=self.custom_count_var, font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.RIGHT)
+        tk.Label(ctrl_row, textvariable=self.custom_count_var, font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.RIGHT)
 
-        # Customer list with checkboxes
+        # Customer list
         self.custom_selected_ids = set()
         self.custom_row_vars = {}
-        list_frame = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        list_frame = tk.Frame(left, bg=self.MC.surface)
         list_frame.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(list_frame, bg=self.theme.palette.bg_surface, highlightthickness=0)
+        canvas = tk.Canvas(list_frame, bg=self.MC.surface, highlightthickness=0)
         vbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=vbar.set)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.custom_rows_frame = tk.Frame(canvas, bg=self.theme.palette.bg_surface)
+        self.custom_rows_frame = tk.Frame(canvas, bg=self.MC.surface)
         win_id = canvas.create_window((0, 0), window=self.custom_rows_frame, anchor='nw')
         self.custom_rows_frame.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win_id, width=e.width))
 
-        # Manual number entry + Add button
-        manual_frame = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        # Manual number + CSV import row
+        manual_frame = tk.Frame(left, bg=self.MC.surface)
         manual_frame.pack(fill=tk.X, pady=(6, 0))
-        tk.Label(manual_frame, text='Add number:', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+        tk.Label(manual_frame, text='📞 Add number:', font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.LEFT)
         self.custom_manual_var = tk.StringVar()
         manual_entry = self.theme.make_entry(manual_frame, variable=self.custom_manual_var)
         manual_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
         manual_entry.entry.bind('<Return>', lambda _: self._add_manual_number())
-        self.theme.make_button(manual_frame, text='+ Add', command=self._add_manual_number,
-                               kind='ghost', width=6, pady=6).pack(side=tk.LEFT)
+        self._modern_button(manual_frame, 'Add', self._add_manual_number,
+                            kind='ghost', width=5, pady=6, icon='➕').pack(side=tk.LEFT, padx=(0, 4))
+        self._modern_button(manual_frame, 'CSV', self._import_csv_numbers,
+                            kind='ghost', width=5, pady=6, icon='📥').pack(side=tk.LEFT)
 
-        # ── Right: Selected recipients display (tokens) ──
-        right_top = tk.Frame(top_frame, bg=self.theme.palette.bg_surface)
+        # ═══ RIGHT COLUMN: Selected recipients ═══
+        right_top = tk.Frame(body, bg=self.MC.surface)
         right_top.grid(row=0, column=1, sticky='nsew')
 
-        tk.Label(right_top, text='📋 Selected Recipients', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 4))
+        tk.Label(right_top, text='📋  Selected Recipients', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
-        self.custom_manual_numbers = []  # list of manually added numbers
-        recipients_frame = tk.Frame(right_top, bg=self.theme.palette.bg_surface_alt,
-                                    highlightthickness=1, highlightbackground=self.theme.palette.border)
+        self.custom_manual_numbers = []
+        recipients_frame = tk.Frame(right_top, bg=self.MC.surface_alt,
+                                    highlightthickness=1, highlightbackground=self.MC.border)
         recipients_frame.pack(fill=tk.BOTH, expand=True)
 
-        recip_canvas = tk.Canvas(recipients_frame, bg=self.theme.palette.bg_surface_alt, highlightthickness=0, bd=0)
+        recip_canvas = tk.Canvas(recipients_frame, bg=self.MC.surface_alt, highlightthickness=0, bd=0)
         recip_vbar = ttk.Scrollbar(recipients_frame, orient=tk.VERTICAL, command=recip_canvas.yview)
         recip_canvas.configure(yscrollcommand=recip_vbar.set)
         recip_vbar.pack(side=tk.RIGHT, fill=tk.Y)
         recip_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.custom_tokens_frame = tk.Frame(recip_canvas, bg=self.theme.palette.bg_surface_alt)
+        self.custom_tokens_frame = tk.Frame(recip_canvas, bg=self.MC.surface_alt)
         token_win = recip_canvas.create_window((0, 0), window=self.custom_tokens_frame, anchor='nw')
         self.custom_tokens_frame.bind('<Configure>', lambda _: recip_canvas.configure(scrollregion=recip_canvas.bbox('all')))
         recip_canvas.bind('<Configure>', lambda e: recip_canvas.itemconfigure(token_win, width=e.width))
 
         self.custom_recip_summary_var = tk.StringVar(value='No recipients selected')
-        tk.Label(right_top, textvariable=self.custom_recip_summary_var, font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', pady=(4, 0))
+        tk.Label(right_top, textvariable=self.custom_recip_summary_var, font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
 
-        # ── BOTTOM ROW: Template selector + Message + Placeholders ──
-        bottom_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        bottom_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        # ═══ BOTTOM: Message composer ═══
+        bottom_frame = tk.Frame(card, bg=self.MC.surface)
+        bottom_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
         bottom_frame.grid_columnconfigure(0, weight=4)
         bottom_frame.grid_columnconfigure(1, weight=1)
         bottom_frame.grid_rowconfigure(1, weight=1)
 
         # Template selector
-        tpl_row = tk.Frame(bottom_frame, bg=self.theme.palette.bg_surface)
-        tpl_row.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 6))
-        tk.Label(tpl_row, text='📄 Template:', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        tpl_row = tk.Frame(bottom_frame, bg=self.MC.surface)
+        tpl_row.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 8))
+        tk.Label(tpl_row, text='📄  Template:', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(side=tk.LEFT)
         self.custom_tpl_var = tk.StringVar(value='custom')
         tpl_values = [f"{CATEGORY_LABELS.get(cat, cat)} — {tpl.get('title', '')}" for cat, tpl in sorted(self.templates.items())]
         self._custom_tpl_keys = [cat for cat, _ in sorted(self.templates.items())]
@@ -438,12 +583,12 @@ class SmsCenterPage:
                                              command=lambda _: self._apply_custom_template())
         tpl_combo.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
 
-        # Message box
-        msg_frame = tk.Frame(bottom_frame, bg=self.theme.palette.bg_surface)
+        # Message editor
+        msg_frame = tk.Frame(bottom_frame, bg=self.MC.surface)
         msg_frame.grid(row=1, column=0, sticky='nsew', padx=(0, 8))
 
-        tk.Label(msg_frame, text='✉️ Message', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 4))
+        tk.Label(msg_frame, text='✉️  Message', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 4))
 
         self.custom_message_text = self._message_box(msg_frame, height=8)
         self.custom_message_text.pack(fill=tk.BOTH, expand=True)
@@ -453,29 +598,124 @@ class SmsCenterPage:
         counter_lbl = self._char_counter(msg_frame, self.custom_message_text)
         counter_lbl.pack(anchor='e', pady=(2, 0))
 
-        # Buttons
-        btn_row = tk.Frame(msg_frame, bg=self.theme.palette.bg_surface)
-        btn_row.pack(fill=tk.X, pady=(6, 0))
-        self.theme.make_button(btn_row, text='💾 Save Template', command=self._save_custom_template,
-                               kind='ghost', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 8))
-        self.theme.make_button(btn_row, text='📤 Send SMS', command=self._send_custom_sms,
-                               kind='primary', width=14, pady=8).pack(side=tk.LEFT)
+        # Action buttons
+        btn_row = tk.Frame(msg_frame, bg=self.MC.surface)
+        btn_row.pack(fill=tk.X, pady=(8, 0))
+        self._modern_button(btn_row, 'Preview', self._preview_custom_sms,
+                            kind='ghost', width=12, pady=8, icon='👁️').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Save Template', self._save_custom_template,
+                            kind='ghost', width=12, pady=8, icon='💾').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Send SMS', self._send_custom_sms,
+                            kind='primary', width=14, pady=8, icon='📤').pack(side=tk.LEFT)
 
         # Placeholders panel
-        ph_frame = tk.Frame(bottom_frame, bg=self.theme.palette.bg_surface)
+        ph_frame = tk.Frame(bottom_frame, bg=self.MC.surface)
         ph_frame.grid(row=1, column=1, sticky='nsew')
         placeholder_panel = self._placeholder_panel(ph_frame, self.custom_message_text)
         placeholder_panel.pack(fill=tk.BOTH, expand=True)
 
         self._refresh_custom_customers()
 
+    # ── Custom Tab: New Features ───────────────────────────────────────────
+
+    def _import_csv_numbers(self):
+        """Import phone numbers from a CSV file."""
+        path = filedialog.askopenfilename(
+            title='Import Phone Numbers from CSV',
+            filetypes=[('CSV Files', '*.csv'), ('Text Files', '*.txt'), ('All Files', '*.*')]
+        )
+        if not path:
+            return
+        try:
+            count = 0
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                content = f.read()
+            # Try CSV parsing first
+            try:
+                reader = csv.reader(io.StringIO(content))
+                for row in reader:
+                    for cell in row:
+                        cell = cell.strip()
+                        # Extract phone numbers (digits only, min 7 chars)
+                        nums = re.findall(r'\d{7,}', cell)
+                        for n in nums:
+                            if n not in self.custom_manual_numbers:
+                                self.custom_manual_numbers.append(n)
+                                count += 1
+            except Exception:
+                # Fallback: extract all numbers from text
+                nums = re.findall(r'\d{7,}', content)
+                for n in nums:
+                    if n not in self.custom_manual_numbers:
+                        self.custom_manual_numbers.append(n)
+                        count += 1
+            self._refresh_recipient_tokens()
+            self._toast('CSV Import', f'Imported {count} phone numbers from CSV.', 'success')
+        except Exception as e:
+            self._toast('Import Error', f'Failed to import: {str(e)}', 'error')
+
+    def _preview_custom_sms(self):
+        """Show a preview dialog of the rendered message."""
+        raw_message = self._get_text(self.custom_message_text)
+        if not raw_message:
+            self._toast('Preview', 'Message is empty.', 'warning')
+            return
+
+        # Get first selected customer for preview context
+        sample_customer = None
+        all_customers = search_customers('')
+        for cid in list(self.custom_selected_ids)[:1]:
+            for c in all_customers:
+                if c['id'] == cid:
+                    sample_customer = c
+                    break
+        if not sample_customer and all_customers:
+            sample_customer = all_customers[0]
+
+        context = build_sms_context(customer=sample_customer, message=raw_message)
+        rendered = render_template(raw_message, context)
+
+        dialog = tk.Toplevel(self.container)
+        dialog.title('📨 Message Preview')
+        dialog.geometry('520x400')
+        dialog.configure(bg=self.MC.surface)
+        dialog.transient(self.container)
+        dialog.grab_set()
+
+        main = tk.Frame(dialog, bg=self.MC.surface)
+        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        tk.Label(main, text='📨  Message Preview', font=('Segoe UI', 14, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w')
+
+        # Original
+        tk.Label(main, text='Original Template:', font=('Segoe UI', 9, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(10, 2))
+        orig_box = tk.Text(main, height=4, wrap='word',
+                           bg=self.MC.surface_alt, fg=self.MC.text_muted,
+                           font=('Segoe UI', 9), relief='flat', padx=8, pady=6)
+        orig_box.insert('1.0', raw_message)
+        orig_box.configure(state='disabled')
+        orig_box.pack(fill=tk.X)
+
+        # Rendered
+        tk.Label(main, text='Rendered Output:', font=('Segoe UI', 9, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(10, 2))
+        rend_box = tk.Text(main, height=6, wrap='word',
+                           bg=self.MC.surface_alt, fg=self.MC.text,
+                           font=('Segoe UI', 10), relief='flat', padx=8, pady=6)
+        rend_box.insert('1.0', rendered)
+        rend_box.configure(state='disabled')
+        rend_box.pack(fill=tk.BOTH, expand=True)
+
+        if sample_customer:
+            tk.Label(main, text=f'Preview context: {sample_customer.get("name", "N/A")}',
+                     font=('Segoe UI', 8), bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
+
+        self._modern_button(main, 'Close', dialog.destroy, kind='ghost', width=10, pady=6).pack(pady=(10, 0))
+
     def _apply_custom_template(self):
-        """Load selected template body into the message box."""
         selected = self.custom_tpl_var.get()
-        # Find matching category from the display value
-        for i, display in enumerate(self.custom_tpl_var.get() for _ in range(1)):
-            pass
-        # match by iterating template keys
         for i, cat in enumerate(self._custom_tpl_keys):
             label = f"{CATEGORY_LABELS.get(cat, cat)} — {self.templates.get(cat, {}).get('title', '')}"
             if label == selected:
@@ -484,7 +724,6 @@ class SmsCenterPage:
                 return
 
     def _add_manual_number(self):
-        """Add manually typed phone numbers as tokens."""
         val = self.custom_manual_var.get().strip()
         if not val:
             return
@@ -496,13 +735,11 @@ class SmsCenterPage:
         self._refresh_recipient_tokens()
 
     def _remove_manual_number(self, number):
-        """Remove a manually added number."""
         if number in self.custom_manual_numbers:
             self.custom_manual_numbers.remove(number)
         self._refresh_recipient_tokens()
 
     def _remove_selected_customer(self, cid):
-        """Remove a selected customer from the tokens."""
         self.custom_selected_ids.discard(cid)
         if cid in self.custom_row_vars:
             self.custom_row_vars[cid].set(False)
@@ -510,14 +747,12 @@ class SmsCenterPage:
         self._refresh_recipient_tokens()
 
     def _refresh_recipient_tokens(self):
-        """Rebuild the selected recipients token display."""
         for w in self.custom_tokens_frame.winfo_children():
             w.destroy()
 
         all_customers = search_customers('')
         total = 0
 
-        # Show selected customers
         for cid in list(self.custom_selected_ids):
             customer = None
             for c in all_customers:
@@ -527,43 +762,38 @@ class SmsCenterPage:
             if not customer:
                 continue
             total += 1
-            token = tk.Frame(self.custom_tokens_frame, bg=self.theme.palette.bg_surface,
-                             highlightthickness=1, highlightbackground=self.theme.palette.border,
+            token = tk.Frame(self.custom_tokens_frame, bg=self.MC.surface,
+                             highlightthickness=1, highlightbackground=self.MC.border,
                              padx=8, pady=4)
             token.pack(fill=tk.X, padx=6, pady=2)
-            tk.Label(token, text=f"👤 {customer['name']}", font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                     anchor='w').pack(side=tk.LEFT)
-            tk.Label(token, text=customer.get('phone', ''), font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(8, 0))
-            rm_btn = tk.Label(token, text='  ✕  ', font=self.theme.fonts.body_bold,
-                              bg=self.theme.palette.bg_surface, fg=self.theme.palette.danger,
-                              cursor='hand2')
+            tk.Label(token, text=f"👤 {customer['name']}", font=('Segoe UI', 9),
+                     bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT)
+            tk.Label(token, text=customer.get('phone', ''), font=('Segoe UI', 8),
+                     bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.LEFT, padx=(8, 0))
+            rm_btn = tk.Label(token, text='  ✕  ', font=('Segoe UI', 10, 'bold'),
+                              bg=self.MC.surface, fg=self.MC.danger, cursor='hand2')
             rm_btn.pack(side=tk.RIGHT)
             rm_btn.bind('<Button-1>', lambda _, c=cid: self._remove_selected_customer(c))
 
-        # Show manual numbers
         for num in list(self.custom_manual_numbers):
             total += 1
-            token = tk.Frame(self.custom_tokens_frame, bg=self.theme.palette.bg_surface,
-                             highlightthickness=1, highlightbackground=self.theme.palette.border,
+            token = tk.Frame(self.custom_tokens_frame, bg=self.MC.surface,
+                             highlightthickness=1, highlightbackground=self.MC.border,
                              padx=8, pady=4)
             token.pack(fill=tk.X, padx=6, pady=2)
-            tk.Label(token, text=f"📱 {num}", font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                     anchor='w').pack(side=tk.LEFT)
-            tk.Label(token, text='(manual)', font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(8, 0))
-            rm_btn = tk.Label(token, text='  ✕  ', font=self.theme.fonts.body_bold,
-                              bg=self.theme.palette.bg_surface, fg=self.theme.palette.danger,
-                              cursor='hand2')
+            tk.Label(token, text=f"📱 {num}", font=('Segoe UI', 9),
+                     bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT)
+            tk.Label(token, text='(manual)', font=('Segoe UI', 8),
+                     bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.LEFT, padx=(8, 0))
+            rm_btn = tk.Label(token, text='  ✕  ', font=('Segoe UI', 10, 'bold'),
+                              bg=self.MC.surface, fg=self.MC.danger, cursor='hand2')
             rm_btn.pack(side=tk.RIGHT)
             rm_btn.bind('<Button-1>', lambda _, n=num: self._remove_manual_number(n))
 
         if total == 0:
             tk.Label(self.custom_tokens_frame, text='No recipients selected yet.\nSelect customers or add numbers.',
-                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface_alt,
-                     fg=self.theme.palette.text_muted, justify='center').pack(pady=20)
+                     font=('Segoe UI', 9), bg=self.MC.surface_alt,
+                     fg=self.MC.text_muted, justify='center').pack(pady=20)
 
         self.custom_recip_summary_var.set(f'{total} recipient{"s" if total != 1 else ""} ready to send')
 
@@ -578,29 +808,27 @@ class SmsCenterPage:
 
         if not results:
             tk.Label(self.custom_rows_frame, text='No customers found.',
-                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
-                     fg=self.theme.palette.text_muted).pack(anchor='w', padx=6, pady=8)
+                     font=('Segoe UI', 9), bg=self.MC.surface,
+                     fg=self.MC.text_muted).pack(anchor='w', padx=6, pady=8)
             return
 
         for customer in results:
             cid = customer['id']
             var = tk.BooleanVar(value=cid in self.custom_selected_ids)
             self.custom_row_vars[cid] = var
-            row = tk.Frame(self.custom_rows_frame, bg=self.theme.palette.bg_surface)
+            row = tk.Frame(self.custom_rows_frame, bg=self.MC.surface)
             row.pack(fill=tk.X, pady=1)
 
             tk.Checkbutton(
                 row, variable=var,
                 command=lambda c=cid: self._toggle_custom_customer(c),
-                bg=self.theme.palette.bg_surface, selectcolor=self.theme.palette.bg_surface,
-                activebackground=self.theme.palette.bg_surface,
+                bg=self.MC.surface, selectcolor=self.MC.surface,
+                activebackground=self.MC.surface,
             ).pack(side=tk.LEFT)
-            tk.Label(row, text=customer['name'], font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                     anchor='w').pack(side=tk.LEFT, padx=(0, 6))
-            tk.Label(row, text=customer.get('phone', ''), font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted,
-                     anchor='w').pack(side=tk.LEFT)
+            tk.Label(row, text=customer['name'], font=('Segoe UI', 9),
+                     bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT, padx=(0, 6))
+            tk.Label(row, text=customer.get('phone', ''), font=('Segoe UI', 8),
+                     bg=self.MC.surface, fg=self.MC.text_muted, anchor='w').pack(side=tk.LEFT)
 
         self._update_custom_count()
 
@@ -632,18 +860,17 @@ class SmsCenterPage:
         body = self._get_text(self.custom_message_text)
         save_sms_template('custom', 'Custom SMS', body, True, self.user['id'])
         self.templates['custom'] = {'title': 'Custom SMS', 'body': body, 'is_active': 1}
-        messagebox.showinfo('Success', 'Custom SMS template saved.')
+        self._toast('Success', 'Custom SMS template saved.', 'success')
 
     def _send_custom_sms(self):
         if not self._check_internet():
             return
         raw_message = self._get_text(self.custom_message_text)
         if not raw_message:
-            messagebox.showwarning('SMS', 'Message cannot be empty.')
+            self._toast('SMS', 'Message cannot be empty.', 'warning')
             return
 
         recipients = []
-        # From selected customers
         all_customers = search_customers('')
         for cid in self.custom_selected_ids:
             for c in all_customers:
@@ -651,12 +878,11 @@ class SmsCenterPage:
                     recipients.append(c)
                     break
 
-        # Manual numbers
         for num in getattr(self, 'custom_manual_numbers', []):
             recipients.append({'phone': num, 'name': num})
 
         if not recipients:
-            messagebox.showwarning('SMS', 'Select customers or add recipient numbers.')
+            self._toast('SMS', 'Select customers or add recipient numbers.', 'warning')
             return
 
         if len(recipients) > 1:
@@ -674,48 +900,65 @@ class SmsCenterPage:
             else:
                 failed += 1
 
-        messagebox.showinfo('SMS Result', f'✅ Sent: {sent}\n❌ Failed: {failed}')
+        self._toast('SMS Result', f'✅ Sent: {sent}\n❌ Failed: {failed}',
+                    'success' if failed == 0 else 'warning')
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 2 — Auto SMS
+    # TAB 2 — Auto SMS (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_auto_tab(self):
         self._clear(self.auto_tab)
-        card = self.theme.make_card(self.auto_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.auto_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'Automatic SMS Settings', '⚡').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Enable automatic SMS for loan events. Each event has its own template that you can customize.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Automatic SMS Settings', '⚡').pack(side=tk.LEFT)
+        self._desc_label(card, 'Enable automatic SMS for loan events. Each event has its own customizable template.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        # Master switch
-        master_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface_alt,
-                                highlightthickness=1, highlightbackground=self.theme.palette.border)
-        master_frame.pack(fill=tk.X, padx=14, pady=(0, 12))
+        # Master switch — modern toggle card
+        master_frame = tk.Frame(card, bg=self.MC.surface_alt,
+                                highlightthickness=1, highlightbackground=self.MC.border)
+        master_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
 
         self.auto_master_var = tk.BooleanVar(value=get_setting('sms_enabled', '0') == '1')
-        master_inner = tk.Frame(master_frame, bg=self.theme.palette.bg_surface_alt)
-        master_inner.pack(fill=tk.X, padx=14, pady=10)
+        master_inner = tk.Frame(master_frame, bg=self.MC.surface_alt)
+        master_inner.pack(fill=tk.X, padx=16, pady=12)
+
+        # Toggle with visual indicator
+        toggle_frame = tk.Frame(master_inner, bg=self.MC.surface_alt)
+        toggle_frame.pack(side=tk.LEFT)
         tk.Checkbutton(
-            master_inner, text='  Enable SMS Gateway', variable=self.auto_master_var,
-            font=self.theme.fonts.h3, bg=self.theme.palette.bg_surface_alt,
-            fg=self.theme.palette.text_primary, selectcolor=self.theme.palette.bg_surface_alt,
-            activebackground=self.theme.palette.bg_surface_alt,
+            toggle_frame, text='  ⚡  Enable SMS Gateway', variable=self.auto_master_var,
+            font=('Segoe UI', 13, 'bold'), bg=self.MC.surface_alt,
+            fg=self.MC.text, selectcolor=self.MC.surface_alt,
+            activebackground=self.MC.surface_alt,
         ).pack(side=tk.LEFT)
-        tk.Label(master_inner, text='Master switch for all automatic SMS', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(side=tk.LEFT, padx=(12, 0))
 
-        # Scrollable events area
-        scroll_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        scroll_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 10))
+        # Status badge
+        status_badge = tk.Frame(master_inner, bg=self.MC.surface_alt)
+        status_badge.pack(side=tk.RIGHT)
+        enabled = self.auto_master_var.get()
+        badge_color = self.MC.success if enabled else self.MC.text_muted
+        badge_text = '●  ACTIVE' if enabled else '○  DISABLED'
+        tk.Label(status_badge, text=badge_text, font=('Segoe UI', 8, 'bold'),
+                 bg=badge_color, fg='#ffffff', padx=10, pady=3).pack()
 
-        canvas = tk.Canvas(scroll_frame, bg=self.theme.palette.bg_surface, highlightthickness=0, bd=0)
+        tk.Label(master_inner, text='Master switch for all automatic SMS', font=('Segoe UI', 9),
+                 bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(anchor='w', padx=(30, 0), pady=(4, 0))
+
+        # Scrollable events
+        scroll_frame = tk.Frame(card, bg=self.MC.surface)
+        scroll_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
+
+        canvas = tk.Canvas(scroll_frame, bg=self.MC.surface, highlightthickness=0, bd=0)
         vbar = ttk.Scrollbar(scroll_frame, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=vbar.set)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        events_frame = tk.Frame(canvas, bg=self.theme.palette.bg_surface)
+        events_frame = tk.Frame(canvas, bg=self.MC.surface)
         win = canvas.create_window((0, 0), window=events_frame, anchor='nw')
         events_frame.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
@@ -724,46 +967,42 @@ class SmsCenterPage:
         self.auto_event_texts = {}
 
         for setting_key, label, template_cat, description in AUTO_EVENTS:
-            event_card = tk.Frame(events_frame, bg=self.theme.palette.bg_surface_alt,
-                                  highlightthickness=1, highlightbackground=self.theme.palette.border)
+            event_card = tk.Frame(events_frame, bg=self.MC.surface_alt,
+                                  highlightthickness=1, highlightbackground=self.MC.border)
             event_card.pack(fill=tk.X, pady=(0, 10))
 
-            # Event header with toggle
-            header = tk.Frame(event_card, bg=self.theme.palette.bg_surface_alt)
-            header.pack(fill=tk.X, padx=14, pady=(10, 4))
+            header = tk.Frame(event_card, bg=self.MC.surface_alt)
+            header.pack(fill=tk.X, padx=16, pady=(10, 4))
 
             var = tk.BooleanVar(value=get_setting(setting_key, '0') == '1')
             self.auto_event_vars[setting_key] = var
 
             tk.Checkbutton(
                 header, text=f'  {label}', variable=var,
-                font=self.theme.fonts.body_bold, bg=self.theme.palette.bg_surface_alt,
-                fg=self.theme.palette.text_primary, selectcolor=self.theme.palette.bg_surface_alt,
-                activebackground=self.theme.palette.bg_surface_alt,
+                font=('Segoe UI', 10, 'bold'), bg=self.MC.surface_alt,
+                fg=self.MC.text, selectcolor=self.MC.surface_alt,
+                activebackground=self.MC.surface_alt,
             ).pack(side=tk.LEFT)
 
             status_text = '● Active' if var.get() else '○ Inactive'
-            status_color = self.theme.palette.success if var.get() else self.theme.palette.text_muted
-            tk.Label(header, text=status_text, font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface_alt, fg=status_color).pack(side=tk.RIGHT)
+            status_color = self.MC.success if var.get() else self.MC.text_muted
+            tk.Label(header, text=status_text, font=('Segoe UI', 8),
+                     bg=self.MC.surface_alt, fg=status_color).pack(side=tk.RIGHT)
 
-            tk.Label(event_card, text=description, font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 6))
+            tk.Label(event_card, text=description, font=('Segoe UI', 9),
+                     bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(anchor='w', padx=16, pady=(0, 6))
 
-            # Template editor
-            tk.Label(event_card, text='Template:', font=self.theme.fonts.small,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14)
-            text_widget = self._message_box(event_card, height=12)
-            text_widget.pack(fill=tk.X, padx=14, pady=(4, 14))
+            tk.Label(event_card, text='Template:', font=('Segoe UI', 9, 'bold'),
+                     bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w', padx=16)
+            text_widget = self._message_box(event_card, height=10)
+            text_widget.pack(fill=tk.X, padx=16, pady=(4, 14))
             self._set_text(text_widget, self._template_body(template_cat, f'Dear {{{{customer_name}}}},\n\n{{{{message}}}}\n\nTicket: {{{{ticket_no}}}}\n{{{{company_name}}}}'))
             self.auto_event_texts[template_cat] = text_widget
 
-        # Save button
-        btn_row = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        btn_row.pack(fill=tk.X, padx=14, pady=(0, 14))
-        self.theme.make_button(btn_row, text='💾 Save All Auto SMS Settings',
-                               command=self._save_auto_settings,
-                               kind='primary', width=24, pady=8).pack(side=tk.LEFT)
+        btn_row = tk.Frame(card, bg=self.MC.surface)
+        btn_row.pack(fill=tk.X, padx=16, pady=(0, 14))
+        self._modern_button(btn_row, 'Save All Auto SMS Settings', self._save_auto_settings,
+                            kind='primary', width=28, pady=8, icon='💾').pack(side=tk.LEFT)
 
     def _save_auto_settings(self):
         # Save master switch
@@ -783,72 +1022,72 @@ class SmsCenterPage:
         messagebox.showinfo('Success', 'All auto SMS settings and templates saved.')
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 3 — Promotions
+    # TAB 3 — Promotions (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_promotion_tab(self):
         self._clear(self.promo_tab)
-        card = self.theme.make_card(self.promo_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.promo_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'Promotion SMS', '📢').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Send promotional messages to selected customers or your entire customer list.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Promotion SMS', '📢').pack(side=tk.LEFT)
+        self._desc_label(card, 'Send promotional messages to selected customers or your entire customer list.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        body = tk.Frame(card, bg=self.MC.surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=2)
         body.grid_rowconfigure(0, weight=1)
 
         # Left — Customer selection
-        left = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        left = tk.Frame(body, bg=self.MC.surface)
         left.grid(row=0, column=0, sticky='nsew', padx=(0, 10))
 
-        tk.Label(left, text='👥 Recipients', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 6))
+        tk.Label(left, text='👥  Recipients', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
-        # Quick filter
-        filter_row = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        filter_row = tk.Frame(left, bg=self.MC.surface)
         filter_row.pack(fill=tk.X, pady=(0, 6))
         self.promo_search_var = tk.StringVar()
         search_e = self.theme.make_entry(filter_row, variable=self.promo_search_var)
         search_e.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         search_e.entry.bind('<KeyRelease>', lambda _: self._refresh_promo_customers())
 
-        # Select All
         self.promo_select_all_var = tk.BooleanVar(value=False)
         tk.Checkbutton(left, text='Select All Customers', variable=self.promo_select_all_var,
                        command=self._toggle_promo_select_all,
-                       bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                       selectcolor=self.theme.palette.bg_surface, font=self.theme.fonts.body,
-                       activebackground=self.theme.palette.bg_surface).pack(anchor='w', pady=(0, 4))
+                       bg=self.MC.surface, fg=self.MC.text,
+                       selectcolor=self.MC.surface, font=('Segoe UI', 9, 'bold'),
+                       activebackground=self.MC.surface).pack(anchor='w', pady=(0, 4))
 
         self.promo_selected_ids = set()
         self.promo_row_vars = {}
 
-        list_frame = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        list_frame = tk.Frame(left, bg=self.MC.surface)
         list_frame.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(list_frame, bg=self.theme.palette.bg_surface, highlightthickness=0)
+        canvas = tk.Canvas(list_frame, bg=self.MC.surface, highlightthickness=0)
         vbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=vbar.set)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.promo_rows_frame = tk.Frame(canvas, bg=self.theme.palette.bg_surface)
+        self.promo_rows_frame = tk.Frame(canvas, bg=self.MC.surface)
         canvas.create_window((0, 0), window=self.promo_rows_frame, anchor='nw')
         self.promo_rows_frame.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
 
         self.promo_count_var = tk.StringVar(value='0 recipients')
-        tk.Label(left, textvariable=self.promo_count_var, font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', pady=(4, 0))
+        tk.Label(left, textvariable=self.promo_count_var, font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
 
         # Right — Message composer
-        right = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        right = tk.Frame(body, bg=self.MC.surface)
         right.grid(row=0, column=1, sticky='nsew')
 
-        tk.Label(right, text='✉️ Promotion Message', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 6))
+        tk.Label(right, text='✉️  Promotion Message', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
         self.promo_message_text = self._message_box(right, height=10)
         self.promo_message_text.pack(fill=tk.BOTH, expand=True)
@@ -859,17 +1098,57 @@ class SmsCenterPage:
         counter_lbl.pack(anchor='e', pady=(4, 0))
 
         tk.Label(right, text='Placeholders: {{customer_name}}, {{company_name}}, {{company_phone}}, {{date}}',
-                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
-                 fg=self.theme.palette.text_muted, wraplength=500).pack(anchor='w', pady=(4, 0))
+                 font=('Segoe UI', 8), bg=self.MC.surface,
+                 fg=self.MC.text_muted, wraplength=500).pack(anchor='w', pady=(4, 0))
 
-        btn_row = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        btn_row = tk.Frame(right, bg=self.MC.surface)
         btn_row.pack(fill=tk.X, pady=(10, 0))
-        self.theme.make_button(btn_row, text='💾 Save Template', command=self._save_promo_template,
-                               kind='ghost', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 8))
-        self.theme.make_button(btn_row, text='📤 Send Promotion', command=self._send_promotion_sms,
-                               kind='primary', width=16, pady=8).pack(side=tk.LEFT)
+        self._modern_button(btn_row, 'Preview', self._preview_promo_sms,
+                            kind='ghost', width=10, pady=8, icon='👁️').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Save Template', self._save_promo_template,
+                            kind='ghost', width=12, pady=8, icon='💾').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Send Promotion', self._send_promotion_sms,
+                            kind='primary', width=16, pady=8, icon='📤').pack(side=tk.LEFT)
 
         self._refresh_promo_customers()
+
+    def _preview_promo_sms(self):
+        """Preview the promotion message."""
+        raw_message = self._get_text(self.promo_message_text)
+        if not raw_message:
+            self._toast('Preview', 'Message is empty.', 'warning')
+            return
+        sample = None
+        all_customers = search_customers('')
+        for cid in list(self.promo_selected_ids)[:1]:
+            for c in all_customers:
+                if c['id'] == cid:
+                    sample = c
+                    break
+        if not sample and all_customers:
+            sample = all_customers[0]
+        context = build_sms_context(customer=sample, message=raw_message)
+        rendered = render_template(raw_message, context)
+        dialog = tk.Toplevel(self.container)
+        dialog.title('📢 Promotion Preview')
+        dialog.geometry('480x320')
+        dialog.configure(bg=self.MC.surface)
+        dialog.transient(self.container)
+        dialog.grab_set()
+        main = tk.Frame(dialog, bg=self.MC.surface)
+        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tk.Label(main, text='📢  Promotion Preview', font=('Segoe UI', 14, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w')
+        box = tk.Text(main, height=8, wrap='word',
+                       bg=self.MC.surface_alt, fg=self.MC.text,
+                       font=('Segoe UI', 10), relief='flat', padx=8, pady=6)
+        box.insert('1.0', rendered)
+        box.configure(state='disabled')
+        box.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        if sample:
+            tk.Label(main, text=f'Preview context: {sample.get("name", "N/A")}',
+                     font=('Segoe UI', 8), bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
+        self._modern_button(main, 'Close', dialog.destroy, kind='ghost', width=10, pady=6).pack(pady=(10, 0))
 
     def _refresh_promo_customers(self):
         query = self.promo_search_var.get().strip()
@@ -884,14 +1163,14 @@ class SmsCenterPage:
             cid = customer['id']
             var = tk.BooleanVar(value=cid in self.promo_selected_ids)
             self.promo_row_vars[cid] = var
-            row = tk.Frame(self.promo_rows_frame, bg=self.theme.palette.bg_surface)
+            row = tk.Frame(self.promo_rows_frame, bg=self.MC.surface)
             row.pack(fill=tk.X, pady=1)
             tk.Checkbutton(
                 row, text=f"{customer['name']}  •  {customer['phone']}",
                 variable=var, command=lambda c=cid: self._toggle_promo_customer(c),
-                bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-                selectcolor=self.theme.palette.bg_surface, font=self.theme.fonts.body,
-                anchor='w', activebackground=self.theme.palette.bg_surface,
+                bg=self.MC.surface, fg=self.MC.text,
+                selectcolor=self.MC.surface, font=('Segoe UI', 9),
+                anchor='w', activebackground=self.MC.surface,
             ).pack(side=tk.LEFT, anchor='w')
 
         self._update_promo_count()
@@ -922,14 +1201,14 @@ class SmsCenterPage:
         body = self._get_text(self.promo_message_text)
         save_sms_template('promotion', 'Promotion SMS', body, True, self.user['id'])
         self.templates['promotion'] = {'title': 'Promotion SMS', 'body': body, 'is_active': 1}
-        messagebox.showinfo('Success', 'Promotion template saved.')
+        self._toast('Success', 'Promotion template saved.', 'success')
 
     def _send_promotion_sms(self):
         if not self._check_internet():
             return
         raw_message = self._get_text(self.promo_message_text)
         if not raw_message:
-            messagebox.showwarning('SMS', 'Promotion message cannot be empty.')
+            self._toast('SMS', 'Promotion message cannot be empty.', 'warning')
             return
 
         customers = []
@@ -937,7 +1216,7 @@ class SmsCenterPage:
             all_customers = search_customers('')
             customers = [c for c in all_customers if c['id'] in self.promo_selected_ids]
         else:
-            messagebox.showwarning('SMS', 'Select at least one customer.')
+            self._toast('SMS', 'Select at least one customer.', 'warning')
             return
 
         if not messagebox.askyesno('Confirm', f'Send promotion SMS to {len(customers)} customer{"s" if len(customers) > 1 else ""}?'):
@@ -954,56 +1233,60 @@ class SmsCenterPage:
             else:
                 failed += 1
 
-        messagebox.showinfo('Promotion SMS', f'✅ Sent: {sent}\n❌ Failed: {failed}')
+        self._toast('Promotion SMS', f'✅ Sent: {sent}\n❌ Failed: {failed}',
+                    'success' if failed == 0 else 'warning')
 
     # ══════════════════════════════════════════════════════════════════════
     # TAB 4 — Birthday Wishes
     # ══════════════════════════════════════════════════════════════════════
 
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB 4 — Birthday Wishes (Modern)
+    # ══════════════════════════════════════════════════════════════════════
+
     def _build_birthday_tab(self):
         self._clear(self.birthday_tab)
-        card = self.theme.make_card(self.birthday_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.birthday_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'Birthday Wishes & Automation', '🎂').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Manage automated birthday greetings and send custom wishes immediately or scheduled.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Birthday Wishes & Automation', '🎂').pack(side=tk.LEFT)
+        self._desc_label(card, 'Manage automated birthday greetings and send custom wishes immediately or scheduled.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        body = tk.Frame(card, bg=self.MC.surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
         body.grid_columnconfigure(0, weight=1, minsize=480)
         body.grid_columnconfigure(1, weight=1, minsize=480)
         body.grid_rowconfigure(0, weight=1)
 
         # Left — Customers & Filtering
-        left = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        left = tk.Frame(body, bg=self.MC.surface)
         left.grid(row=0, column=0, sticky='nsew', padx=(0, 15))
 
-        # Filtering frame
-        filter_frame = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        filter_frame = tk.Frame(left, bg=self.MC.surface)
         filter_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Row 1 of filters: Search
-        search_row = tk.Frame(filter_frame, bg=self.theme.palette.bg_surface)
+        search_row = tk.Frame(filter_frame, bg=self.MC.surface)
         search_row.pack(fill=tk.X, pady=2)
         
-        tk.Label(search_row, text='🔍 Search:', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted, width=8, anchor='w').pack(side=tk.LEFT)
+        tk.Label(search_row, text='🔍 Search:', font=('Segoe UI', 9),
+                 bg=self.MC.surface, fg=self.MC.text_muted, width=8, anchor='w').pack(side=tk.LEFT)
         self.bday_search_var = tk.StringVar()
         search_entry = tk.Entry(
-            search_row, textvariable=self.bday_search_var, font=self.theme.fonts.body,
-            bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary,
-            relief='flat', highlightthickness=1, highlightbackground=self.theme.palette.border,
-            highlightcolor=self.theme.palette.accent
+            search_row, textvariable=self.bday_search_var, font=('Segoe UI', 9),
+            bg=self.MC.surface_alt, fg=self.MC.text,
+            relief='flat', highlightthickness=1, highlightbackground=self.MC.border,
+            highlightcolor=self.MC.primary
         )
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         self.bday_search_var.trace_add('write', lambda *_: self._refresh_birthdays())
 
-        # Row 2 of filters: Status Filter and Range
-        filter_row = tk.Frame(filter_frame, bg=self.theme.palette.bg_surface)
+        filter_row = tk.Frame(filter_frame, bg=self.MC.surface)
         filter_row.pack(fill=tk.X, pady=4)
 
-        tk.Label(filter_row, text='Birthday:', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted, width=8, anchor='w').pack(side=tk.LEFT)
+        tk.Label(filter_row, text='Birthday:', font=('Segoe UI', 9),
+                 bg=self.MC.surface, fg=self.MC.text_muted, width=8, anchor='w').pack(side=tk.LEFT)
         
         self.bday_added_filter_var = tk.StringVar(value='All Customers')
         added_combo = self.theme.make_combobox(
@@ -1013,8 +1296,8 @@ class SmsCenterPage:
         added_combo.pack(side=tk.LEFT, padx=(4, 10))
         added_combo.bind('<<ComboboxSelected>>', lambda _: self._refresh_birthdays())
 
-        tk.Label(filter_row, text='Upcoming:', font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+        tk.Label(filter_row, text='Upcoming:', font=('Segoe UI', 9),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.LEFT)
         
         self.bday_range_var = tk.StringVar(value='30 days')
         range_combo = self.theme.make_combobox(
@@ -1024,25 +1307,23 @@ class SmsCenterPage:
         range_combo.pack(side=tk.LEFT, padx=(4, 0))
         range_combo.bind('<<ComboboxSelected>>', lambda _: self._refresh_birthdays())
 
-        # Select All checkbox
         self.bday_select_all_var = tk.BooleanVar(value=False)
         self.bday_select_all_chk = tk.Checkbutton(
             left, text='Select All', variable=self.bday_select_all_var,
             command=self._toggle_bday_select_all,
-            bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
-            selectcolor=self.theme.palette.bg_surface, font=self.theme.fonts.body_bold,
-            activebackground=self.theme.palette.bg_surface
+            bg=self.MC.surface, fg=self.MC.text,
+            selectcolor=self.MC.surface, font=('Segoe UI', 9, 'bold'),
+            activebackground=self.MC.surface
         )
         self.bday_select_all_chk.pack(anchor='w', pady=(0, 6))
 
         self.bday_selected_ids = set()
         self.bday_row_vars = {}
 
-        # Scrollable list area
-        list_container = tk.Frame(left, bg=self.theme.palette.bg_surface, highlightthickness=1, highlightbackground=self.theme.palette.border)
+        list_container = tk.Frame(left, bg=self.MC.surface, highlightthickness=1, highlightbackground=self.MC.border)
         list_container.pack(fill=tk.BOTH, expand=True)
 
-        canvas = tk.Canvas(list_container, bg=self.theme.palette.bg_surface, highlightthickness=0)
+        canvas = tk.Canvas(list_container, bg=self.MC.surface, highlightthickness=0)
         vbar = ttk.Scrollbar(list_container, orient=tk.VERTICAL, command=canvas.yview)
         hbar = ttk.Scrollbar(list_container, orient=tk.HORIZONTAL, command=canvas.xview)
         canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
@@ -1053,7 +1334,7 @@ class SmsCenterPage:
         list_container.grid_rowconfigure(0, weight=1)
         list_container.grid_columnconfigure(0, weight=1)
 
-        self.bday_rows_frame = tk.Frame(canvas, bg=self.theme.palette.bg_surface)
+        self.bday_rows_frame = tk.Frame(canvas, bg=self.MC.surface)
         win = canvas.create_window((0, 0), window=self.bday_rows_frame, anchor='nw')
         
         def update_frame_width(*_):
@@ -1067,33 +1348,33 @@ class SmsCenterPage:
         canvas.bind('<Configure>', update_frame_width)
 
         self.bday_count_var = tk.StringVar(value='')
-        tk.Label(left, textvariable=self.bday_count_var, font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', pady=(4, 0))
+        tk.Label(left, textvariable=self.bday_count_var, font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
 
         # Right — Automation Settings & Composer
-        right = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        right = tk.Frame(body, bg=self.MC.surface)
         right.grid(row=0, column=1, sticky='nsew')
 
         # Automation settings card
-        auto_card = tk.Frame(right, bg=self.theme.palette.bg_surface_alt, highlightthickness=1, highlightbackground=self.theme.palette.border, padx=14, pady=10)
-        auto_card.pack(fill=tk.X, pady=(0, 12))
+        auto_card = tk.Frame(right, bg=self.MC.surface_alt, highlightthickness=1, highlightbackground=self.MC.border)
+        auto_card.pack(fill=tk.X, pady=(0, 12), padx=16, ipadx=16, ipady=12)
         
-        tk.Label(auto_card, text='⚙️ Automated Birthday Wishes Settings', font=self.theme.fonts.body_bold,
-                 bg=auto_card['bg'], fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 6))
+        tk.Label(auto_card, text='⚙️  Automated Birthday Wishes Settings', font=('Segoe UI', 10, 'bold'),
+                 bg=auto_card['bg'], fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
         self.bday_auto_enabled_var = tk.BooleanVar(value=get_setting('sms_birthday_auto_enabled', '0') == '1')
         chk_auto = tk.Checkbutton(
             auto_card, text='Enable Birthday SMS Automation', variable=self.bday_auto_enabled_var,
-            bg=auto_card['bg'], fg=self.theme.palette.text_primary, selectcolor=self.theme.palette.bg_surface_alt,
-            font=self.theme.fonts.body, activebackground=auto_card['bg']
+            bg=auto_card['bg'], fg=self.MC.text, selectcolor=self.MC.surface_alt,
+            font=('Segoe UI', 9), activebackground=auto_card['bg']
         )
         chk_auto.pack(anchor='w', pady=4)
 
         time_row = tk.Frame(auto_card, bg=auto_card['bg'])
         time_row.pack(fill=tk.X, pady=4)
         
-        tk.Label(time_row, text='Send Time:', font=self.theme.fonts.body,
-                 bg=auto_card['bg'], fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        tk.Label(time_row, text='Send Time:', font=('Segoe UI', 9),
+                 bg=auto_card['bg'], fg=self.MC.text).pack(side=tk.LEFT)
 
         stored_time = get_setting('sms_birthday_time', '09:00')
         try:
@@ -1107,29 +1388,28 @@ class SmsCenterPage:
         hour_combo = self.theme.make_combobox(time_row, variable=self.bday_hour_var,
                                               values=[f"{h:02d}" for h in range(24)], width=4)
         hour_combo.pack(side=tk.LEFT, padx=(8, 2))
-        tk.Label(time_row, text=':', bg=auto_card['bg'], fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        tk.Label(time_row, text=':', bg=auto_card['bg'], fg=self.MC.text).pack(side=tk.LEFT)
         min_combo = self.theme.make_combobox(time_row, variable=self.bday_min_var,
                                              values=[f"{m:02d}" for m in [0, 15, 30, 45]], width=4)
         min_combo.pack(side=tk.LEFT, padx=(2, 8))
 
-        self.theme.make_button(time_row, text='💾 Save Settings', command=self._save_birthday_settings,
-                               kind='ghost', width=14, pady=4).pack(side=tk.LEFT)
+        self._modern_button(time_row, 'Save Settings', self._save_birthday_settings,
+                            kind='ghost', width=12, pady=4, icon='💾').pack(side=tk.LEFT)
 
         last_run = get_setting('sms_birthday_last_run_date', 'Never')
         self.bday_last_run_lbl = tk.Label(
-            auto_card, text=f"Last run date: {last_run}", font=self.theme.fonts.small,
-            bg=auto_card['bg'], fg=self.theme.palette.text_muted
+            auto_card, text=f"Last run date: {last_run}", font=('Segoe UI', 8),
+            bg=auto_card['bg'], fg=self.MC.text_muted
         )
         self.bday_last_run_lbl.pack(anchor='w', pady=(4, 0))
 
         # Compose message
-        compose_lbl_row = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        compose_lbl_row = tk.Frame(right, bg=self.MC.surface)
         compose_lbl_row.pack(fill=tk.X, pady=(0, 6))
         
-        tk.Label(compose_lbl_row, text='🎉 Birthday Message Template', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        tk.Label(compose_lbl_row, text='🎉  Birthday Message Template', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(side=tk.LEFT)
 
-        # Template selector
         bday_templates = [t for t in list_sms_templates() if t['category'] == 'birthday']
         self.bday_template_var = tk.StringVar()
         
@@ -1142,7 +1422,6 @@ class SmsCenterPage:
 
         bday_template_titles = [t['title'] for t in bday_templates]
         if not bday_template_titles:
-            # Create a default birthday template
             default_body = 'Dear {{customer_name}},\n\nWishing you a very Happy Birthday! 🎂🎉\n\nMay this year bring you happiness and prosperity.\n\nWarm wishes,\n{{company_name}}'
             save_sms_template('birthday', 'Default Birthday Wishes', default_body, True, self.user['id'])
             bday_template_titles = ['Default Birthday Wishes']
@@ -1154,17 +1433,15 @@ class SmsCenterPage:
         template_combo.pack(side=tk.RIGHT)
         self.bday_template_var.trace_add('write', on_template_select)
 
-        # Main editor frame with placeholders
-        editor_frame = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        editor_frame = tk.Frame(right, bg=self.MC.surface)
         editor_frame.pack(fill=tk.BOTH, expand=True)
 
-        composer_part = tk.Frame(editor_frame, bg=self.theme.palette.bg_surface)
+        composer_part = tk.Frame(editor_frame, bg=self.MC.surface)
         composer_part.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
 
         self.bday_message_text = self._message_box(composer_part, height=8)
         self.bday_message_text.pack(fill=tk.BOTH, expand=True)
         
-        # Load initial template body
         initial_body = ''
         for t in list_sms_templates():
             if t['title'] == self.bday_template_var.get() and t['category'] == 'birthday':
@@ -1180,16 +1457,17 @@ class SmsCenterPage:
         placeholder_pane = self._placeholder_panel(editor_frame, self.bday_message_text)
         placeholder_pane.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Buttons
-        btn_row = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        btn_row = tk.Frame(right, bg=self.MC.surface)
         btn_row.pack(fill=tk.X, pady=(10, 0))
         
-        self.theme.make_button(btn_row, text='💾 Save Template', command=self._save_birthday_template,
-                               kind='ghost', width=14, pady=8).pack(side=tk.LEFT, padx=(0, 8))
-        self.theme.make_button(btn_row, text='📅 Schedule wishes', command=self._schedule_birthday_sms,
-                               kind='secondary', width=16, pady=8).pack(side=tk.RIGHT)
-        self.theme.make_button(btn_row, text='🎂 Send wishes', command=self._send_birthday_sms,
-                               kind='primary', width=16, pady=8).pack(side=tk.RIGHT, padx=(0, 8))
+        self._modern_button(btn_row, 'Preview', self._preview_birthday_sms,
+                            kind='ghost', width=10, pady=8, icon='👁️').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Save Template', self._save_birthday_template,
+                            kind='ghost', width=12, pady=8, icon='💾').pack(side=tk.LEFT, padx=(0, 6))
+        self._modern_button(btn_row, 'Schedule', self._schedule_birthday_sms,
+                            kind='secondary', width=12, pady=8, icon='📅').pack(side=tk.RIGHT)
+        self._modern_button(btn_row, 'Send Wishes', self._send_birthday_sms,
+                            kind='primary', width=14, pady=8, icon='🎂').pack(side=tk.RIGHT, padx=(0, 8))
 
         self._refresh_birthdays()
 
@@ -1269,15 +1547,14 @@ class SmsCenterPage:
         processed_customers.sort(key=sort_key)
         self.bday_customers = processed_customers
 
-        # Clear rows
         for w in self.bday_rows_frame.winfo_children():
             w.destroy()
         self.bday_row_vars.clear()
 
         if not processed_customers:
             tk.Label(self.bday_rows_frame, text='No customers match filters.',
-                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
-                     fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=12)
+                     font=('Segoe UI', 9), bg=self.MC.surface,
+                     fg=self.MC.text_muted).pack(anchor='w', padx=14, pady=12)
             self.bday_count_var.set('0 customers listed')
             return
 
@@ -1287,17 +1564,16 @@ class SmsCenterPage:
             var = tk.BooleanVar(value=cid in self.bday_selected_ids if has_bday else False)
             self.bday_row_vars[cid] = var
 
-            row = tk.Frame(self.bday_rows_frame, bg=self.theme.palette.bg_surface)
+            row = tk.Frame(self.bday_rows_frame, bg=self.MC.surface)
             row.pack(fill=tk.X, pady=4, padx=6)
             
-            # Left flow
             left_flow = tk.Frame(row, bg=row['bg'])
             left_flow.pack(side=tk.LEFT, fill=tk.Y)
             
             if has_bday:
                 chk = tk.Checkbutton(
                     left_flow, variable=var, command=lambda cid=cid: self._toggle_bday_customer(cid),
-                    bg=row['bg'], selectcolor=self.theme.palette.bg_surface,
+                    bg=row['bg'], selectcolor=self.MC.surface,
                     activebackground=row['bg']
                 )
                 chk.pack(side=tk.LEFT, padx=(4, 8))
@@ -1307,53 +1583,84 @@ class SmsCenterPage:
 
             name_lbl = tk.Label(
                 left_flow, text=f"{c['name']} • {c['phone']}",
-                font=self.theme.fonts.body_bold if has_bday else self.theme.fonts.body,
-                bg=row['bg'], fg=self.theme.palette.text_primary if has_bday else self.theme.palette.text_muted
+                font=('Segoe UI', 9, 'bold') if has_bday else ('Segoe UI', 9),
+                bg=row['bg'], fg=self.MC.text if has_bday else self.MC.text_muted
             )
             name_lbl.pack(side=tk.LEFT, anchor='w')
 
-            # Right flow
             right_flow = tk.Frame(row, bg=row['bg'])
             right_flow.pack(side=tk.RIGHT, fill=tk.Y)
 
             days_until = c.get('days_until')
             if not has_bday:
                 badge_text = '⚠️ Missing Birthday'
-                badge_color = self.theme.palette.text_muted
+                badge_color = self.MC.text_muted
                 badge_bg = '#f3f4f6'
             elif days_until == 0:
                 badge_text = '🎉 TODAY!'
                 badge_color = '#ffffff'
-                badge_bg = self.theme.palette.danger
+                badge_bg = self.MC.danger
             elif days_until == 1:
                 badge_text = '🎂 Tomorrow!'
                 badge_color = '#ffffff'
-                badge_bg = self.theme.palette.warning
+                badge_bg = self.MC.warning
             else:
                 badge_text = f'In {days_until} days'
-                badge_color = self.theme.palette.text_primary
+                badge_color = self.MC.text
                 badge_bg = '#e2e8f0'
 
             if cid in wished_ids:
                 wished_lbl = tk.Label(
-                    right_flow, text=f"✓ Sent '{datetime.now().strftime('%y')}", font=self.theme.fonts.small,
+                    right_flow, text=f"✓ Sent '{datetime.now().strftime('%y')}", font=('Segoe UI', 8),
                     fg='#ffffff', bg='#0f766e', padx=6, pady=2
                 )
                 wished_lbl.pack(side=tk.LEFT, padx=(0, 6))
 
             badge_lbl = tk.Label(
-                right_flow, text=badge_text, font=self.theme.fonts.small,
+                right_flow, text=badge_text, font=('Segoe UI', 8),
                 fg=badge_color, bg=badge_bg, padx=6, pady=2
             )
             badge_lbl.pack(side=tk.LEFT, padx=(0, 10))
 
-            btn_edit = self.theme.make_button(
-                right_flow, text='✏️ Edit', command=lambda cust=c: self._open_edit_birthday_dialog(cust),
-                kind='ghost', width=6, pady=2
+            btn_edit = self._modern_button(
+                right_flow, 'Edit', lambda cust=c: self._open_edit_birthday_dialog(cust),
+                kind='ghost', width=4, pady=2, icon='✏️'
             )
             btn_edit.pack(side=tk.LEFT, padx=(0, 4))
 
         self.bday_count_var.set(f"{len(processed_customers)} customer{'s' if len(processed_customers) != 1 else ''} listed")
+
+    def _preview_birthday_sms(self):
+        """Preview the birthday message."""
+        raw_message = self._get_text(self.bday_message_text)
+        if not raw_message:
+            self._toast('Preview', 'Message is empty.', 'warning')
+            return
+        sample = None
+        for c in self.bday_customers[:1]:
+            sample = c
+        context = build_sms_context(customer=sample, message=raw_message)
+        rendered = render_template(raw_message, context)
+        dialog = tk.Toplevel(self.container)
+        dialog.title('🎂 Birthday Preview')
+        dialog.geometry('480x320')
+        dialog.configure(bg=self.MC.surface)
+        dialog.transient(self.container)
+        dialog.grab_set()
+        main = tk.Frame(dialog, bg=self.MC.surface)
+        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tk.Label(main, text='🎂  Birthday Preview', font=('Segoe UI', 14, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w')
+        box = tk.Text(main, height=8, wrap='word',
+                       bg=self.MC.surface_alt, fg=self.MC.text,
+                       font=('Segoe UI', 10), relief='flat', padx=8, pady=6)
+        box.insert('1.0', rendered)
+        box.configure(state='disabled')
+        box.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        if sample:
+            tk.Label(main, text=f'Preview context: {sample.get("name", "N/A")}',
+                     font=('Segoe UI', 8), bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
+        self._modern_button(main, 'Close', dialog.destroy, kind='ghost', width=10, pady=6).pack(pady=(10, 0))
 
     def _toggle_bday_customer(self, cid):
         var = self.bday_row_vars.get(cid)
@@ -1365,7 +1672,6 @@ class SmsCenterPage:
     def _toggle_bday_select_all(self):
         select_all = self.bday_select_all_var.get()
         for cid, var in self.bday_row_vars.items():
-            # Check if customer has birthday before checking/selecting
             has_bday = any(c['id'] == cid and c.get('birthday') for c in self.bday_customers)
             if has_bday:
                 var.set(select_all)
@@ -1381,35 +1687,34 @@ class SmsCenterPage:
         dialog.title(f"Edit Birthday - {customer['name']}")
         dialog.geometry("380x200")
         dialog.resizable(False, False)
-        dialog.configure(bg=self.theme.palette.bg_surface)
+        dialog.configure(bg=self.MC.surface)
         dialog.transient(self.container)
         dialog.grab_set()
 
-        # Center dialog
         dialog.update_idletasks()
         x = self.container.winfo_rootx() + (self.container.winfo_width() - dialog.winfo_width()) // 2
         y = self.container.winfo_rooty() + (self.container.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        main_frm = tk.Frame(dialog, bg=self.theme.palette.bg_surface, padx=20, pady=20)
-        main_frm.pack(fill=tk.BOTH, expand=True)
+        main_frm = tk.Frame(dialog, bg=self.MC.surface)
+        main_frm.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         tk.Label(
             main_frm, text=f"Set Birthday for {customer['name']}",
-            font=self.theme.fonts.body_bold, bg=dialog['bg'], fg=self.theme.palette.text_primary
+            font=('Segoe UI', 10, 'bold'), bg=dialog['bg'], fg=self.MC.text
         ).pack(anchor='w', pady=(0, 10))
 
         tk.Label(
             main_frm, text="Format: YYYY-MM-DD (e.g. 1990-05-15)",
-            font=self.theme.fonts.small, bg=dialog['bg'], fg=self.theme.palette.text_muted
+            font=('Segoe UI', 8), bg=dialog['bg'], fg=self.MC.text_muted
         ).pack(anchor='w', pady=(0, 4))
 
         bday_var = tk.StringVar(value=customer.get('birthday', '') or '')
         entry = tk.Entry(
-            main_frm, textvariable=bday_var, font=self.theme.fonts.body,
-            bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary,
-            relief='flat', highlightthickness=1, highlightcolor=self.theme.palette.accent,
-            highlightbackground=self.theme.palette.border
+            main_frm, textvariable=bday_var, font=('Segoe UI', 9),
+            bg=self.MC.surface_alt, fg=self.MC.text,
+            relief='flat', highlightthickness=1, highlightcolor=self.MC.primary,
+            highlightbackground=self.MC.border
         )
         entry.pack(fill=tk.X, pady=(0, 20), ipady=4)
         entry.focus_set()
@@ -1429,10 +1734,10 @@ class SmsCenterPage:
             update_customer_birthday(customer['id'], val)
             dialog.destroy()
             self._refresh_birthdays()
-            messagebox.showinfo("Success", f"Birthday updated for {customer['name']}.", parent=self.container)
+            self._toast('Success', f"Birthday updated for {customer['name']}.", 'success')
 
-        self.theme.make_button(btn_row, text='Save', command=save, kind='primary', width=10).pack(side=tk.RIGHT)
-        self.theme.make_button(btn_row, text='Cancel', command=dialog.destroy, kind='ghost', width=10).pack(side=tk.RIGHT, padx=(0, 8))
+        self._modern_button(btn_row, 'Save', save, kind='primary', width=10).pack(side=tk.RIGHT)
+        self._modern_button(btn_row, 'Cancel', dialog.destroy, kind='ghost', width=10).pack(side=tk.RIGHT, padx=(0, 8))
 
     def _save_birthday_settings(self):
         auto_enabled = '1' if self.bday_auto_enabled_var.get() else '0'
@@ -1441,26 +1746,26 @@ class SmsCenterPage:
         set_setting('sms_birthday_auto_enabled', auto_enabled, 'Whether automated birthday SMS is enabled', self.user['id'])
         set_setting('sms_birthday_time', send_time, 'Daily time to send automated birthday SMS', self.user['id'])
         
-        messagebox.showinfo('Success', 'Birthday automation settings saved.')
+        self._toast('Success', 'Birthday automation settings saved.', 'success')
 
     def _save_birthday_template(self):
         body = self._get_text(self.bday_message_text)
         title = self.bday_template_var.get()
         save_sms_template('birthday', title, body, True, self.user['id'])
         self.templates['birthday'] = {'title': title, 'body': body, 'is_active': 1}
-        messagebox.showinfo('Success', f'Birthday wishes template "{title}" saved.')
+        self._toast('Success', f'Birthday wishes template "{title}" saved.', 'success')
 
     def _send_birthday_sms(self):
         if not self._check_internet():
             return
         raw_message = self._get_text(self.bday_message_text)
         if not raw_message:
-            messagebox.showwarning('SMS', 'Birthday message cannot be empty.')
+            self._toast('SMS', 'Birthday message cannot be empty.', 'warning')
             return
 
         customers = [c for c in self.bday_customers if c['id'] in self.bday_selected_ids]
         if not customers:
-            messagebox.showwarning('SMS', 'Select at least one customer with a birthday.')
+            self._toast('SMS', 'Select at least one customer with a birthday.', 'warning')
             return
 
         if not messagebox.askyesno('Confirm', f'Send birthday wishes to {len(customers)} customer{"s" if len(customers) > 1 else ""}?'):
@@ -1472,22 +1777,21 @@ class SmsCenterPage:
         dialog = tk.Toplevel(self.container)
         dialog.title("Campaign Sequencer")
         dialog.geometry("550x450")
-        dialog.configure(bg=self.theme.palette.bg_surface)
+        dialog.configure(bg=self.MC.surface)
         dialog.transient(self.container)
         dialog.grab_set()
 
-        # Center dialog
         dialog.update_idletasks()
         x = self.container.winfo_rootx() + (self.container.winfo_width() - dialog.winfo_width()) // 2
         y = self.container.winfo_rooty() + (self.container.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        main_frm = tk.Frame(dialog, bg=self.theme.palette.bg_surface, padx=20, pady=20)
-        main_frm.pack(fill=tk.BOTH, expand=True)
+        main_frm = tk.Frame(dialog, bg=self.MC.surface)
+        main_frm.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         tk.Label(
             main_frm, text="SMS Campaign Progress",
-            font=self.theme.fonts.h3, bg=dialog['bg'], fg=self.theme.palette.text_primary
+            font=('Segoe UI', 14, 'bold'), bg=dialog['bg'], fg=self.MC.text
         ).pack(anchor='w', pady=(0, 6))
 
         progress_var = tk.DoubleVar()
@@ -1496,21 +1800,20 @@ class SmsCenterPage:
 
         status_lbl = tk.Label(
             main_frm, text=f"Preparing campaign for {len(customers)} recipients...",
-            font=self.theme.fonts.body, bg=dialog['bg'], fg=self.theme.palette.text_primary
+            font=('Segoe UI', 9), bg=dialog['bg'], fg=self.MC.text
         )
         status_lbl.pack(anchor='w', pady=(0, 4))
         
         countdown_lbl = tk.Label(
             main_frm, text="",
-            font=self.theme.fonts.body_bold, bg=dialog['bg'], fg=self.theme.palette.accent
+            font=('Segoe UI', 10, 'bold'), bg=dialog['bg'], fg=self.MC.primary
         )
         countdown_lbl.pack(anchor='w', pady=(0, 10))
 
-        # Log box
         log_box = tk.Text(
             main_frm, height=12, wrap='word',
-            bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary,
-            font=self.theme.fonts.small, relief='flat', bd=0, padx=8, pady=8
+            bg=self.MC.surface_alt, fg=self.MC.text,
+            font=('Segoe UI', 8), relief='flat', bd=0, padx=8, pady=8
         )
         log_box.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
 
@@ -1534,7 +1837,7 @@ class SmsCenterPage:
             append_log("Campaign cancelled by user.")
             btn_stop.configure(text="Close", command=dialog.destroy)
 
-        btn_stop = self.theme.make_button(btn_row, text='Stop Campaign', command=stop_campaign, kind='primary')
+        btn_stop = self._modern_button(btn_row, 'Stop Campaign', stop_campaign, kind='primary')
         btn_stop.pack(side=tk.RIGHT)
 
         def tick():
@@ -1545,16 +1848,15 @@ class SmsCenterPage:
             if idx >= len(customers):
                 append_log(f"Campaign complete. Success: {campaign_state['sent']}, Failed: {campaign_state['failed']}")
                 btn_stop.configure(text="Close", command=dialog.destroy)
-                countdown_lbl.configure(text="Campaign Finished! 🎉", fg=self.theme.palette.success)
+                countdown_lbl.configure(text="Campaign Finished! 🎉", fg=self.MC.success)
                 return
 
             if campaign_state['countdown'] > 0:
-                countdown_lbl.configure(text=f"Next message in {campaign_state['countdown']} seconds...", fg=self.theme.palette.accent)
+                countdown_lbl.configure(text=f"Next message in {campaign_state['countdown']} seconds...", fg=self.MC.primary)
                 campaign_state['countdown'] -= 1
                 dialog.after(1000, tick)
                 return
 
-            # Send message
             customer = customers[idx]
             recipient = customer.get('phone', '')
             context = build_sms_context(customer=customer, message=message_template)
@@ -1579,7 +1881,7 @@ class SmsCenterPage:
             
             if campaign_state['index'] < len(customers):
                 campaign_state['countdown'] = 3
-                countdown_lbl.configure(text="Next message in 3 seconds...", fg=self.theme.palette.accent)
+                countdown_lbl.configure(text="Next message in 3 seconds...", fg=self.MC.primary)
                 dialog.after(1000, tick)
             else:
                 dialog.after(100, tick)
@@ -1589,47 +1891,46 @@ class SmsCenterPage:
     def _schedule_birthday_sms(self):
         raw_message = self._get_text(self.bday_message_text)
         if not raw_message:
-            messagebox.showwarning('SMS', 'Birthday message cannot be empty.')
+            self._toast('SMS', 'Birthday message cannot be empty.', 'warning')
             return
 
         customers = [c for c in self.bday_customers if c['id'] in self.bday_selected_ids]
         if not customers:
-            messagebox.showwarning('SMS', 'Select at least one customer with a birthday.')
+            self._toast('SMS', 'Select at least one customer with a birthday.', 'warning')
             return
 
         dialog = tk.Toplevel(self.container)
         dialog.title("Schedule SMS Campaign")
         dialog.geometry("380x280")
         dialog.resizable(False, False)
-        dialog.configure(bg=self.theme.palette.bg_surface)
+        dialog.configure(bg=self.MC.surface)
         dialog.transient(self.container)
         dialog.grab_set()
 
-        # Center dialog
         dialog.update_idletasks()
         x = self.container.winfo_rootx() + (self.container.winfo_width() - dialog.winfo_width()) // 2
         y = self.container.winfo_rooty() + (self.container.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
 
-        main_frm = tk.Frame(dialog, bg=self.theme.palette.bg_surface, padx=20, pady=20)
-        main_frm.pack(fill=tk.BOTH, expand=True)
+        main_frm = tk.Frame(dialog, bg=self.MC.surface)
+        main_frm.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         tk.Label(
             main_frm, text=f"Schedule Wishes for {len(customers)} Customers",
-            font=self.theme.fonts.body_bold, bg=dialog['bg'], fg=self.theme.palette.text_primary
+            font=('Segoe UI', 10, 'bold'), bg=dialog['bg'], fg=self.MC.text
         ).pack(anchor='w', pady=(0, 10))
 
-        tk.Label(main_frm, text="Scheduled Date (YYYY-MM-DD):", font=self.theme.fonts.small, bg=dialog['bg'], fg=self.theme.palette.text_muted).pack(anchor='w', pady=(0, 4))
+        tk.Label(main_frm, text="Scheduled Date (YYYY-MM-DD):", font=('Segoe UI', 8), bg=dialog['bg'], fg=self.MC.text_muted).pack(anchor='w', pady=(0, 4))
         date_var = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         date_entry = tk.Entry(
-            main_frm, textvariable=date_var, font=self.theme.fonts.body,
-            bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary,
-            relief='flat', highlightthickness=1, highlightbackground=self.theme.palette.border,
-            highlightcolor=self.theme.palette.accent
+            main_frm, textvariable=date_var, font=('Segoe UI', 9),
+            bg=self.MC.surface_alt, fg=self.MC.text,
+            relief='flat', highlightthickness=1, highlightbackground=self.MC.border,
+            highlightcolor=self.MC.primary
         )
         date_entry.pack(fill=tk.X, pady=(0, 10), ipady=4)
 
-        tk.Label(main_frm, text="Scheduled Time (HH:MM):", font=self.theme.fonts.small, bg=dialog['bg'], fg=self.theme.palette.text_muted).pack(anchor='w', pady=(0, 4))
+        tk.Label(main_frm, text="Scheduled Time (HH:MM):", font=('Segoe UI', 8), bg=dialog['bg'], fg=self.MC.text_muted).pack(anchor='w', pady=(0, 4))
         time_row = tk.Frame(main_frm, bg=dialog['bg'])
         time_row.pack(fill=tk.X, pady=(0, 20))
 
@@ -1638,7 +1939,7 @@ class SmsCenterPage:
 
         hour_combo = self.theme.make_combobox(time_row, variable=h_var, values=[f"{h:02d}" for h in range(24)], width=5)
         hour_combo.pack(side=tk.LEFT)
-        tk.Label(time_row, text=':', bg=dialog['bg'], fg=self.theme.palette.text_primary).pack(side=tk.LEFT, padx=4)
+        tk.Label(time_row, text=':', bg=dialog['bg'], fg=self.MC.text).pack(side=tk.LEFT, padx=4)
         min_combo = self.theme.make_combobox(time_row, variable=m_var, values=[f"{m:02d}" for m in range(0, 60, 5)], width=5)
         min_combo.pack(side=tk.LEFT)
 
@@ -1680,35 +1981,39 @@ class SmsCenterPage:
                 )
 
             dialog.destroy()
-            messagebox.showinfo("Scheduled", f"Successfully scheduled {len(customers)} messages for {sched_datetime_str}.", parent=self.container)
+            self._toast('Scheduled', f"Successfully scheduled {len(customers)} messages for {sched_datetime_str}.", 'success')
             
             if hasattr(self, '_refresh_scheduled_queue'):
                 self._refresh_scheduled_queue()
 
-        self.theme.make_button(btn_row, text='Schedule', command=save_schedule, kind='primary', width=12).pack(side=tk.RIGHT)
-        self.theme.make_button(btn_row, text='Cancel', command=dialog.destroy, kind='ghost', width=12).pack(side=tk.RIGHT, padx=(0, 8))
+        self._modern_button(btn_row, 'Schedule', save_schedule, kind='primary', width=12).pack(side=tk.RIGHT)
+        self._modern_button(btn_row, 'Cancel', dialog.destroy, kind='ghost', width=12).pack(side=tk.RIGHT, padx=(0, 8))
+
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB 5 — Scheduled SMS Queue (Modern)
+    # ══════════════════════════════════════════════════════════════════════
 
     def _build_scheduled_tab(self):
         self._clear(self.scheduled_tab)
-        card = self.theme.make_card(self.scheduled_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.scheduled_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'Scheduled SMS Queue', '📅').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'View all messages scheduled to be sent. Pending messages will be dispatched automatically at their scheduled time.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Scheduled SMS Queue', '📅').pack(side=tk.LEFT)
+        self._desc_label(card, 'View all messages scheduled to be sent. Pending messages will be dispatched automatically at their scheduled time.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        # Refresh button
-        header = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        header.pack(fill=tk.X, padx=14, pady=(0, 8))
-        self.theme.make_button(header, text='🔄 Refresh Queue', command=self._refresh_scheduled_queue,
-                               kind='ghost', width=16).pack(side=tk.RIGHT)
+        header = tk.Frame(card, bg=self.MC.surface)
+        header.pack(fill=tk.X, padx=16, pady=(0, 8))
+        self._modern_button(header, 'Refresh Queue', self._refresh_scheduled_queue,
+                            kind='ghost', width=16, icon='🔄').pack(side=tk.RIGHT)
 
-        # Table/List of scheduled SMS
-        list_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        list_frame = tk.Frame(card, bg=self.MC.surface)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
 
         style = ttk.Style()
-        style.configure("Scheduled.Treeview", font=self.theme.fonts.body, rowheight=30)
-        style.configure("Scheduled.Treeview.Heading", font=self.theme.fonts.body_bold)
+        style.configure("Scheduled.Treeview", font=('Segoe UI', 9), rowheight=30)
+        style.configure("Scheduled.Treeview.Heading", font=('Segoe UI', 9, 'bold'))
 
         self.sched_tree = ttk.Treeview(
             list_frame, columns=('recipient', 'customer', 'message', 'scheduled_time', 'status', 'actions'),
@@ -1775,31 +2080,34 @@ class SmsCenterPage:
             delete_scheduled_sms(int(item_id))
             self._refresh_scheduled_queue()
 
+    # ══════════════════════════════════════════════════════════════════════
+    # TAB 6 — Failed SMS Manager (Modern)
+    # ══════════════════════════════════════════════════════════════════════
+
     def _build_failed_tab(self):
         self._clear(self.failed_tab)
-        card = self.theme.make_card(self.failed_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.failed_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'Failed SMS Manager', '❌').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'View all messages that failed to send. Select a row and click "Resend" to retry sending.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'Failed SMS Manager', '❌').pack(side=tk.LEFT)
+        self._desc_label(card, 'View all messages that failed to send. Select a row and click "Resend" to retry sending.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        # Control Row
-        header = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        header.pack(fill=tk.X, padx=14, pady=(0, 8))
+        header = tk.Frame(card, bg=self.MC.surface)
+        header.pack(fill=tk.X, padx=16, pady=(0, 8))
         
-        self.theme.make_button(header, text='🔄 Refresh List', command=self._refresh_failed_list,
-                               kind='ghost', width=16).pack(side=tk.RIGHT)
-        
-        self.theme.make_button(header, text='🔄 Resend Selected', command=self._resend_failed_sms,
-                               kind='primary', width=20).pack(side=tk.RIGHT, padx=(0, 8))
+        self._modern_button(header, 'Refresh List', self._refresh_failed_list,
+                            kind='ghost', width=14, icon='🔄').pack(side=tk.RIGHT)
+        self._modern_button(header, 'Resend Selected', self._resend_failed_sms,
+                            kind='primary', width=18, icon='🔄').pack(side=tk.RIGHT, padx=(0, 8))
 
-        # Table/List of Failed SMS
-        list_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        list_frame = tk.Frame(card, bg=self.MC.surface)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
 
         style = ttk.Style()
-        style.configure("Failed.Treeview", font=self.theme.fonts.body, rowheight=30)
-        style.configure("Failed.Treeview.Heading", font=self.theme.fonts.body_bold)
+        style.configure("Failed.Treeview", font=('Segoe UI', 9), rowheight=30)
+        style.configure("Failed.Treeview.Heading", font=('Segoe UI', 9, 'bold'))
 
         self.failed_tree = ttk.Treeview(
             list_frame, columns=('id', 'recipient', 'customer', 'category', 'message', 'failed_at'),
@@ -1852,7 +2160,7 @@ class SmsCenterPage:
             return
         selected_item = self.failed_tree.focus()
         if not selected_item:
-            messagebox.showwarning('Warning', 'Please select a failed SMS message from the list.')
+            self._toast('Warning', 'Please select a failed SMS message from the list.', 'warning')
             return
 
         values = self.failed_tree.item(selected_item, 'values')
@@ -1864,7 +2172,7 @@ class SmsCenterPage:
         conn.close()
         
         if not row:
-            messagebox.showerror('Error', 'Failed to retrieve the message content from the database.')
+            self._toast('Error', 'Failed to retrieve the message content from the database.', 'error')
             return
             
         message = row['message']
@@ -1876,7 +2184,6 @@ class SmsCenterPage:
         if customer_id:
             customer = get_customer(customer_id)
 
-        # Attempt resending
         ok, res_text, _ = send_sms(
             recipient=recipient,
             message=message,
@@ -1891,52 +2198,52 @@ class SmsCenterPage:
             conn.commit()
             conn.close()
             
-            messagebox.showinfo('Success', f'SMS resent successfully to {recipient}!')
+            self._toast('Success', f'SMS resent successfully to {recipient}!', 'success')
             self._refresh_failed_list()
             if hasattr(self, '_refresh_history_table'):
                 self._refresh_history_table()
         else:
-            messagebox.showerror('Failed', f'Resending failed: {res_text}')
+            self._toast('Failed', f'Resending failed: {res_text}', 'error')
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 5 — Templates Manager
+    # TAB 7 — Templates Manager (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_templates_tab(self):
         self._clear(self.templates_tab)
-        card = self.theme.make_card(self.templates_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.templates_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'SMS Template Manager', '📋').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Manage all SMS templates. Create new templates, edit existing ones, or delete custom templates.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'SMS Template Manager', '📋').pack(side=tk.LEFT)
+        self._desc_label(card, 'Manage all SMS templates. Create new templates, edit existing ones, or delete custom templates.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        body = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        body = tk.Frame(card, bg=self.MC.surface)
+        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
         body.grid_columnconfigure(0, weight=1, minsize=220)
         body.grid_columnconfigure(1, weight=3)
         body.grid_rowconfigure(0, weight=1)
 
-        # Left — Template list
-        left = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        left = tk.Frame(body, bg=self.MC.surface)
         left.grid(row=0, column=0, sticky='nsew', padx=(0, 12))
 
-        tk.Label(left, text='📄 Templates', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 6))
+        tk.Label(left, text='📄  Templates', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
-        # Listbox with horizontal scroll
-        list_outer = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        list_outer = tk.Frame(left, bg=self.MC.surface)
         list_outer.pack(fill=tk.BOTH, expand=True)
 
         self.tpl_listbox = tk.Listbox(
             list_outer, height=14,
-            bg=self.theme.palette.bg_surface_alt,
-            fg=self.theme.palette.text_primary,
-            selectbackground=self.theme.palette.accent,
+            bg=self.MC.surface_alt,
+            fg=self.MC.text,
+            selectbackground=self.MC.primary,
             selectforeground='white',
             activestyle='none',
-            font=self.theme.fonts.body,
+            font=('Segoe UI', 9),
             highlightthickness=1,
-            highlightbackground=self.theme.palette.border,
+            highlightbackground=self.MC.border,
             bd=0,
         )
         tpl_vbar = ttk.Scrollbar(list_outer, orient=tk.VERTICAL, command=self.tpl_listbox.yview)
@@ -1945,49 +2252,46 @@ class SmsCenterPage:
         self.tpl_listbox.pack(fill=tk.BOTH, expand=True)
         self.tpl_listbox.bind('<<ListboxSelect>>', self._on_template_select)
 
-        # Buttons — stacked vertically for visibility
-        btn_bar = tk.Frame(left, bg=self.theme.palette.bg_surface)
+        btn_bar = tk.Frame(left, bg=self.MC.surface)
         btn_bar.pack(fill=tk.X, pady=(8, 0))
         btn_bar.grid_columnconfigure(0, weight=1)
         btn_bar.grid_columnconfigure(1, weight=1)
         btn_bar.grid_columnconfigure(2, weight=1)
 
-        new_btn = self.theme.make_button(btn_bar, text='➕ New', command=self._new_template,
-                               kind='ghost', width=7, pady=6)
+        new_btn = self._modern_button(btn_bar, 'New', self._new_template,
+                                      kind='ghost', width=7, pady=6, icon='➕')
         new_btn.grid(row=0, column=0, sticky='ew', padx=(0, 4))
-        del_btn = self.theme.make_button(btn_bar, text='🗑️ Delete', command=self._delete_template,
-                               kind='danger', width=7, pady=6)
+        del_btn = self._modern_button(btn_bar, 'Delete', self._delete_template,
+                                      kind='danger', width=7, pady=6, icon='🗑️')
         del_btn.grid(row=0, column=1, sticky='ew', padx=(0, 4))
-        save_btn = self.theme.make_button(btn_bar, text='💾 Save', command=self._save_edited_template,
-                               kind='primary', width=7, pady=6)
+        save_btn = self._modern_button(btn_bar, 'Save', self._save_edited_template,
+                                       kind='primary', width=7, pady=6, icon='💾')
         save_btn.grid(row=0, column=2, sticky='ew')
 
-        # Right — Template editor
-        right = tk.Frame(body, bg=self.theme.palette.bg_surface)
+        right = tk.Frame(body, bg=self.MC.surface)
         right.grid(row=0, column=1, sticky='nsew')
 
-        # Category & Title
-        form = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        form = tk.Frame(right, bg=self.MC.surface)
         form.pack(fill=tk.X, pady=(0, 8))
 
-        tk.Label(form, text='Category:', font=self.theme.fonts.body_bold, width=10, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).grid(row=0, column=0, sticky='w', pady=4)
+        tk.Label(form, text='Category:', font=('Segoe UI', 9, 'bold'), width=10, anchor='w',
+                 bg=self.MC.surface, fg=self.MC.text).grid(row=0, column=0, sticky='w', pady=4)
         self.tpl_category_var = tk.StringVar()
         cat_entry = self.theme.make_entry(form, variable=self.tpl_category_var)
         cat_entry.grid(row=0, column=1, sticky='ew', padx=(8, 0), pady=4)
 
-        tk.Label(form, text='Title:', font=self.theme.fonts.body_bold, width=10, anchor='w',
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).grid(row=1, column=0, sticky='w', pady=4)
+        tk.Label(form, text='Title:', font=('Segoe UI', 9, 'bold'), width=10, anchor='w',
+                 bg=self.MC.surface, fg=self.MC.text).grid(row=1, column=0, sticky='w', pady=4)
         self.tpl_title_var = tk.StringVar()
         title_entry = self.theme.make_entry(form, variable=self.tpl_title_var)
         title_entry.grid(row=1, column=1, sticky='ew', padx=(8, 0), pady=4)
 
         form.grid_columnconfigure(1, weight=1)
 
-        tk.Label(right, text='Template Body:', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', pady=(0, 4))
+        tk.Label(right, text='Template Body:', font=('Segoe UI', 9, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 4))
 
-        editor_frame = tk.Frame(right, bg=self.theme.palette.bg_surface)
+        editor_frame = tk.Frame(right, bg=self.MC.surface)
         editor_frame.pack(fill=tk.BOTH, expand=True)
         editor_frame.grid_columnconfigure(0, weight=3)
         editor_frame.grid_columnconfigure(1, weight=1)
@@ -2039,27 +2343,26 @@ class SmsCenterPage:
         body = self._get_text(self.tpl_body_text)
 
         if not category:
-            messagebox.showwarning('Template', 'Category is required.')
+            self._toast('Template', 'Category is required.', 'warning')
             return
         if not title:
-            messagebox.showwarning('Template', 'Title is required.')
+            self._toast('Template', 'Title is required.', 'warning')
             return
         if not body:
-            messagebox.showwarning('Template', 'Template body is required.')
+            self._toast('Template', 'Template body is required.', 'warning')
             return
 
-        # Sanitize category (lowercase, underscores)
         category = category.lower().strip().replace(' ', '_')
 
         save_sms_template(category, title, body, True, self.user['id'])
         self.templates[category] = {'title': title, 'body': body, 'is_active': 1}
-        messagebox.showinfo('Success', f'Template "{title}" saved.')
+        self._toast('Success', f'Template "{title}" saved.', 'success')
         self._refresh_template_list()
 
     def _delete_template(self):
         selection = self.tpl_listbox.curselection()
         if not selection:
-            messagebox.showwarning('Template', 'Select a template to delete.')
+            self._toast('Template', 'Select a template to delete.', 'warning')
             return
 
         idx = selection[0]
@@ -2067,10 +2370,9 @@ class SmsCenterPage:
             return
 
         cat = self.tpl_categories[idx]
-        # Prevent deletion of core system templates
         protected = {'custom', 'auto', 'auto_new_loan', 'auto_renewal', 'auto_redemption', 'auto_reminder', 'promotion', 'birthday'}
         if cat in protected:
-            messagebox.showwarning('Template', f'Cannot delete system template "{cat}". You can edit it instead.')
+            self._toast('Template', f'Cannot delete system template "{cat}". You can edit it instead.', 'warning')
             return
 
         if not messagebox.askyesno('Confirm', f'Delete template "{cat}"?'):
@@ -2082,27 +2384,29 @@ class SmsCenterPage:
         self.tpl_category_var.set('')
         self.tpl_title_var.set('')
         self._set_text(self.tpl_body_text, '')
-        messagebox.showinfo('Success', 'Template deleted.')
+        self._toast('Success', 'Template deleted.', 'success')
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 6 — History
+    # TAB 8 — History (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_history_tab(self):
         self._clear(self.history_tab)
-        card = self.theme.make_card(self.history_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.history_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'SMS History', '📊').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'View all sent SMS messages with filtering options.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'SMS History', '📊').pack(side=tk.LEFT)
+        self._desc_label(card, 'View all sent SMS messages with filtering options.').pack(anchor='w', padx=16, pady=(0, 10))
 
         # Gateway summary
-        summary = tk.Frame(card.inner, bg=self.theme.palette.bg_surface_alt,
-                           highlightthickness=1, highlightbackground=self.theme.palette.border)
-        summary.pack(fill=tk.X, padx=14, pady=(0, 10))
+        summary = tk.Frame(card, bg=self.MC.surface_alt,
+                           highlightthickness=1, highlightbackground=self.MC.border)
+        summary.pack(fill=tk.X, padx=16, pady=(0, 10))
 
-        summary_inner = tk.Frame(summary, bg=self.theme.palette.bg_surface_alt)
-        summary_inner.pack(fill=tk.X, padx=14, pady=8)
+        summary_inner = tk.Frame(summary, bg=self.MC.surface_alt)
+        summary_inner.pack(fill=tk.X, padx=16, pady=8)
 
         gateway_info = [
             ('Gateway', get_setting('sms_gateway_base_url', 'https://app.text.lk/api/v3/sms/send')),
@@ -2111,17 +2415,16 @@ class SmsCenterPage:
             ('API Token', 'Configured ✅' if get_setting('sms_gateway_token', '') else 'Missing ⚠️'),
         ]
         for i, (label, value) in enumerate(gateway_info):
-            tk.Label(summary_inner, text=f'{label}: ', font=self.theme.fonts.body_bold,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).grid(row=0, column=i*2, sticky='w', padx=(0, 2))
-            tk.Label(summary_inner, text=value, font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).grid(row=0, column=i*2+1, sticky='w', padx=(0, 16))
+            tk.Label(summary_inner, text=f'{label}: ', font=('Segoe UI', 9, 'bold'),
+                     bg=self.MC.surface_alt, fg=self.MC.text).grid(row=0, column=i*2, sticky='w', padx=(0, 2))
+            tk.Label(summary_inner, text=value, font=('Segoe UI', 9),
+                     bg=self.MC.surface_alt, fg=self.MC.text_muted).grid(row=0, column=i*2+1, sticky='w', padx=(0, 16))
 
-        # Filters
-        filter_row = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        filter_row.pack(fill=tk.X, padx=14, pady=(0, 8))
+        filter_row = tk.Frame(card, bg=self.MC.surface)
+        filter_row.pack(fill=tk.X, padx=16, pady=(0, 8))
 
-        tk.Label(filter_row, text='Filter:', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        tk.Label(filter_row, text='Filter:', font=('Segoe UI', 9, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text).pack(side=tk.LEFT)
 
         self.hist_cat_var = tk.StringVar(value='All')
         cat_values = ['All', 'Custom', 'Auto', 'New Loan', 'Renewal', 'Redemption', 'Reminder', 'Promotion', 'Birthday', 'Loan Status']
@@ -2132,16 +2435,15 @@ class SmsCenterPage:
         self.theme.make_combobox(filter_row, variable=self.hist_status_var, values=['All', 'Sent', 'Failed', 'Pending'], width=10,
                                  command=lambda _: self._refresh_history()).pack(side=tk.LEFT, padx=(0, 8))
 
-        self.theme.make_button(filter_row, text='🔄 Refresh', command=self._refresh_history,
-                               kind='ghost', width=10, pady=6).pack(side=tk.LEFT)
+        self._modern_button(filter_row, 'Refresh', self._refresh_history,
+                            kind='ghost', width=10, pady=6, icon='🔄').pack(side=tk.LEFT)
 
         self.hist_total_var = tk.StringVar(value='')
-        tk.Label(filter_row, textvariable=self.hist_total_var, font=self.theme.fonts.small,
-                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.RIGHT)
+        tk.Label(filter_row, textvariable=self.hist_total_var, font=('Segoe UI', 8),
+                 bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.RIGHT)
 
-        # History table (using Treeview for table-style display)
-        tree_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        tree_frame = tk.Frame(card, bg=self.MC.surface)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
 
         columns = ('date', 'recipient', 'category', 'status', 'message')
         self.hist_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=14)
@@ -2165,7 +2467,6 @@ class SmsCenterPage:
         self._refresh_history()
 
     def _refresh_history(self):
-        # Map filter values to db categories
         cat_map = {
             'All': '', 'Custom': 'custom', 'Auto': 'auto', 'New Loan': 'auto_new_loan',
             'Renewal': 'auto_renewal', 'Redemption': 'auto_redemption', 'Reminder': 'auto_reminder',
@@ -2178,7 +2479,6 @@ class SmsCenterPage:
 
         messages = list_sms_messages_filtered(category=cat, status=status, limit=200)
 
-        # Clear tree
         for item in self.hist_tree.get_children():
             self.hist_tree.delete(item)
 
@@ -2196,35 +2496,34 @@ class SmsCenterPage:
         self.hist_total_var.set(f'{len(messages)} messages')
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 7 — Analytics
+    # TAB 9 — Analytics (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_analytics_tab(self):
         self._clear(self.analytics_tab)
-        card = self.theme.make_card(self.analytics_tab, bg=self.theme.palette.bg_surface)
+        card = self._glass_card(self.analytics_tab)
         card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        self._section_label(card.inner, 'SMS Analytics', '📈').pack(anchor='w', padx=14, pady=(10, 2))
-        self._desc_label(card.inner, 'Overview of your SMS messaging performance and usage statistics.').pack(anchor='w', padx=14, pady=(0, 10))
+        hdr = tk.Frame(card, bg=self.MC.surface)
+        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
+        self._section_label(hdr, 'SMS Analytics', '📈').pack(side=tk.LEFT)
+        self._desc_label(card, 'Overview of your SMS messaging performance and usage statistics.').pack(anchor='w', padx=16, pady=(0, 10))
 
-        # Refresh button
-        ref_row = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        ref_row.pack(fill=tk.X, padx=14, pady=(0, 10))
-        self.theme.make_button(ref_row, text='🔄 Refresh Analytics',
-                               command=self._refresh_analytics,
-                               kind='ghost', width=16, pady=6).pack(side=tk.LEFT)
+        ref_row = tk.Frame(card, bg=self.MC.surface)
+        ref_row.pack(fill=tk.X, padx=16, pady=(0, 10))
+        self._modern_button(ref_row, 'Refresh Analytics', self._refresh_analytics,
+                            kind='ghost', width=16, pady=6, icon='🔄').pack(side=tk.LEFT)
 
-        # Scrollable content area
-        scroll_outer = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
-        scroll_outer.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
+        scroll_outer = tk.Frame(card, bg=self.MC.surface)
+        scroll_outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
 
-        canvas = tk.Canvas(scroll_outer, bg=self.theme.palette.bg_surface, highlightthickness=0, bd=0)
+        canvas = tk.Canvas(scroll_outer, bg=self.MC.surface, highlightthickness=0, bd=0)
         vbar = ttk.Scrollbar(scroll_outer, orient=tk.VERTICAL, command=canvas.yview)
         canvas.configure(yscrollcommand=vbar.set)
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.analytics_content = tk.Frame(canvas, bg=self.theme.palette.bg_surface)
+        self.analytics_content = tk.Frame(canvas, bg=self.MC.surface)
         win = canvas.create_window((0, 0), window=self.analytics_content, anchor='nw')
         self.analytics_content.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
@@ -2239,150 +2538,141 @@ class SmsCenterPage:
             data = get_sms_analytics()
         except Exception:
             tk.Label(parent, text='No SMS data available yet.',
-                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
-                     fg=self.theme.palette.text_muted).pack(pady=20)
+                     font=('Segoe UI', 9), bg=self.MC.surface,
+                     fg=self.MC.text_muted).pack(pady=20)
             return
 
         # ── Stat Cards Row ──
-        stats_row = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        stats_row = tk.Frame(parent, bg=self.MC.surface)
         stats_row.pack(fill=tk.X, pady=(0, 16))
-        stats_row.grid_columnconfigure(0, weight=1)
-        stats_row.grid_columnconfigure(1, weight=1)
-        stats_row.grid_columnconfigure(2, weight=1)
-        stats_row.grid_columnconfigure(3, weight=1)
-        stats_row.grid_columnconfigure(4, weight=1)
+        for i in range(5):
+            stats_row.grid_columnconfigure(i, weight=1)
 
         cards_data = [
-            ('Total SMS', data['total'], self.theme.palette.accent),
-            ('Sent ✅', data['sent'], self.theme.palette.success),
-            ('Failed ❌', data['failed'], self.theme.palette.danger),
-            ('Pending ⏳', data['pending'], self.theme.palette.warning),
-            ('Success Rate', f"{data['success_rate']}%", self.theme.palette.success),
+            ('Total SMS', data['total'], self.MC.primary),
+            ('Sent ✅', data['sent'], self.MC.success),
+            ('Failed ❌', data['failed'], self.MC.danger),
+            ('Pending ⏳', data['pending'], self.MC.warning),
+            ('Success Rate', f"{data['success_rate']}%", self.MC.success),
         ]
         for i, (title, value, color) in enumerate(cards_data):
             c = self._stat_card(stats_row, title, value, color)
             c.grid(row=0, column=i, sticky='nsew', padx=4)
 
         # ── Two column layout ──
-        two_col = tk.Frame(parent, bg=self.theme.palette.bg_surface)
+        two_col = tk.Frame(parent, bg=self.MC.surface)
         two_col.pack(fill=tk.BOTH, expand=True)
         two_col.grid_columnconfigure(0, weight=1)
         two_col.grid_columnconfigure(1, weight=1)
 
         # ── By Category ──
-        cat_frame = tk.Frame(two_col, bg=self.theme.palette.bg_surface_alt,
-                             highlightthickness=1, highlightbackground=self.theme.palette.border)
+        cat_frame = tk.Frame(two_col, bg=self.MC.surface_alt,
+                             highlightthickness=1, highlightbackground=self.MC.border)
         cat_frame.grid(row=0, column=0, sticky='nsew', padx=(0, 6), pady=(0, 12))
 
-        tk.Label(cat_frame, text='📊 SMS by Category', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 8))
+        tk.Label(cat_frame, text='📊 SMS by Category', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w', padx=14, pady=(10, 8))
 
         if data['by_category']:
             max_cnt = max(r['cnt'] for r in data['by_category']) if data['by_category'] else 1
             for row_data in data['by_category']:
-                row = tk.Frame(cat_frame, bg=self.theme.palette.bg_surface_alt)
+                row = tk.Frame(cat_frame, bg=self.MC.surface_alt)
                 row.pack(fill=tk.X, padx=14, pady=3)
                 label = CATEGORY_LABELS.get(row_data['category'], row_data['category'])
-                tk.Label(row, text=label, font=self.theme.fonts.body, width=12, anchor='w',
-                         bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+                tk.Label(row, text=label, font=('Segoe UI', 9), width=12, anchor='w',
+                         bg=self.MC.surface_alt, fg=self.MC.text).pack(side=tk.LEFT)
 
-                bar_frame = tk.Frame(row, bg=self.theme.palette.bg_surface_alt)
+                bar_frame = tk.Frame(row, bg=self.MC.surface_alt)
                 bar_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 8))
                 bar_pct = (row_data['cnt'] / max_cnt) if max_cnt > 0 else 0
-                bar_canvas = tk.Canvas(bar_frame, height=18, bg=self.theme.palette.bg_surface_alt,
+                bar_canvas = tk.Canvas(bar_frame, height=18, bg=self.MC.surface_alt,
                                        highlightthickness=0, bd=0)
                 bar_canvas.pack(fill=tk.X)
                 bar_canvas.update_idletasks()
                 bar_canvas.bind('<Configure>', lambda e, bc=bar_canvas, pct=bar_pct: self._draw_bar(bc, pct))
 
-                tk.Label(row, text=str(row_data['cnt']), font=self.theme.fonts.body_bold,
-                         bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.accent).pack(side=tk.RIGHT)
+                tk.Label(row, text=str(row_data['cnt']), font=('Segoe UI', 9, 'bold'),
+                         bg=self.MC.surface_alt, fg=self.MC.primary).pack(side=tk.RIGHT)
 
-            # Spacer at bottom
-            tk.Frame(cat_frame, bg=self.theme.palette.bg_surface_alt, height=10).pack()
+            tk.Frame(cat_frame, bg=self.MC.surface_alt, height=10).pack()
         else:
-            tk.Label(cat_frame, text='No data', font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(pady=10)
+            tk.Label(cat_frame, text='No data', font=('Segoe UI', 9),
+                     bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(pady=10)
 
         # ── Top Recipients ──
-        recip_frame = tk.Frame(two_col, bg=self.theme.palette.bg_surface_alt,
-                               highlightthickness=1, highlightbackground=self.theme.palette.border)
+        recip_frame = tk.Frame(two_col, bg=self.MC.surface_alt,
+                               highlightthickness=1, highlightbackground=self.MC.border)
         recip_frame.grid(row=0, column=1, sticky='nsew', padx=(6, 0), pady=(0, 12))
 
-        tk.Label(recip_frame, text='👤 Top Recipients', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 8))
+        tk.Label(recip_frame, text='👤 Top Recipients', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w', padx=14, pady=(10, 8))
 
         if data['top_recipients']:
             for i, r in enumerate(data['top_recipients']):
-                row = tk.Frame(recip_frame, bg=self.theme.palette.bg_surface_alt)
+                row = tk.Frame(recip_frame, bg=self.MC.surface_alt)
                 row.pack(fill=tk.X, padx=14, pady=2)
-                rank_color = self.theme.palette.accent if i < 3 else self.theme.palette.text_muted
-                tk.Label(row, text=f'#{i+1}', font=self.theme.fonts.body_bold, width=3,
-                         bg=self.theme.palette.bg_surface_alt, fg=rank_color).pack(side=tk.LEFT)
-                tk.Label(row, text=r['recipient'], font=self.theme.fonts.body,
-                         bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(side=tk.LEFT, padx=(4, 0))
-                tk.Label(row, text=f"{r['cnt']} SMS", font=self.theme.fonts.body_bold,
-                         bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.accent).pack(side=tk.RIGHT)
+                rank_color = self.MC.primary if i < 3 else self.MC.text_muted
+                tk.Label(row, text=f'#{i+1}', font=('Segoe UI', 9, 'bold'), width=3,
+                         bg=self.MC.surface_alt, fg=rank_color).pack(side=tk.LEFT)
+                tk.Label(row, text=r['recipient'], font=('Segoe UI', 9),
+                         bg=self.MC.surface_alt, fg=self.MC.text).pack(side=tk.LEFT, padx=(4, 0))
+                tk.Label(row, text=f"{r['cnt']} SMS", font=('Segoe UI', 9, 'bold'),
+                         bg=self.MC.surface_alt, fg=self.MC.primary).pack(side=tk.RIGHT)
 
-            tk.Frame(recip_frame, bg=self.theme.palette.bg_surface_alt, height=10).pack()
+            tk.Frame(recip_frame, bg=self.MC.surface_alt, height=10).pack()
         else:
-            tk.Label(recip_frame, text='No data', font=self.theme.fonts.body,
-                     bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_muted).pack(pady=10)
+            tk.Label(recip_frame, text='No data', font=('Segoe UI', 9),
+                     bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(pady=10)
 
         # ── Daily Activity (last 30 days) ──
-        daily_frame = tk.Frame(parent, bg=self.theme.palette.bg_surface_alt,
-                               highlightthickness=1, highlightbackground=self.theme.palette.border)
+        daily_frame = tk.Frame(parent, bg=self.MC.surface_alt,
+                               highlightthickness=1, highlightbackground=self.MC.border)
         daily_frame.pack(fill=tk.X, pady=(0, 12))
 
-        tk.Label(daily_frame, text='📅 Daily SMS Activity (Last 30 Days)', font=self.theme.fonts.body_bold,
-                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 8))
+        tk.Label(daily_frame, text='📅 Daily SMS Activity (Last 30 Days)', font=('Segoe UI', 10, 'bold'),
+                 bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w', padx=14, pady=(10, 8))
 
         if data['daily']:
-            # Create visual bar chart using Canvas
-            chart_canvas = tk.Canvas(daily_frame, height=120, bg=self.theme.palette.bg_surface_alt,
+            chart_canvas = tk.Canvas(daily_frame, height=120, bg=self.MC.surface_alt,
                                      highlightthickness=0, bd=0)
             chart_canvas.pack(fill=tk.X, padx=14, pady=(0, 10))
             chart_canvas.update_idletasks()
             chart_canvas.bind('<Configure>', lambda e: self._draw_daily_chart(chart_canvas, data['daily']))
 
-            # Legend
-            legend = tk.Frame(daily_frame, bg=self.theme.palette.bg_surface_alt)
+            legend = tk.Frame(daily_frame, bg=self.MC.surface_alt)
             legend.pack(padx=14, pady=(0, 10), anchor='w')
-            tk.Label(legend, text='■', fg=self.theme.palette.success, bg=self.theme.palette.bg_surface_alt,
+            tk.Label(legend, text='■', fg=self.MC.success, bg=self.MC.surface_alt,
                      font=('Segoe UI', 8)).pack(side=tk.LEFT)
-            tk.Label(legend, text='Sent', fg=self.theme.palette.text_muted, bg=self.theme.palette.bg_surface_alt,
-                     font=self.theme.fonts.small).pack(side=tk.LEFT, padx=(2, 10))
-            tk.Label(legend, text='■', fg=self.theme.palette.danger, bg=self.theme.palette.bg_surface_alt,
+            tk.Label(legend, text='Sent', fg=self.MC.text_muted, bg=self.MC.surface_alt,
+                     font=('Segoe UI', 8)).pack(side=tk.LEFT, padx=(2, 10))
+            tk.Label(legend, text='■', fg=self.MC.danger, bg=self.MC.surface_alt,
                      font=('Segoe UI', 8)).pack(side=tk.LEFT)
-            tk.Label(legend, text='Failed', fg=self.theme.palette.text_muted, bg=self.theme.palette.bg_surface_alt,
-                     font=self.theme.fonts.small).pack(side=tk.LEFT, padx=(2, 0))
+            tk.Label(legend, text='Failed', fg=self.MC.text_muted, bg=self.MC.surface_alt,
+                     font=('Segoe UI', 8)).pack(side=tk.LEFT, padx=(2, 0))
         else:
             tk.Label(daily_frame, text='No activity in the last 30 days.',
-                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface_alt,
-                     fg=self.theme.palette.text_muted).pack(pady=10)
+                     font=('Segoe UI', 9), bg=self.MC.surface_alt,
+                     fg=self.MC.text_muted).pack(pady=10)
 
     def _draw_bar(self, canvas, pct):
-        """Draw a horizontal progress bar on a canvas."""
         canvas.delete('all')
         w = canvas.winfo_width()
         h = canvas.winfo_height()
         if w <= 1:
             return
         bar_w = max(2, int(w * pct))
-        canvas.create_rectangle(0, 2, bar_w, h - 2, fill=self.theme.palette.accent, outline='')
-        canvas.create_rectangle(bar_w, 2, w, h - 2, fill=self.theme.palette.border, outline='')
+        canvas.create_rectangle(0, 2, bar_w, h - 2, fill=self.MC.primary, outline='')
+        canvas.create_rectangle(bar_w, 2, w, h - 2, fill=self.MC.border, outline='')
 
     def _draw_daily_chart(self, canvas, daily_data):
-        """Draw a simple bar chart for daily SMS counts."""
         canvas.delete('all')
         w = canvas.winfo_width()
         h = canvas.winfo_height()
         if w <= 1 or not daily_data:
             return
 
-        # Show last 30 days max
         days = daily_data[:30]
-        days.reverse()  # oldest first
+        days.reverse()
         n = len(days)
         if n == 0:
             return
@@ -2402,17 +2692,14 @@ class SmsCenterPage:
             sent_h = int((d.get('sent_cnt', 0) / max_cnt) * chart_h)
             failed_h = int((d.get('failed_cnt', 0) / max_cnt) * chart_h)
 
-            # Failed bar (stacked on top of sent)
-            total_h = sent_h + failed_h
             if sent_h > 0:
-                canvas.create_rectangle(x, h - 20 - total_h, x + bar_w, h - 20 - failed_h,
-                                        fill=self.theme.palette.success, outline='')
+                canvas.create_rectangle(x, h - 20 - sent_h - failed_h, x + bar_w, h - 20 - failed_h,
+                                        fill=self.MC.success, outline='')
             if failed_h > 0:
                 canvas.create_rectangle(x, h - 20 - failed_h, x + bar_w, h - 20,
-                                        fill=self.theme.palette.danger, outline='')
+                                        fill=self.MC.danger, outline='')
 
-            # Date label (show every few bars)
             if n <= 15 or i % max(1, n // 8) == 0:
-                day_label = d.get('day', '')[-5:]  # MM-DD
+                day_label = d.get('day', '')[-5:]
                 canvas.create_text(x + bar_w // 2, h - 8, text=day_label,
-                                   font=('Segoe UI', 7), fill=self.theme.palette.text_muted)
+                                   font=('Segoe UI', 7), fill=self.MC.text_muted)
