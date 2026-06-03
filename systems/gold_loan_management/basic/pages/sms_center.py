@@ -250,7 +250,7 @@ class SmsCenterPage:
         return card
 
     def _placeholder_panel(self, parent, text_widget):
-        """Modern placeholder insertion sidebar with search."""
+        """Placeholder insertion sidebar showing all placeholders (no search)."""
         frame = tk.Frame(parent, bg=self.MC.surface_alt,
                          highlightthickness=1, highlightbackground=self.MC.border)
 
@@ -260,17 +260,6 @@ class SmsCenterPage:
                  bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w')
         tk.Label(header, text='Click to insert', font=('Segoe UI', 8),
                  bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(anchor='w')
-
-        # Search
-        search_var = tk.StringVar()
-        search_entry = tk.Entry(
-            frame, textvariable=search_var, font=('Segoe UI', 9),
-            bg=self.MC.surface, fg=self.MC.text, relief='flat',
-            highlightthickness=1, highlightbackground=self.MC.border
-        )
-        search_entry.pack(fill=tk.X, padx=8, pady=(4, 4))
-        search_entry.insert(0, '🔍 Search placeholders...')
-        search_entry.bind('<FocusIn>', lambda e: search_entry.delete(0, tk.END) if search_entry.get() == '🔍 Search placeholders...' else None)
 
         list_frame = tk.Frame(frame, bg=self.MC.surface_alt)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 4))
@@ -285,25 +274,17 @@ class SmsCenterPage:
         inner.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(win, width=e.width))
 
-        def filter_items(*_):
-            q = search_var.get().lower()
-            for w in inner.winfo_children():
-                w.destroy()
-            for label, placeholder in SMS_PLACEHOLDERS:
-                if q and q not in label.lower() and q not in placeholder.lower():
-                    continue
-                btn = tk.Label(
-                    inner, text=f'  {label}', font=('Segoe UI', 9),
-                    bg=self.MC.surface_alt, fg=self.MC.primary,
-                    anchor='w', cursor='hand2', pady=3,
-                )
-                btn.pack(fill=tk.X, padx=6)
-                btn.bind('<Enter>', lambda e, b=btn: b.configure(bg=self.MC.border))
-                btn.bind('<Leave>', lambda e, b=btn: b.configure(bg=self.MC.surface_alt))
-                btn.bind('<Button-1>', lambda e, p=placeholder: self._insert_placeholder(text_widget, p))
+        for label, placeholder in SMS_PLACEHOLDERS:
+            btn = tk.Label(
+                inner, text=f'  {label}', font=('Segoe UI', 9),
+                bg=self.MC.surface_alt, fg=self.MC.primary,
+                anchor='w', cursor='hand2', pady=3,
+            )
+            btn.pack(fill=tk.X, padx=6)
+            btn.bind('<Enter>', lambda e, b=btn: b.configure(bg=self.MC.border))
+            btn.bind('<Leave>', lambda e, b=btn: b.configure(bg=self.MC.surface_alt))
+            btn.bind('<Button-1>', lambda e, p=placeholder: self._insert_placeholder(text_widget, p))
 
-        search_var.trace_add('write', filter_items)
-        filter_items()
         return frame
 
     def _insert_placeholder(self, text_widget, placeholder):
@@ -381,8 +362,6 @@ class SmsCenterPage:
         title_frame.pack(side=tk.LEFT)
         tk.Label(title_frame, text='📨  SMS Command Center', font=('Segoe UI', 22, 'bold'),
                  bg=self.MC.surface, fg=self.MC.text).pack(anchor='w')
-        tk.Label(title_frame, text='Enterprise-grade SMS management • Text.lk Gateway',
-                 font=('Segoe UI', 9), bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w')
 
         # Right: Gateway status + quick actions
         status_frame = tk.Frame(hdr_inner, bg=self.MC.surface)
@@ -425,7 +404,6 @@ class SmsCenterPage:
             '⚡  Auto SMS': tk.Frame(notebook, bg=self.MC.bg),
             '📢  Promotions': tk.Frame(notebook, bg=self.MC.bg),
             '🎂  Birthday': tk.Frame(notebook, bg=self.MC.bg),
-            '📅  Scheduled': tk.Frame(notebook, bg=self.MC.bg),
             '❌  Failed': tk.Frame(notebook, bg=self.MC.bg),
             '📋  Templates': tk.Frame(notebook, bg=self.MC.bg),
             '📊  History': tk.Frame(notebook, bg=self.MC.bg),
@@ -438,7 +416,6 @@ class SmsCenterPage:
         self.auto_tab = tabs['⚡  Auto SMS']
         self.promo_tab = tabs['📢  Promotions']
         self.birthday_tab = tabs['🎂  Birthday']
-        self.scheduled_tab = tabs['📅  Scheduled']
         self.failed_tab = tabs['❌  Failed']
         self.templates_tab = tabs['📋  Templates']
         self.history_tab = tabs['📊  History']
@@ -448,7 +425,6 @@ class SmsCenterPage:
         self._build_auto_tab()
         self._build_promotion_tab()
         self._build_birthday_tab()
-        self._build_scheduled_tab()
         self._build_failed_tab()
         self._build_templates_tab()
         self._build_history_tab()
@@ -1990,98 +1966,7 @@ class SmsCenterPage:
         self._modern_button(btn_row, 'Cancel', dialog.destroy, kind='ghost', width=12).pack(side=tk.RIGHT, padx=(0, 8))
 
     # ══════════════════════════════════════════════════════════════════════
-    # TAB 5 — Scheduled SMS Queue (Modern)
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _build_scheduled_tab(self):
-        self._clear(self.scheduled_tab)
-        card = self._glass_card(self.scheduled_tab)
-        card.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        hdr = tk.Frame(card, bg=self.MC.surface)
-        hdr.pack(fill=tk.X, padx=16, pady=(14, 4))
-        self._section_label(hdr, 'Scheduled SMS Queue', '📅').pack(side=tk.LEFT)
-        self._desc_label(card, 'View all messages scheduled to be sent. Pending messages will be dispatched automatically at their scheduled time.').pack(anchor='w', padx=16, pady=(0, 10))
-
-        header = tk.Frame(card, bg=self.MC.surface)
-        header.pack(fill=tk.X, padx=16, pady=(0, 8))
-        self._modern_button(header, 'Refresh Queue', self._refresh_scheduled_queue,
-                            kind='ghost', width=16, icon='🔄').pack(side=tk.RIGHT)
-
-        list_frame = tk.Frame(card, bg=self.MC.surface)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 14))
-
-        style = ttk.Style()
-        style.configure("Scheduled.Treeview", font=('Segoe UI', 9), rowheight=30)
-        style.configure("Scheduled.Treeview.Heading", font=('Segoe UI', 9, 'bold'))
-
-        self.sched_tree = ttk.Treeview(
-            list_frame, columns=('recipient', 'customer', 'message', 'scheduled_time', 'status', 'actions'),
-            show='headings', style="Scheduled.Treeview"
-        )
-        self.sched_tree.heading('recipient', text='Recipient')
-        self.sched_tree.heading('customer', text='Customer')
-        self.sched_tree.heading('message', text='Message')
-        self.sched_tree.heading('scheduled_time', text='Scheduled Time')
-        self.sched_tree.heading('status', text='Status')
-        self.sched_tree.heading('actions', text='Actions')
-
-        self.sched_tree.column('recipient', width=120, anchor='w')
-        self.sched_tree.column('customer', width=150, anchor='w')
-        self.sched_tree.column('message', width=300, anchor='w')
-        self.sched_tree.column('scheduled_time', width=150, anchor='center')
-        self.sched_tree.column('status', width=90, anchor='center')
-        self.sched_tree.column('actions', width=80, anchor='center')
-
-        self.sched_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.sched_tree.yview)
-        self.sched_tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.sched_tree.bind('<Double-1>', self._on_scheduled_row_double_click)
-        
-        self._refresh_scheduled_queue()
-
-    def _refresh_scheduled_queue(self):
-        if not hasattr(self, 'sched_tree'):
-            return
-        for item in self.sched_tree.get_children():
-            self.sched_tree.delete(item)
-
-        queue = list_scheduled_sms(100)
-        for item in queue:
-            customer_display = f"{item['customer_name']} ({item['customer_nic']})" if item['customer_name'] else 'Manual Number'
-            status_display = item['status'].upper()
-            self.sched_tree.insert(
-                '', tk.END, iid=str(item['id']),
-                values=(
-                    item['recipient'],
-                    customer_display,
-                    item['message'][:60] + ('...' if len(item['message']) > 60 else ''),
-                    item['scheduled_time'],
-                    status_display,
-                    '❌ Cancel' if item['status'] == 'pending' else 'N/A'
-                )
-            )
-
-    def _on_scheduled_row_double_click(self, event):
-        item_id = self.sched_tree.focus()
-        if not item_id:
-            return
-        
-        values = self.sched_tree.item(item_id, 'values')
-        status = values[4]
-        if status != 'PENDING':
-            messagebox.showinfo('Info', f"This message is already {status.lower()} and cannot be cancelled.")
-            return
-
-        if messagebox.askyesno('Cancel Scheduled SMS', 'Are you sure you want to cancel and delete this scheduled message?'):
-            delete_scheduled_sms(int(item_id))
-            self._refresh_scheduled_queue()
-
-    # ══════════════════════════════════════════════════════════════════════
-    # TAB 6 — Failed SMS Manager (Modern)
+    # TAB 5 — Failed SMS Manager (Modern)
     # ══════════════════════════════════════════════════════════════════════
 
     def _build_failed_tab(self):
