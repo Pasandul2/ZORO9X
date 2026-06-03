@@ -4,9 +4,39 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
 from database import (get_loan, renew_loan, redeem_loan,
-                      get_duration_rate, add_audit_log, create_approval_request, get_setting)
+                      get_duration_rate, add_audit_log, create_approval_request, get_setting, get_sms_template)
+from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, format_date, calculate_total_payable,
                    calculate_interest, get_expire_date, is_overdue)
+
+
+def _send_auto_sms_for_loan(loan, *, event_message, setting_key, user_id):
+    if get_setting('sms_enabled', '0') != '1' or get_setting(setting_key, '0') != '1':
+        return
+
+    customer = {
+        'id': loan.get('customer_id'),
+        'name': loan.get('customer_name', ''),
+        'nic': loan.get('customer_nic', ''),
+        'phone': loan.get('customer_phone', ''),
+        'address': loan.get('customer_address', ''),
+        'job': loan.get('customer_job', ''),
+        'marital_status': loan.get('customer_marital_status', ''),
+        'language': loan.get('customer_language', ''),
+    }
+    loan_context = dict(loan)
+    template = get_sms_template('auto')
+    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
+    sms_context = build_sms_context(customer=customer, loan=loan_context, message=event_message)
+    sms_message = render_template(sms_body, sms_context)
+    send_sms(
+        customer.get('phone', ''),
+        sms_message,
+        customer=customer,
+        loan=loan_context,
+        category='auto',
+        sent_by=user_id,
+    )
 
 
 class RenewLoanPage:
@@ -443,6 +473,12 @@ class RenewLoanPage:
         )
         add_audit_log(self.user['id'], 'RENEW_LOAN', 'loan', self.loan_id, msg)
         if ok:
+            _send_auto_sms_for_loan(
+                self.loan,
+                event_message=f'Your loan {self.loan["ticket_no"]} has been renewed successfully for {months} month(s).',
+                setting_key='sms_auto_renewal',
+                user_id=self.user['id'],
+            )
             if messagebox.askyesno('Success', f'{msg}\n\nWould you like to print a Renewal Loan Ticket for customer?'):
                 self.navigate('print_ticket', {'loan_id': self.loan_id, 'doc_type': 'renewal_ticket'})
             else:
@@ -728,6 +764,12 @@ class RedeemLoanPage:
         )
         add_audit_log(self.user['id'], 'REDEEM_LOAN', 'loan', self.loan_id, msg)
         if ok:
+            _send_auto_sms_for_loan(
+                self.loan,
+                event_message=f'Your loan {self.loan["ticket_no"]} has been redeemed successfully.',
+                setting_key='sms_auto_redemption',
+                user_id=self.user['id'],
+            )
             if messagebox.askyesno('Success', f'{msg}\nGold articles returned to customer.\n\nWould you like to print a Redeem Ticket for customer?'):
                 self.navigate('print_ticket', {
                     'loan_id': self.loan_id,
