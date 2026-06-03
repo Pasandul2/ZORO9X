@@ -136,11 +136,11 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white pt-24 pb-20 px-4">
+    <div className="min-h-screen bg-gray-900 text-white pt-20 sm:pt-24 pb-20 px-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">
+          <h1 className="text-3xl sm:text-4xl font-bold mb-2">
             Welcome back, <span className="text-purple-400">{user?.fullName}</span>
           </h1>
           <p className="text-gray-400">Here's your account overview and quick actions</p>

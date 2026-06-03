@@ -1,18 +1,82 @@
-// src/components/ServiceDetail.tsx
-
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Float, MeshDistortMaterial, Sparkles } from '@react-three/drei';
+import * as THREE from 'three';
+import { ArrowLeft, Check, Zap, Shield, Star, Cpu } from 'lucide-react';
 
-// Corrected type: `Features` is optional and is an array of strings
+// ─── 3D Scene ────────────────────────────────────────────────
+function ServiceDetailScene() {
+  const groupRef = useRef<THREE.Group>(null!);
+  const coreRef = useRef<THREE.Mesh>(null!);
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const t = state.clock.elapsedTime;
+    groupRef.current.rotation.y = t * 0.025;
+    groupRef.current.rotation.x = Math.sin(t * 0.015) * 0.04;
+    if (coreRef.current) {
+      coreRef.current.rotation.x = t * 0.08;
+      coreRef.current.rotation.z = t * 0.1;
+    }
+  });
+
+  const particles = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    const count = 180;
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count * 3; i++) pos[i] = (Math.random() - 0.5) * 18;
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return geo;
+  }, []);
+
+  return (
+    <group ref={groupRef}>
+      {/* Core */}
+      <mesh ref={coreRef} position={[0, 0, -3]}>
+        <dodecahedronGeometry args={[1.8, 0]} />
+        <MeshDistortMaterial color="#6366f1" transparent opacity={0.08} wireframe distort={0.4} speed={2} />
+      </mesh>
+      {/* Glow sphere */}
+      <mesh position={[0, 0, -3]}>
+        <sphereGeometry args={[1, 16, 16]} />
+        <meshBasicMaterial color="#4f46e5" transparent opacity={0.03} />
+      </mesh>
+      {/* Rings */}
+      {[0, 1].map((i) => (
+        <mesh key={i} rotation={[i * 1.2, i * 0.8, 0]}>
+          <torusGeometry args={[2.8 + i * 0.6, 0.015, 24, 48]} />
+          <meshBasicMaterial color={['#818cf8', '#a78bfa'][i]} transparent opacity={0.06 + i * 0.03} />
+        </mesh>
+      ))}
+      {/* Floating dots */}
+      {[0, 1, 2, 3].map((i) => (
+        <Float key={i} speed={0.4 + i * 0.1} floatIntensity={0.3}>
+          <mesh position={[
+            Math.cos((i / 4) * Math.PI * 2) * 3.8,
+            Math.sin((i / 4) * Math.PI * 2) * 2.8,
+            -2,
+          ]}>
+            <sphereGeometry args={[0.05, 8, 8]} />
+            <meshBasicMaterial color="#a78bfa" transparent opacity={0.25} />
+          </mesh>
+        </Float>
+      ))}
+      {/* Particles */}
+      <points geometry={particles}>
+        <pointsMaterial size={0.02} color="#818cf8" transparent opacity={0.3} />
+      </points>
+    </group>
+  );
+}
+
 type ServiceInfo = {
   title: string;
   content: string;
   Features?: string[];
 };
 
-// Service details
 const serviceDetails: Record<string, ServiceInfo> = {
   'web-design': {
     title: 'Web Design',
@@ -38,7 +102,6 @@ const serviceDetails: Record<string, ServiceInfo> = {
       'Interactive Design',
       'Design Systems & Style Guides',
     ],
-
   },
   'responsive-design': {
     title: 'Responsive Design',
@@ -86,32 +149,30 @@ const serviceDetails: Record<string, ServiceInfo> = {
   },
 };
 
+const featureIcons = [Zap, Shield, Star, Cpu, Check, Check];
+
 const ServiceDetail: React.FC = () => {
   const { serviceId } = useParams<{ serviceId: string }>();
   const service = serviceDetails[serviceId || ''];
 
-  // Scroll to top when serviceId changes
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [serviceId]);
 
   if (!service) {
     return (
-      <div className="min-h-screen bg-black text-white px-6 py-24 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="text-center"
-        >
+      <div className="relative min-h-screen bg-black text-white flex items-center justify-center overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <Canvas camera={{ position: [0, 0, 6], fov: 55 }} dpr={[1, 2]} gl={{ alpha: true }}>
+            <ambientLight intensity={0.1} />
+            <ServiceDetailScene />
+            <Sparkles count={20} scale={10} size={0.3} speed={0.3} color="#818cf8" />
+          </Canvas>
+        </div>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="relative z-10 text-center">
           <h1 className="text-5xl font-bold mb-4 text-red-400">Service Not Found</h1>
-          <p className="text-gray-400 mb-6">
-            The service you’re looking for does not exist or has been moved.
-          </p>
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 text-indigo-400 hover:underline transition"
-          >
+          <p className="text-gray-500 mb-6 font-light">The service you're looking for doesn't exist.</p>
+          <Link to="/" className="inline-flex items-center gap-2 text-indigo-400 hover:underline transition">
             <ArrowLeft size={18} /> Back to Home
           </Link>
         </motion.div>
@@ -120,54 +181,159 @@ const ServiceDetail: React.FC = () => {
   }
 
   return (
-    <section className="min-h-screen bg-black text-white px-6 py-24">
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, ease: 'easeOut' }}
-        className="max-w-4xl mx-auto"
-      >
-        {/* Back to Services link */}
-        <Link
-          to="/services"
-          className="inline-flex items-center gap-2 text-indigo-400 hover:underline mb-10 text-lg font-medium"
+    <section className="relative min-h-screen bg-black text-white overflow-hidden">
+      {/* 3D Canvas Background */}
+      <div className="fixed inset-0 pointer-events-none">
+        <Canvas camera={{ position: [0, 0, 6], fov: 50 }} dpr={[1, 2]} gl={{ alpha: true }}>
+          <ambientLight intensity={0.1} />
+          <pointLight position={[0, 0, 5]} intensity={0.15} color="#6366f1" />
+          <ServiceDetailScene />
+          <Sparkles count={30} scale={12} size={0.3} speed={0.3} color="#818cf8" />
+        </Canvas>
+      </div>
+
+      {/* Overlays */}
+      <div className="fixed inset-0 pointer-events-none" style={{
+        background: `
+          radial-gradient(ellipse 70% 50% at 50% 0%, rgba(15,10,30,0.7) 0%, transparent 100%),
+          radial-gradient(ellipse 60% 50% at 50% 100%, rgba(10,5,25,0.5) 0%, transparent 100%)
+        `,
+      }} />
+      <div className="fixed inset-0 futuristic-grid opacity-20 pointer-events-none" />
+      <div className="aurora-glow fixed pointer-events-none" />
+
+      <div className="relative z-10 pt-32 pb-20 px-6 max-w-5xl mx-auto">
+        {/* Back */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mb-12"
         >
-          <ArrowLeft size={18} /> Back to Services
-        </Link>
+          <Link
+            to="/services"
+            className="inline-flex items-center gap-2 text-gray-500 hover:text-indigo-400 transition-colors text-sm font-light"
+          >
+            <ArrowLeft size={16} />
+            Back to Services
+          </Link>
+        </motion.div>
 
-        {/* Title */}
-        <h1 className="text-4xl font-extrabold text-white mb-8 leading-tight">
-          {service.title}
-        </h1>
+        {/* Hero */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, ease: 'easeOut' }}
+          className="mb-16"
+        >
+          <span className="text-indigo-400/50 text-xs tracking-[0.3em] uppercase font-light">Service Detail</span>
+          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mt-4 mb-6 tracking-tight">
+            <span className="bg-gradient-to-r from-white via-indigo-100 to-purple-200 bg-clip-text text-transparent">
+              {service.title}
+            </span>
+          </h1>
+          <p className="text-gray-400 text-lg md:text-xl max-w-3xl leading-relaxed font-light">
+            {service.content}
+          </p>
+        </motion.div>
 
-        {/* Content */}
-        <p className="text-gray-300 text-lg md:text-xl leading-relaxed mb-10">
-          {service.content}
-        </p>
-
-        {/* Features */}
+        {/* Features Grid */}
         {service.Features && (
-          <>
-            <h2 className="text-3xl font-semibold mb-6">Key Features:</h2>
-            <ul className="list-disc list-inside space-y-2 mb-10">
-              {service.Features.map((feature, index) => (
-                <li key={index}>{feature}</li>
-              ))}
-            </ul>
-          </>
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.2 }}
+            className="mb-16"
+          >
+            <h2 className="text-2xl md:text-3xl font-bold mb-8">
+              <span className="bg-gradient-to-r from-indigo-200 via-purple-200 to-white bg-clip-text text-transparent">
+                Key Features
+              </span>
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {service.Features.map((feature, index) => {
+                const IconComp = featureIcons[index % featureIcons.length];
+                return (
+                  <motion.div
+                    key={index}
+                    initial={{ opacity: 0, x: -20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.5, delay: index * 0.06 }}
+                    whileHover={{ x: 5, transition: { duration: 0.2 } }}
+                    className="group flex items-center gap-4 p-5 rounded-xl border border-white/[0.03] hover:border-indigo-500/15 transition-all duration-500"
+                    style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.015) 0%, rgba(255,255,255,0.005) 100%)' }}
+                  >
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-indigo-500/10 border border-indigo-500/10 group-hover:scale-110 transition-transform duration-300">
+                      <IconComp className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <span className="text-gray-300 group-hover:text-white transition-colors duration-300 text-sm md:text-base">
+                      {feature}
+                    </span>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
         )}
 
-        {/* Bonus content */}
-        <div className="mt-12 border-t border-gray-700 pt-8 space-y-4 text-gray-400">
-          <h3 className="text-2xl font-semibold text-white">What You Get:</h3>
-          <ul className="list-disc list-inside space-y-2">
-            <li>Tailored strategy for your goals</li>
-            <li>Latest technologies and design trends</li>
-            <li>Performance, accessibility, and SEO optimization</li>
-            <li>Post-launch support & analytics</li>
-          </ul>
-        </div>
-      </motion.div>
+        {/* What You Get */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.3 }}
+          className="rounded-2xl border border-white/[0.04] p-8 md:p-10 glow-box"
+          style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.005) 100%)' }}
+        >
+          <h3 className="text-2xl font-bold mb-6 flex items-center gap-3">
+            <Star className="w-6 h-6 text-yellow-400/60" />
+            <span className="bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">What You Get</span>
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[
+              { text: 'Tailored strategy for your goals', icon: Zap },
+              { text: 'Latest technologies and design trends', icon: Cpu },
+              { text: 'Performance, accessibility & SEO optimization', icon: Shield },
+              { text: 'Post-launch support & analytics', icon: Star },
+            ].map((item, i) => {
+              const IconComp = item.icon;
+              return (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 10 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4, delay: i * 0.1 }}
+                  className="flex items-center gap-3 text-gray-400"
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/8 border border-indigo-500/10">
+                    <IconComp className="w-4 h-4 text-indigo-400/60" />
+                  </div>
+                  <span className="text-sm">{item.text}</span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.div>
+
+        {/* CTA */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.3 }}
+          className="text-center mt-16"
+        >
+          <Link
+            to="/contact"
+            className="group inline-flex items-center gap-3 px-9 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full text-white font-medium shadow-2xl shadow-indigo-500/15 hover:shadow-indigo-500/35 transition-all duration-500 hover:scale-[1.03]"
+          >
+            Get Started on Your Project
+            <ArrowLeft className="w-4 h-4 rotate-180 group-hover:translate-x-1 transition-transform" />
+          </Link>
+        </motion.div>
+      </div>
     </section>
   );
 };

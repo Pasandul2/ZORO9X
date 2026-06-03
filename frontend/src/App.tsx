@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import Navbar from './components/Navbar';
+import Navbar3D from './components/Navbar3D';
 import AdminLayout from './components/AdminLayout';
 import ServicesSection from './components/ServicesSection';
 import { WorkSection } from './components/WorkSection';
-import { Footer } from './components/Footer';
+import Footer3D from './components/Footer3D';
 import FaqSection from './components/FaqSection';
 import AboutUs from './pages/AboutUs';
 import Home from './pages/Home';
@@ -43,6 +43,7 @@ import NotFound from './components/NotFound';
 import ScrollToTop from './components/ScrollToTop';
 import ScrollToTopButton from './components/ScrollToTopButton';
 import CustomCursor from './components/CustomCursor';
+import NightSkyBackground from './components/NightSkyBackground';
 
 function AppContent() {
   const [darkMode, setDarkMode] = useState(true);
@@ -70,6 +71,18 @@ function AppContent() {
     }
   }, [darkMode, adminDarkMode, isAdminRoute, isAdminLogin]);
 
+  // Global mouse tracker for glow-box CSS custom properties
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const x = (e.clientX / window.innerWidth) * 100;
+      const y = (e.clientY / window.innerHeight) * 100;
+      document.documentElement.style.setProperty('--mx', `${x}%`);
+      document.documentElement.style.setProperty('--my', `${y}%`);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
   return (
     <AuthProvider>
       <CustomCursor />
@@ -82,6 +95,11 @@ function AppContent() {
           ? (darkMode ? 'bg-black text-white' : 'bg-white text-black')
           : ''
       }`}>
+        {/* Night sky background (comets + stars) for all public pages */}
+        {!isAdminRoute && !isAdminLogin && (
+          <NightSkyBackground />
+        )}
+
         {/* Global gradient effect for non-admin pages */}
         {!isAdminRoute && !isAdminLogin && (
           <div className="fixed inset-0 pointer-events-none mix-blend-lighten opacity-60 z-50" />
@@ -92,7 +110,7 @@ function AppContent() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5 }}
-          className="w-full"
+          className="w-full relative z-10"
         >
           {/* Admin Login Page (No Layout) */}
           {isAdminLogin ? (
@@ -123,7 +141,7 @@ function AppContent() {
           ) : (
             /* Public Routes */
             <>
-              <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
+              <Navbar3D />
               <Routes>
                 <Route path="/" element={<Home/>} />
                 <Route path="/about" element={<AboutUs />} />
@@ -146,7 +164,7 @@ function AppContent() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               <WhatsApp />
-              <Footer darkMode={darkMode} />
+              <Footer3D />
             </>
           )}
         </motion.div>

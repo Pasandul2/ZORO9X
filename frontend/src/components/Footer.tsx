@@ -9,6 +9,7 @@ interface FooterProps {
 export const Footer = ({ darkMode }: FooterProps) => {
   const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
+  const currentYear = new Date().getFullYear();
 
   const handleLogout = () => {
     if (window.confirm('Are you sure you want to logout?')) {
@@ -132,7 +133,7 @@ export const Footer = ({ darkMode }: FooterProps) => {
 
           {/* Copyright */}
           <p className="text-xs text-white md:text-gray-600 dark:md:text-gray-400 text-center md:text-left">
-            © 2025 ZORO 9X. All rights reserved.
+            © {currentYear} ZORO 9X. All rights reserved.
           </p>
         </div>
       </div>
