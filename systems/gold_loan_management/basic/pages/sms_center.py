@@ -413,7 +413,7 @@ class SmsCenterPage:
             notebook.add(frame, text=name)
 
         self.custom_tab = tabs['✉️  Custom SMS']
-        self.auto_tab = tabs['⚡  Auto SMS']
+        self.auto_tab = tabs['⚡ Auto SMS']
         self.promo_tab = tabs['📢  Promotions']
         self.birthday_tab = tabs['🎂  Birthday']
         self.failed_tab = tabs['❌  Failed']
