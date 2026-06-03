@@ -337,6 +337,10 @@ class GoldLoanSystemApp:
         # Register app close handler for backup
         self.root.protocol('WM_DELETE_WINDOW', self._on_closing)
 
+        # Start SMS Scheduler
+        self.sms_scheduler_job = None
+        self._start_sms_scheduler()
+
         # Show login
         self._show_login()
 
@@ -902,6 +906,7 @@ class GoldLoanSystemApp:
 
         if self.current_user['role'] == 'admin':
             nav_items.append(('✉️ Letters', 'letters'))
+            nav_items.append(('📨 SMS', 'sms_center'))
             nav_items.append((' Reports', 'reports'))
             nav_items.append(('⚙️ Admin Settings', 'admin_settings'))
             # Show pending count badge
@@ -1033,6 +1038,7 @@ class GoldLoanSystemApp:
             'redeem_loan': 'Redeem Loan',
             'customers': 'Customer Management',
             'letters': 'Letters Center',
+            'sms_center': 'SMS Center',
             'admin_settings': 'Admin Settings',
             'reports': 'Reports',
             'loan_approvals': 'Loan Approval Requests',
@@ -1079,6 +1085,10 @@ class GoldLoanSystemApp:
             if param and isinstance(param, dict):
                 kwargs = param
             LettersPage(self.page_content, self.theme, self.current_user, self.navigate, **kwargs).render()
+
+        elif page_name == 'sms_center':
+            from pages.sms_center import SmsCenterPage
+            SmsCenterPage(self.page_content, self.theme, self.current_user, self.navigate).render()
 
         elif page_name == 'admin_settings':
             from pages.admin_settings import AdminSettingsPage
@@ -1145,6 +1155,115 @@ class GoldLoanSystemApp:
                 self.backup_manager.sync_pending_uploads()
         except Exception as e:
             print(f"Warning: Failed to create backup: {e}")
+
+    def _start_sms_scheduler(self):
+        if self.sms_scheduler_job:
+            try:
+                self.root.after_cancel(self.sms_scheduler_job)
+            except Exception:
+                pass
+        
+        def sms_tick():
+            self._check_sms_scheduler()
+            # Run every 30 seconds
+            self.sms_scheduler_job = self.root.after(30000, sms_tick)
+
+        self.sms_scheduler_job = self.root.after(5000, sms_tick) # Start first tick after 5 seconds
+
+    def _check_sms_scheduler(self):
+        # We need database functions
+        from database import (
+            get_setting,
+            set_setting,
+            get_upcoming_birthdays,
+            get_pending_scheduled_sms,
+            mark_scheduled_sms_sent,
+            mark_scheduled_sms_failed,
+            list_sms_templates,
+            get_wished_customer_ids_this_year
+        )
+        from sms_service import build_sms_context, render_template, send_sms
+
+        now = datetime.now()
+        current_time_str = now.strftime('%Y-%m-%d %H:%M:%S')
+        today_date_str = now.strftime('%Y-%m-%d')
+        current_time_hm = now.strftime('%H:%M')
+
+        # 1. Automated Birthday SMS Check
+        auto_birthday_enabled = get_setting('sms_birthday_auto_enabled', '0', db_path=self.db_file) == '1'
+        if auto_birthday_enabled:
+            last_run_date = get_setting('sms_birthday_last_run_date', '', db_path=self.db_file)
+            if last_run_date != today_date_str:
+                send_time = get_setting('sms_birthday_time', '09:00', db_path=self.db_file)
+                if current_time_hm >= send_time:
+                    # Mark run immediately to prevent double run
+                    set_setting('sms_birthday_last_run_date', today_date_str, 'Last run date for automated birthday SMS', db_path=self.db_file)
+                    
+                    def run_auto_birthdays():
+                        try:
+                            # Today's birthdays
+                            birthdays = get_upcoming_birthdays(0, db_path=self.db_file)
+                            if birthdays:
+                                wished_ids = get_wished_customer_ids_this_year(db_path=self.db_file)
+                                templates = list_sms_templates(db_path=self.db_file)
+                                bday_template = None
+                                for t in templates:
+                                    if t['category'] == 'birthday':
+                                        bday_template = t['body']
+                                        break
+                                if not bday_template:
+                                    bday_template = 'Dear {{customer_name}},\n\nWishing you a very Happy Birthday! 🎂🎉\n\nWarm wishes,\n{{company_name}}'
+                                
+                                for customer in birthdays:
+                                    if customer['id'] in wished_ids:
+                                        continue # Skip if already sent this year
+                                    recipient = customer.get('phone', '')
+                                    context = build_sms_context(customer=customer, message=bday_template)
+                                    message = render_template(bday_template, context)
+                                    send_sms(recipient, message, customer=customer, category='birthday', db_path=self.db_file)
+                        except Exception as e:
+                            print(f"Error sending automatic birthday SMS: {e}")
+
+                    threading.Thread(target=run_auto_birthdays, daemon=True).start()
+
+        # 2. Scheduled SMS Check
+        try:
+            pending_msgs = get_pending_scheduled_sms(current_time_str, db_path=self.db_file)
+            if pending_msgs:
+                def run_pending_scheduled():
+                    for msg in pending_msgs:
+                        try:
+                            sms_id = msg['id']
+                            recipient = msg['recipient']
+                            message = msg['message']
+                            category = msg['category']
+                            customer_id = msg['customer_id']
+                            
+                            customer = None
+                            if customer_id:
+                                from database import get_customer
+                                customer = get_customer(customer_id, db_path=self.db_file)
+
+                            ok, err_msg, response = send_sms(
+                                recipient=recipient,
+                                message=message,
+                                customer=customer,
+                                category=category,
+                                db_path=self.db_file
+                            )
+                            if ok:
+                                provider_msg_id = ''
+                                if response and isinstance(response.get('data'), dict):
+                                    provider_msg_id = str(response['data'].get('sms_id', '') or '')
+                                mark_scheduled_sms_sent(sms_id, provider_msg_id, json.dumps(response) if response else '', db_path=self.db_file)
+                            else:
+                                mark_scheduled_sms_failed(sms_id, err_msg, db_path=self.db_file)
+                        except Exception as e:
+                            mark_scheduled_sms_failed(msg['id'], str(e), db_path=self.db_file)
+                
+                threading.Thread(target=run_pending_scheduled, daemon=True).start()
+        except Exception as e:
+            print(f"Error checking/sending scheduled SMS: {e}")
 
     def run(self):
         self.root.mainloop()

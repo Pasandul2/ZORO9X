@@ -9,8 +9,9 @@ from database import (get_customer_by_nic, create_customer, create_loan,
                       generate_ticket_no, get_market_rate, get_duration_rate,
                       get_all_duration_rates, add_audit_log, search_recent_purposes,
                  search_recent_descriptions, create_approval_request,
-                  get_article_types, get_setting, search_recent_customer_jobs,
+               get_article_types, get_setting, get_customer, get_loan, get_sms_template, search_recent_customer_jobs,
                   update_customer)
+from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                          calculate_interest, get_expire_date, ARTICLE_TYPES, CARAT_OPTIONS)
 
@@ -1565,6 +1566,32 @@ class NewTicketPage:
 
         ticket_no = loan_data['ticket_no']
         add_audit_log(self.user['id'], 'CREATE_LOAN', 'loan', loan_id, f'Ticket: {ticket_no}')
+
+        try:
+            sms_enabled = get_setting('sms_enabled', '0') == '1'
+            sms_auto_new_loan = get_setting('sms_auto_new_loan', '0') == '1'
+            if sms_enabled and sms_auto_new_loan:
+                customer = get_customer(self.customer_id)
+                loan_record = get_loan(loan_id)
+                if customer:
+                    template = get_sms_template('auto')
+                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
+                    sms_context = build_sms_context(
+                        customer=customer,
+                        loan=loan_record or loan_data,
+                        message='Your new gold loan has been created successfully.',
+                    )
+                    sms_message = render_template(sms_body, sms_context)
+                    send_sms(
+                        customer.get('phone', ''),
+                        sms_message,
+                        customer=customer,
+                        loan=loan_record or loan_data,
+                        category='auto',
+                        sent_by=self.user['id'],
+                    )
+        except Exception:
+            pass
 
         # Check if custom assessed percentage was used - if so, request admin approval
         needs_approval = getattr(self, '_assessed_pct_user_edited', False)

@@ -157,6 +157,46 @@ def init_database(db_path=None):
         updated_by INTEGER
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_by INTEGER
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient TEXT NOT NULL,
+        recipients TEXT,
+        message TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'custom',
+        status TEXT NOT NULL DEFAULT 'pending',
+        provider TEXT,
+        provider_message_id TEXT,
+        response_json TEXT,
+        customer_id INTEGER,
+        loan_id INTEGER,
+        sent_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS scheduled_sms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient TEXT NOT NULL,
+        message TEXT NOT NULL,
+        scheduled_time TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        category TEXT NOT NULL DEFAULT 'custom',
+        customer_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        sent_at TEXT,
+        error_message TEXT
+    )''')
+
     c.execute('''CREATE TABLE IF NOT EXISTS market_rates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         carat INTEGER UNIQUE NOT NULL,
@@ -420,11 +460,39 @@ def init_database(db_path=None):
         'ticket_prefix': 'GL',
         'print_format': 'a4',
         'other_bank_service_charge_pct': '2.0',
+        'sms_gateway_base_url': 'https://app.text.lk/api/v3/sms/send',
+        'sms_gateway_token': '',
+        'sms_sender_id': '',
+        'sms_default_country_code': '94',
+        'sms_enabled': '0',
+        'sms_auto_new_loan': '0',
+        'sms_auto_renewal': '0',
+        'sms_auto_redemption': '0',
+        'sms_auto_reminder': '0',
     }
     for key, val in defaults.items():
         existing = c.execute("SELECT key FROM settings WHERE key=?", (key,)).fetchone()
         if not existing:
             c.execute("INSERT INTO settings (key, value) VALUES (?,?)", (key, val))
+
+    sms_template_count = c.execute("SELECT COUNT(*) FROM sms_templates").fetchone()[0]
+    if not sms_template_count:
+        default_sms_templates = [
+            ('custom', 'Custom SMS', 'Dear {{customer_name}},\n\nThank you for choosing our service.\n\n{{company_name}}'),
+            ('auto', 'Auto SMS', 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'),
+            ('auto_new_loan', 'New Loan SMS', 'Dear {{customer_name}},\n\nYour gold loan has been issued successfully.\n\nTicket: {{ticket_no}}\nAmount: Rs. {{loan_amount}}\nDuration: {{duration}} months\nExpiry: {{expire_date}}\n\nThank you,\n{{company_name}}'),
+            ('auto_renewal', 'Renewal SMS', 'Dear {{customer_name}},\n\nYour gold loan {{ticket_no}} has been renewed successfully.\n\nNew Expiry: {{expire_date}}\n\nThank you,\n{{company_name}}'),
+            ('auto_redemption', 'Redemption SMS', 'Dear {{customer_name}},\n\nYour gold loan {{ticket_no}} has been redeemed successfully. Please collect your items.\n\nThank you,\n{{company_name}}'),
+            ('auto_reminder', 'Reminder SMS', 'Dear {{customer_name}},\n\nThis is a reminder that your gold loan {{ticket_no}} is due for renewal.\n\nExpiry: {{expire_date}}\nAmount: Rs. {{loan_amount}}\n\nPlease visit us soon.\n{{company_name}}'),
+            ('promotion', 'Promotion SMS', '{{company_name}} has a special offer for you. Contact us today.'),
+            ('birthday', 'Birthday Wishes', 'Dear {{customer_name}},\n\nWishing you a very Happy Birthday! 🎂🎉\n\nMay this year bring you happiness and prosperity.\n\nWarm wishes,\n{{company_name}}'),
+            ('order_status', 'Loan Status SMS', 'Dear {{customer_name}},\n\nYour loan {{ticket_no}} status is {{loan_status}}.\n\n{{company_name}}'),
+        ]
+        for category, title, body in default_sms_templates:
+            c.execute(
+                "INSERT INTO sms_templates (category, title, body, is_active) VALUES (?,?,?,1)",
+                (category, title, body),
+            )
 
     template_count = c.execute("SELECT COUNT(*) FROM letter_templates").fetchone()[0]
     if not template_count:
@@ -825,6 +893,25 @@ def get_loan(loan_id, db_path=None):
     return dict(row) if row else None
 
 
+def get_latest_loan_for_customer(customer_id, db_path=None):
+    """Return the most recently created loan for a customer with customer fields joined."""
+    conn = get_connection(db_path)
+    row = conn.execute(
+        '''SELECT l.*, c.name as customer_name, c.nic as customer_nic,
+                  c.phone as customer_phone, c.address as customer_address,
+                  c.birthday as customer_birthday, c.job as customer_job,
+                  c.marital_status as customer_marital_status, c.language as customer_language
+           FROM loans l
+           JOIN customers c ON l.customer_id = c.id
+           WHERE l.customer_id=?
+           ORDER BY l.id DESC
+           LIMIT 1''',
+        (customer_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_loan_by_ticket(ticket_no, db_path=None):
     conn = get_connection(db_path)
     row = conn.execute('''SELECT l.*, c.name as customer_name, c.nic as customer_nic,
@@ -981,6 +1068,233 @@ def set_setting(key, value, description='', user_id=None, db_path=None):
                  (key, value, description, user_id, value, description, user_id))
     conn.commit()
     conn.close()
+
+
+def get_sms_settings(db_path=None):
+    defaults = {
+        'sms_gateway_base_url': 'https://app.text.lk/api/v3/sms/send',
+        'sms_gateway_token': '',
+        'sms_sender_id': '',
+        'sms_default_country_code': '94',
+        'sms_enabled': '0',
+        'sms_auto_new_loan': '0',
+        'sms_auto_renewal': '0',
+        'sms_auto_redemption': '0',
+        'sms_auto_reminder': '0',
+    }
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('sms_gateway_base_url','sms_gateway_token','sms_sender_id','sms_default_country_code','sms_enabled','sms_auto_new_loan','sms_auto_renewal','sms_auto_redemption','sms_auto_reminder')"
+    ).fetchall()
+    conn.close()
+    result = dict(defaults)
+    for row in rows:
+        result[row['key']] = row['value']
+    return result
+
+
+def get_sms_template(category, db_path=None):
+    conn = get_connection(db_path)
+    row = conn.execute("SELECT * FROM sms_templates WHERE category=?", (category,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_sms_templates(db_path=None):
+    conn = get_connection(db_path)
+    rows = conn.execute("SELECT * FROM sms_templates ORDER BY category").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def save_sms_template(category, title, body, is_active=True, user_id=None, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        '''INSERT INTO sms_templates (category, title, body, is_active, updated_by, updated_at)
+           VALUES (?,?,?,?,?,datetime('now','localtime'))
+           ON CONFLICT(category) DO UPDATE SET
+             title=excluded.title,
+             body=excluded.body,
+             is_active=excluded.is_active,
+             updated_by=excluded.updated_by,
+             updated_at=datetime('now','localtime')''',
+        (category, title, body, 1 if is_active else 0, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def log_sms_message(recipient, message, category='custom', status='pending', provider='', provider_message_id='',
+                    response=None, customer_id=None, loan_id=None, sent_by=None, recipients=None, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        '''INSERT INTO sms_messages
+           (recipient, recipients, message, category, status, provider, provider_message_id, response_json, customer_id, loan_id, sent_by, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))''',
+        (
+            recipient,
+            recipients,
+            message,
+            category,
+            status,
+            provider,
+            provider_message_id,
+            json.dumps(response, ensure_ascii=False) if response is not None else None,
+            customer_id,
+            loan_id,
+            sent_by,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_sms_messages(limit=100, db_path=None):
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        '''SELECT sm.*, c.name as customer_name, c.nic as customer_nic, l.ticket_no
+           FROM sms_messages sm
+           LEFT JOIN customers c ON sm.customer_id = c.id
+           LEFT JOIN loans l ON sm.loan_id = l.id
+           ORDER BY sm.id DESC
+           LIMIT ?''',
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def delete_sms_template(category, db_path=None):
+    """Delete an SMS template by category. Returns True if deleted."""
+    conn = get_connection(db_path)
+    cursor = conn.execute("DELETE FROM sms_templates WHERE category=?", (category,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def get_upcoming_birthdays(days=30, db_path=None):
+    """Return customers whose birthday falls within the next N days."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT * FROM customers
+           WHERE birthday IS NOT NULL AND birthday != ''
+           ORDER BY
+             CASE
+               WHEN CAST(strftime('%%j',
+                   strftime('%%Y', 'now', 'localtime') || '-' ||
+                   substr(birthday, 6)) AS INTEGER) >=
+                   CAST(strftime('%%j', 'now', 'localtime') AS INTEGER)
+               THEN CAST(strftime('%%j',
+                   strftime('%%Y', 'now', 'localtime') || '-' ||
+                   substr(birthday, 6)) AS INTEGER) -
+                   CAST(strftime('%%j', 'now', 'localtime') AS INTEGER)
+               ELSE 366 + CAST(strftime('%%j',
+                   strftime('%%Y', 'now', 'localtime') || '-' ||
+                   substr(birthday, 6)) AS INTEGER) -
+                   CAST(strftime('%%j', 'now', 'localtime') AS INTEGER)
+             END"""
+    ).fetchall()
+    conn.close()
+    from datetime import datetime, timedelta
+    today = datetime.now().date()
+    result = []
+    for row in rows:
+        c = dict(row)
+        bday_str = c.get('birthday', '')
+        if not bday_str or len(bday_str) < 5:
+            continue
+        try:
+            bday = datetime.strptime(bday_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            continue
+        next_bday = bday.replace(year=today.year)
+        if next_bday < today:
+            next_bday = next_bday.replace(year=today.year + 1)
+        days_until = (next_bday - today).days
+        if days_until <= days:
+            c['next_birthday'] = next_bday.strftime('%Y-%m-%d')
+            c['days_until_birthday'] = days_until
+            result.append(c)
+    result.sort(key=lambda x: x['days_until_birthday'])
+    return result
+
+
+def list_sms_messages_filtered(category='', status='', limit=200, db_path=None):
+    """List SMS messages with optional category and status filters."""
+    conn = get_connection(db_path)
+    sql = """SELECT sm.*, c.name as customer_name, c.nic as customer_nic, l.ticket_no
+             FROM sms_messages sm
+             LEFT JOIN customers c ON sm.customer_id = c.id
+             LEFT JOIN loans l ON sm.loan_id = l.id
+             WHERE 1=1"""
+    params = []
+    if category:
+        sql += " AND sm.category=?"
+        params.append(category)
+    if status:
+        sql += " AND sm.status=?"
+        params.append(status)
+    sql += " ORDER BY sm.id DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_sms_analytics(db_path=None):
+    """Return SMS analytics: totals, by category, by status, daily counts."""
+    conn = get_connection(db_path)
+    # Total counts
+    total = conn.execute("SELECT COUNT(*) as cnt FROM sms_messages").fetchone()['cnt']
+    sent = conn.execute("SELECT COUNT(*) as cnt FROM sms_messages WHERE status='sent'").fetchone()['cnt']
+    failed = conn.execute("SELECT COUNT(*) as cnt FROM sms_messages WHERE status='failed'").fetchone()['cnt']
+    pending = conn.execute("SELECT COUNT(*) as cnt FROM sms_messages WHERE status='pending'").fetchone()['cnt']
+
+    # By category
+    by_category = conn.execute(
+        "SELECT category, COUNT(*) as cnt FROM sms_messages GROUP BY category ORDER BY cnt DESC"
+    ).fetchall()
+
+    # By status
+    by_status = conn.execute(
+        "SELECT status, COUNT(*) as cnt FROM sms_messages GROUP BY status ORDER BY cnt DESC"
+    ).fetchall()
+
+    # Daily counts (last 30 days)
+    daily = conn.execute(
+        """SELECT date(created_at) as day, COUNT(*) as cnt,
+                  SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent_cnt,
+                  SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed_cnt
+           FROM sms_messages
+           WHERE created_at >= datetime('now', '-30 days', 'localtime')
+           GROUP BY date(created_at)
+           ORDER BY day DESC"""
+    ).fetchall()
+
+    # Top recipients
+    top_recipients = conn.execute(
+        """SELECT recipient, COUNT(*) as cnt,
+                  MAX(created_at) as last_sent
+           FROM sms_messages
+           GROUP BY recipient
+           ORDER BY cnt DESC
+           LIMIT 10"""
+    ).fetchall()
+
+    conn.close()
+    return {
+        'total': total,
+        'sent': sent,
+        'failed': failed,
+        'pending': pending,
+        'success_rate': round((sent / total * 100), 1) if total > 0 else 0.0,
+        'by_category': [dict(r) for r in by_category],
+        'by_status': [dict(r) for r in by_status],
+        'daily': [dict(r) for r in daily],
+        'top_recipients': [dict(r) for r in top_recipients],
+    }
 
 
 def get_article_types(db_path=None):
@@ -1364,3 +1678,97 @@ def list_customer_letters(query='', db_path=None):
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def add_scheduled_sms(recipient, message, scheduled_time, category='custom', customer_id=None, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        """INSERT INTO scheduled_sms (recipient, message, scheduled_time, status, category, customer_id)
+           VALUES (?, ?, ?, 'pending', ?, ?)""",
+        (recipient, message, scheduled_time, category, customer_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_pending_scheduled_sms(current_time_str, db_path=None):
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT * FROM scheduled_sms WHERE status = 'pending' AND scheduled_time <= ?",
+        (current_time_str,)
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def mark_scheduled_sms_sent(sms_id, provider_msg_id='', response_json='', db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        """UPDATE scheduled_sms 
+           SET status = 'sent', sent_at = datetime('now','localtime'), error_message = NULL
+           WHERE id = ?""",
+        (sms_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_scheduled_sms_failed(sms_id, error_message='', db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        """UPDATE scheduled_sms 
+           SET status = 'failed', error_message = ?
+           WHERE id = ?""",
+        (error_message, sms_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_scheduled_sms(limit=100, db_path=None):
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT s.*, c.name AS customer_name, c.nic AS customer_nic
+           FROM scheduled_sms s
+           LEFT JOIN customers c ON s.customer_id = c.id
+           ORDER BY s.scheduled_time ASC, s.id DESC
+           LIMIT ?""",
+        (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def delete_scheduled_sms(sms_id, db_path=None):
+    conn = get_connection(db_path)
+    cursor = conn.execute("DELETE FROM scheduled_sms WHERE id = ?", (sms_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def update_customer_birthday(customer_id, birthday, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute(
+        "UPDATE customers SET birthday = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+        (birthday, customer_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_wished_customer_ids_this_year(db_path=None):
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT DISTINCT sm.customer_id 
+           FROM sms_messages sm
+           JOIN customers c ON sm.customer_id = c.id
+           WHERE sm.category='birthday' 
+             AND sm.status='sent' 
+             AND strftime('%Y', sm.created_at) = strftime('%Y', 'now', 'localtime')
+             AND strftime('%m-%d', sm.created_at) = substr(c.birthday, 6)
+             AND sm.customer_id IS NOT NULL"""
+    ).fetchall()
+    conn.close()
+    return {row['customer_id'] for row in rows}

@@ -14,9 +14,11 @@ from database import (get_all_market_rates, set_market_rate, get_all_duration_ra
                       set_duration_rate, delete_duration_rate, get_all_users,
                       create_user, update_user, get_setting, set_setting, get_duration_rate,
                       get_article_types, set_article_types, set_other_charges,
-                      search_loans, get_market_rate, create_customer, get_customer_by_nic,
+                      search_loans, get_market_rate, create_customer, get_customer_by_nic, get_customer,
+                      get_loan, get_sms_template,
                       create_loan, delete_loan, generate_ticket_no, add_audit_log,
                       update_customer)
+from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                    calculate_interest, get_expire_date)
 from backup_manager import get_backup_manager, BackupManager
@@ -65,17 +67,24 @@ class AdminSettingsPage:
             ('👤 User Management', self._show_users),
             ('🗑️ Loan Add / Delete', self._show_loan_admin_tools),
             ('🏦 Bank Details', self._show_bank_details),
+            ('📨 SMS Settings', self._show_sms_settings),
             ('🖨 Printer Settings', self._show_printer_settings),
             ('🏢 Company Settings', self._show_company_settings),
             (' Backup & Restore', self._show_backup_restore),
         ]
         tabs1 = tabs[:4]
-        tabs2 = tabs[4:]
+        tabs2 = tabs[4:8]
+        tabs3 = tabs[8:]
         for text, cmd in tabs1:
             btn = self.theme.make_button(tab_row1, text=text, command=cmd, kind='ghost', width=18, pady=8)
             btn.pack(side=tk.LEFT, padx=(0, 6))
         for text, cmd in tabs2:
             btn = self.theme.make_button(tab_row2, text=text, command=cmd, kind='ghost', width=18, pady=8)
+            btn.pack(side=tk.LEFT, padx=(0, 6))
+        tab_row3 = tk.Frame(view, bg=self.theme.palette.bg_app)
+        tab_row3.pack(fill=tk.X, pady=(0, 10))
+        for text, cmd in tabs3:
+            btn = self.theme.make_button(tab_row3, text=text, command=cmd, kind='ghost', width=18, pady=8)
             btn.pack(side=tk.LEFT, padx=(0, 6))
 
         self._show_market_rates()
@@ -689,6 +698,31 @@ class AdminSettingsPage:
 
         add_audit_log(self.user['id'], 'CREATE_LOAN', 'loan', loan_id,
                       f'Admin historical add: {ticket_no} ({issue_date})')
+
+        try:
+            if get_setting('sms_enabled', '0') == '1' and get_setting('sms_auto_new_loan', '0') == '1':
+                customer = get_customer(customer_id)
+                loan_record = get_loan(loan_id)
+                if customer:
+                    template = get_sms_template('auto')
+                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
+                    sms_context = build_sms_context(
+                        customer=customer,
+                        loan=loan_record or loan_data,
+                        message='Your gold loan has been created successfully.',
+                    )
+                    sms_message = render_template(sms_body, sms_context)
+                    send_sms(
+                        customer.get('phone', ''),
+                        sms_message,
+                        customer=customer,
+                        loan=loan_record or loan_data,
+                        category='auto',
+                        sent_by=self.user['id'],
+                    )
+        except Exception:
+            pass
+
         messagebox.showinfo('Success', f'Loan {ticket_no} added successfully.')
         self._search_admin_loans_for_delete()
 
@@ -805,6 +839,90 @@ class AdminSettingsPage:
         btn_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
         btn_frame.pack(fill=tk.X, padx=14, pady=(0, 14))
         self.theme.make_button(btn_frame, text='💾 Save Bank Details', command=_save_bank_details,
+                               kind='primary', width=20, pady=8).pack(side=tk.LEFT)
+
+    # ── SMS Settings ──
+    def _show_sms_settings(self):
+        self._clear_tab()
+        card = self.theme.make_card(self.tab_content, bg=self.theme.palette.bg_surface)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(card.inner, text='SMS Gateway Settings', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 4))
+        tk.Label(card.inner, text='Configure your Text.lk API token, sender ID, and auto SMS switches.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 12))
+
+        form = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        form.pack(fill=tk.X, padx=14, pady=(0, 14))
+
+        self.sms_setting_vars = {
+            'sms_gateway_base_url': tk.StringVar(value=get_setting('sms_gateway_base_url', 'https://app.text.lk/api/v3/sms/send')),
+            'sms_gateway_token': tk.StringVar(value=get_setting('sms_gateway_token', '')),
+            'sms_sender_id': tk.StringVar(value=get_setting('sms_sender_id', '')),
+            'sms_default_country_code': tk.StringVar(value=get_setting('sms_default_country_code', '94')),
+            'sms_enabled': tk.BooleanVar(value=get_setting('sms_enabled', '0') == '1'),
+            'sms_auto_new_loan': tk.BooleanVar(value=get_setting('sms_auto_new_loan', '0') == '1'),
+            'sms_auto_renewal': tk.BooleanVar(value=get_setting('sms_auto_renewal', '0') == '1'),
+            'sms_auto_redemption': tk.BooleanVar(value=get_setting('sms_auto_redemption', '0') == '1'),
+            'sms_auto_reminder': tk.BooleanVar(value=get_setting('sms_auto_reminder', '0') == '1'),
+        }
+
+        rows = [
+            ('Gateway URL', 'sms_gateway_base_url'),
+            ('API Token', 'sms_gateway_token'),
+            ('Sender ID', 'sms_sender_id'),
+            ('Default Country Code', 'sms_default_country_code'),
+        ]
+
+        for label, key in rows:
+            row = tk.Frame(form, bg=self.theme.palette.bg_surface)
+            row.pack(fill=tk.X, pady=(0, 8))
+            tk.Label(row, text=f'{label}:', font=self.theme.fonts.body_bold, width=22, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+            self.theme.make_entry(row, variable=self.sms_setting_vars[key], width=42).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        switch_box = tk.Frame(form, bg=self.theme.palette.bg_surface_alt)
+        switch_box.pack(fill=tk.X, pady=(8, 12))
+        tk.Label(switch_box, text='SMS Controls', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface_alt, fg=self.theme.palette.text_primary).pack(anchor='w', padx=12, pady=(10, 8))
+
+        for label, key in [
+            ('Enable SMS Gateway', 'sms_enabled'),
+            ('Auto SMS on New Loan', 'sms_auto_new_loan'),
+            ('Auto SMS on Renewal', 'sms_auto_renewal'),
+            ('Auto SMS on Redemption', 'sms_auto_redemption'),
+            ('Auto SMS Reminders', 'sms_auto_reminder'),
+        ]:
+            tk.Checkbutton(
+                switch_box,
+                text=label,
+                variable=self.sms_setting_vars[key],
+                bg=self.theme.palette.bg_surface_alt,
+                fg=self.theme.palette.text_primary,
+                selectcolor=self.theme.palette.bg_surface_alt,
+                font=self.theme.fonts.body,
+            ).pack(anchor='w', padx=12, pady=(0, 6))
+
+        tk.Label(
+            form,
+            text='Text.lk uses the recipient format 94XXXXXXXXX and a bearer API token.',
+            font=self.theme.fonts.small,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_muted,
+        ).pack(anchor='w', pady=(0, 8))
+
+        def _save_sms_settings():
+            for key, var in self.sms_setting_vars.items():
+                if isinstance(var, tk.BooleanVar):
+                    set_setting(key, '1' if var.get() else '0', user_id=self.user['id'])
+                else:
+                    set_setting(key, var.get().strip(), user_id=self.user['id'])
+            messagebox.showinfo('Success', 'SMS settings saved.')
+
+        btn_row = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        btn_row.pack(fill=tk.X, padx=14, pady=(0, 14))
+        self.theme.make_button(btn_row, text='💾 Save SMS Settings', command=_save_sms_settings,
                                kind='primary', width=20, pady=8).pack(side=tk.LEFT)
 
     # ── Other Charges ──
