@@ -290,6 +290,37 @@ async function initializeSaaSTables() {
     await createSecurityAlertsTable();
     await createLicenseTokensTable();
     await createAuditLogsTable();
+
+    try {
+      await pool.execute(`
+        ALTER TABLE audit_logs
+        MODIFY COLUMN event_type ENUM(
+          'download',
+          'activation_approved',
+          'activation_pending',
+          'activation_rejected',
+          'revocation',
+          'token_refresh',
+          'validation_blocked',
+          'policy_violation',
+          'approval',
+          'rejection',
+          'business_info_change_requested',
+          'business_info_change_approved',
+          'business_info_change_rejected',
+          'admin_subscription_activate',
+          'admin_subscription_deactivate',
+          'admin_subscription_expire',
+          'admin_subscription_extend_days',
+          'admin_subscription_set_end_date',
+          'admin_subscription_lifetime',
+          'admin_subscription_set_activation',
+          'admin_subscription_update_dates'
+        ) NOT NULL
+      `);
+    } catch (alterError) {
+      console.warn('Warning: Could not alter audit_logs.event_type ENUM:', alterError.message);
+    }
     
     console.log('\n🎉 All SaaS tables initialized successfully!\n');
   } catch (error) {
@@ -578,7 +609,8 @@ async function createAuditLogsTable() {
           'admin_subscription_extend_days',
           'admin_subscription_set_end_date',
           'admin_subscription_lifetime',
-          'admin_subscription_set_activation'
+          'admin_subscription_set_activation',
+          'admin_subscription_update_dates'
         ) NOT NULL,
         actor VARCHAR(64) DEFAULT 'system',
         details JSON NULL,

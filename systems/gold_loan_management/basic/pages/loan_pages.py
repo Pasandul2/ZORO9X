@@ -51,10 +51,22 @@ class LoanListPage:
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         self.status_var = tk.StringVar(value='all')
         status_combo = ttk.Combobox(fbar, textvariable=self.status_var,
-                                    values=['all', 'active', 'renewed', 'redeemed', 'forfeited'],
+                                    values=['all', 'active', 'overdue', 'renewed', 'redeemed', 'forfeited'],
                                     state='readonly', font=self.theme.fonts.body[0:2], width=12)
         status_combo.pack(side=tk.LEFT, padx=(8, 16))
-        status_combo.bind('<<ComboboxSelected>>', lambda _e: self._do_search())
+        status_combo.bind('<<ComboboxSelected>>', self._on_status_change)
+
+        # Sort row (shown only when overdue is selected)
+        self._sort_frame = tk.Frame(filter_card.inner, bg=self.theme.palette.bg_surface)
+        self._sort_label = tk.Label(self._sort_frame, text='Sort:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary)
+        self._sort_label.pack(side=tk.LEFT)
+        self.sort_var = tk.StringVar(value='most_overdue')
+        self._sort_combo = ttk.Combobox(self._sort_frame, textvariable=self.sort_var,
+                                        values=['most_overdue', 'newest_first'],
+                                        state='readonly', font=self.theme.fonts.body[0:2], width=16)
+        self._sort_combo.pack(side=tk.LEFT, padx=(8, 0))
+        self._sort_combo.bind('<<ComboboxSelected>>', lambda _e: self._do_search())
 
         search_btn = self.theme.make_button(fbar, text='🔍 Search', command=self._do_search,
                                             kind='primary', width=10, pady=6)
@@ -95,6 +107,13 @@ class LoanListPage:
             tk.Label(card.inner, text=value, font=self.theme.fonts.h2,
                      bg=self.theme.palette.bg_surface, fg=color).pack(anchor='w', padx=12, pady=(0, 8))
 
+    def _on_status_change(self, _event=None):
+        if self.status_var.get() == 'overdue':
+            self._sort_frame.pack(fill=tk.X, padx=14, pady=(0, 10))
+        else:
+            self._sort_frame.pack_forget()
+        self._do_search()
+
     def _on_search_change(self, *_args):
         if self._search_after_id is not None:
             self.container.after_cancel(self._search_after_id)
@@ -105,7 +124,9 @@ class LoanListPage:
         for w in self.table_frame.winfo_children():
             w.destroy()
 
-        loans = search_loans(self.search_var.get().strip(), self.status_var.get())
+        loans = search_loans(self.search_var.get().strip(), self.status_var.get(),
+                             sort_overdue=(self.status_var.get() == 'overdue' and
+                                          self.sort_var.get() == 'most_overdue'))
         self._render_stats(loans)
 
         tk.Label(self.table_frame, text=f'Results: {len(loans)} loan(s)', font=self.theme.fonts.body,
@@ -373,6 +394,21 @@ class LoanDetailPage:
                                             command=lambda: self._send_letter_for_loan(loan))
         letter_btn.grid(row=2, column=0, padx=(0, 4), pady=(4, 0), sticky='ew')
 
+        def _print_notice(ntype):
+            from pages.print_ticket import PrintTicketPage
+            p = PrintTicketPage(self.container, self.theme, self.user, self.navigate, self.loan_id)
+            p.loan = loan
+            p.items = get_loan_items(self.loan_id)
+            p._open_notice_preview(ntype)
+
+        notice_btn = self.theme.make_button(abf, text='📋 Letter of Notice', kind='secondary', width=13, pady=8,
+                                            command=lambda: _print_notice('letter'))
+        notice_btn.grid(row=2, column=1, padx=(4, 0), pady=(4, 0), sticky='ew')
+
+        auction_btn = self.theme.make_button(abf, text='🔔 Auction Notice', kind='danger', width=13, pady=8,
+                                             command=lambda: _print_notice('auction'))
+        auction_btn.grid(row=3, column=0, columnspan=2, padx=0, pady=(4, 0), sticky='ew')
+
         if effective_status in ('redeemed', 'forfeited'):
             renew_btn.config(state=tk.DISABLED)
             redeem_btn.config(state=tk.DISABLED)
@@ -397,7 +433,7 @@ class LoanDetailPage:
                 pady=8,
                 command=_mark_forfeited,
             )
-            forfeit_btn.grid(row=3, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
+            forfeit_btn.grid(row=4, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
 
         # Letter History section (below action buttons on left side)
         letter_hist_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
@@ -508,6 +544,7 @@ class LoanDetailPage:
             ('Overdue Base (2.5%)', format_currency(payable.get('overdue_base_interest', 0))),
             ('Overdue Penalty (5%)', format_currency(payable.get('overdue_penalty_interest', 0))),
             ('Overdue Interest', format_currency(payable['overdue_interest'])),
+            ('Total Interest', format_currency(payable['interest'] + payable['overdue_interest'])),
             ('Total Outstanding', format_currency(payable['total'])),
         ]
         fin_data = [row for row in fin_data if row is not None]

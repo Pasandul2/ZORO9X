@@ -283,6 +283,7 @@ class GoldLoanSystemApp:
         self.theme = GOLD_THEME
         self.current_user = None
         self.heartbeat_job = None
+        self.is_offline = False
 
         # Load configuration
         self.config = self.load_config()
@@ -583,6 +584,7 @@ class GoldLoanSystemApp:
                 )
                 data = resp.json()
                 if resp.status_code == 200 and data.get('valid'):
+                    self.is_offline = False
                     grace_period_days = resolve_grace_period_days(data)
                     cache_data = {
                         'valid': True,
@@ -641,6 +643,7 @@ class GoldLoanSystemApp:
                 )
                 data = resp.json()
                 if resp.status_code == 200 and data.get('success'):
+                    self.is_offline = False
                     grace_period_days = resolve_grace_period_days(data)
                     cache_data = {
                         'valid': True,
@@ -682,6 +685,7 @@ class GoldLoanSystemApp:
         return False
 
     def _check_offline_grace(self):
+        self.is_offline = True
         cache = load_license_cache()
         device_fp = get_device_fingerprint()
         if not cache.get('valid'):
@@ -703,6 +707,14 @@ class GoldLoanSystemApp:
                                  'Server token signature validation failed.\nPlease reconnect to refresh your license.')
             return False
         expires_ms = int(token_payload.get('expires', 0) or 0)
+        sub_expires_ms = token_payload.get('sub_expires')
+        if sub_expires_ms is not None:
+            if datetime.now().timestamp() * 1000 > int(sub_expires_ms or 0):
+                self._show_payment_required_popup(
+                    'Your subscription has expired. Please connect to internet and renew your subscription.'
+                )
+                return False
+            expires_ms = min(expires_ms, int(sub_expires_ms or 0))
         token_device = token_payload.get('device')
         token_sub = token_payload.get('sub_id')
         cache_sub = cache.get('subscription_id')
@@ -893,9 +905,23 @@ class GoldLoanSystemApp:
             fg=self.theme.palette.text_muted,
         ).pack()
 
-        # Navigation
-        nav_frame = tk.Frame(sidebar, bg=self.theme.palette.bg_sidebar)
-        nav_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        # Navigation — scrollable
+        nav_outer = tk.Frame(sidebar, bg=self.theme.palette.bg_sidebar)
+        nav_outer.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        nav_canvas = tk.Canvas(nav_outer, bg=self.theme.palette.bg_sidebar,
+                               highlightthickness=0, bd=0)
+        nav_scrollbar = ttk.Scrollbar(nav_outer, orient=tk.VERTICAL, command=nav_canvas.yview)
+        nav_canvas.configure(yscrollcommand=nav_scrollbar.set)
+        nav_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        nav_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        nav_frame = tk.Frame(nav_canvas, bg=self.theme.palette.bg_sidebar)
+        nav_win = nav_canvas.create_window((0, 0), window=nav_frame, anchor='nw')
+        nav_frame.bind('<Configure>', lambda _: nav_canvas.configure(scrollregion=nav_canvas.bbox('all')))
+        nav_canvas.bind('<Configure>', lambda e: nav_canvas.itemconfigure(nav_win, width=e.width))
+        # Mouse wheel scrolling on the nav canvas only
+        nav_canvas.bind('<MouseWheel>', lambda e: nav_canvas.yview_scroll(int(-1 * (e.delta / 120)), 'units'))
 
         nav_items = [
             ('📊 Dashboard', 'dashboard'),
@@ -907,6 +933,7 @@ class GoldLoanSystemApp:
         if self.current_user['role'] == 'admin':
             nav_items.append(('✉️ Letters', 'letters'))
             nav_items.append(('📨 SMS', 'sms_center'))
+            nav_items.append(('💰 Cash', 'cash_management'))
             nav_items.append((' Reports', 'reports'))
             nav_items.append(('⚙️ Admin Settings', 'admin_settings'))
             # Show pending count badge
@@ -979,6 +1006,11 @@ class GoldLoanSystemApp:
             fg=self.theme.palette.text_muted
         ).pack(side=tk.RIGHT, padx=20)
 
+        # Subscription status frame
+        self.sub_frame = tk.Frame(header, bg=self.theme.palette.bg_header)
+        self.sub_frame.pack(side=tk.RIGHT, padx=(0, 20))
+        self._update_subscription_header()
+
         # Scrollable body
         body_host = tk.Frame(content_outer, bg=self.theme.palette.bg_app)
         body_host.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
@@ -986,6 +1018,16 @@ class GoldLoanSystemApp:
 
         # Show dashboard
         self.navigate('dashboard')
+
+        # Show morning cash popup if enabled
+        self.root.after(1000, lambda: self._show_morning_cash_popup())
+
+    def _show_morning_cash_popup(self):
+        try:
+            from pages.cash_management import show_morning_cash_popup
+            show_morning_cash_popup(self.root, self.theme, self.current_user, db_file=self.db_file)
+        except Exception:
+            pass
 
     def _create_scrollable_body(self, parent):
         self.page_canvas = tk.Canvas(
@@ -1016,6 +1058,9 @@ class GoldLoanSystemApp:
 
     def navigate(self, page_name, param=None):
         """Navigate to a page."""
+        # Refresh subscription status
+        self._update_subscription_header()
+
         # Refresh pending approvals badge for admin
         if self.current_user and self.current_user['role'] == 'admin' and hasattr(self, 'nav_buttons'):
             from database import get_pending_approval_requests
@@ -1039,6 +1084,7 @@ class GoldLoanSystemApp:
             'customers': 'Customer Management',
             'letters': 'Letters Center',
             'sms_center': 'SMS Center',
+            'cash_management': 'Cash Management',
             'admin_settings': 'Admin Settings',
             'reports': 'Reports',
             'loan_approvals': 'Loan Approval Requests',
@@ -1089,6 +1135,10 @@ class GoldLoanSystemApp:
         elif page_name == 'sms_center':
             from pages.sms_center import SmsCenterPage
             SmsCenterPage(self.page_content, self.theme, self.current_user, self.navigate).render()
+
+        elif page_name == 'cash_management':
+            from pages.cash_management import CashManagementPage
+            CashManagementPage(self.page_content, self.theme, self.current_user, self.navigate).render()
 
         elif page_name == 'admin_settings':
             from pages.admin_settings import AdminSettingsPage
@@ -1264,6 +1314,102 @@ class GoldLoanSystemApp:
                 threading.Thread(target=run_pending_scheduled, daemon=True).start()
         except Exception as e:
             print(f"Error checking/sending scheduled SMS: {e}")
+
+    def get_subscription_info(self):
+        cache = load_license_cache()
+        bypass = is_license_bypass_enabled()
+        
+        token = cache.get('token', '')
+        payload = parse_token_payload(token)
+        expires_ms = int(payload.get('expires', 0) or 0)
+        sub_expires_ms = payload.get('sub_expires')
+        if sub_expires_ms is not None:
+            expires_ms = int(sub_expires_ms or 0)
+        
+        if not expires_ms:
+            if bypass:
+                return "Active (Bypass)", None, False
+            return "Expired", 0, True
+
+        expiry_date = datetime.fromtimestamp(expires_ms / 1000.0)
+        delta = expiry_date - datetime.now()
+        days_remaining = int(delta.total_seconds() / 86400.0)
+
+        # Check offline grace
+        if getattr(self, 'is_offline', False):
+            last_check_str = cache.get('last_check')
+            if last_check_str:
+                try:
+                    last_check = datetime.fromisoformat(last_check_str)
+                    grace_period_days = resolve_grace_period_days(cache)
+                    offline_days = max(0, int((datetime.now() - last_check).total_seconds() // (60 * 60 * 24)))
+                    offline_remaining = grace_period_days - offline_days
+                    if offline_remaining < days_remaining:
+                        days_remaining = offline_remaining
+                except Exception:
+                    pass
+
+        if days_remaining < 0:
+            return "Expired", days_remaining, True
+        elif days_remaining <= 7:
+            return "Expiring Soon", days_remaining, True
+        else:
+            return "Active", days_remaining, False
+
+    def _update_subscription_header(self):
+        if not hasattr(self, 'sub_frame') or not self.sub_frame:
+            return
+            
+        for widget in self.sub_frame.winfo_children():
+            widget.destroy()
+
+        status, days, show_renew = self.get_subscription_info()
+
+        if status == "Active":
+            badge_bg = '#d1fae5'
+            badge_fg = '#065f46'
+            text = "Subscription: Active"
+        elif status == "Expiring Soon":
+            badge_bg = '#ffedd5'
+            badge_fg = '#9a3412'
+            text = f"Subscription: Expires in {days} day{'s' if days != 1 else ''}"
+        elif status == "Expired":
+            badge_bg = '#fee2e2'
+            badge_fg = '#991b1b'
+            text = "Subscription: Expired"
+        elif status == "Active (Bypass)":
+            badge_bg = '#e0e7ff'
+            badge_fg = '#3730a3'
+            text = "Developer Mode"
+        else:
+            badge_bg = '#f3f4f6'
+            badge_fg = '#374151'
+            text = "Subscription: Unknown"
+
+        badge = tk.Frame(self.sub_frame, bg=badge_bg, padx=10, pady=4)
+        badge.pack(side=tk.LEFT, padx=5, pady=8)
+        
+        tk.Label(
+            badge, text=text, font=('Segoe UI', 9, 'bold'),
+            bg=badge_bg, fg=badge_fg
+        ).pack()
+
+        if show_renew:
+            renew_btn = tk.Button(
+                self.sub_frame,
+                text="Renew Now",
+                command=lambda: webbrowser.open("https://www.zoro9x.com/client-dashboard"),
+                bg='#d97706',
+                fg='white',
+                activebackground='#b45309',
+                activeforeground='white',
+                relief='flat',
+                font=('Segoe UI', 9, 'bold'),
+                padx=8,
+                pady=2,
+                cursor='hand2'
+            )
+            renew_btn.pack(side=tk.LEFT, padx=5, pady=8)
 
     def run(self):
         self.root.mainloop()

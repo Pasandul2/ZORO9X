@@ -17,7 +17,7 @@ from database import (get_all_market_rates, set_market_rate, get_all_duration_ra
                       search_loans, get_market_rate, create_customer, get_customer_by_nic, get_customer,
                       get_loan, get_sms_template,
                       create_loan, delete_loan, generate_ticket_no, add_audit_log,
-                      update_customer)
+                      update_customer, add_cash_transaction, get_cash_balance)
 from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                    calculate_interest, get_expire_date)
@@ -62,12 +62,13 @@ class AdminSettingsPage:
         tabs = [
             ('💰 Market Rates', self._show_market_rates),
             ('📊 Duration & Interest', self._show_duration_rates),
-            ('� Other Charges', self._show_other_charges),
+            (' Other Charges', self._show_other_charges),
             ('💍 Article Types', self._show_article_types),
             ('👤 User Management', self._show_users),
             ('🗑️ Loan Add / Delete', self._show_loan_admin_tools),
             ('🏦 Bank Details', self._show_bank_details),
             ('📨 SMS Settings', self._show_sms_settings),
+            ('💰 Cash Settings', self._show_cash_settings),
             ('🖨 Printer Settings', self._show_printer_settings),
             ('🏢 Company Settings', self._show_company_settings),
             (' Backup & Restore', self._show_backup_restore),
@@ -704,8 +705,8 @@ class AdminSettingsPage:
                 customer = get_customer(customer_id)
                 loan_record = get_loan(loan_id)
                 if customer:
-                    template = get_sms_template('auto')
-                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
+                    template = get_sms_template('auto_new_loan')
+                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\nYour gold loan has been issued successfully.\n\nTicket: {{ticket_no}}\nAmount: Rs. {{loan_amount}}\nDuration: {{duration}} months\nExpiry: {{expire_date}}\n\nThank you,\n{{company_name}}'
                     sms_context = build_sms_context(
                         customer=customer,
                         loan=loan_record or loan_data,
@@ -720,6 +721,12 @@ class AdminSettingsPage:
                         category='auto',
                         sent_by=self.user['id'],
                     )
+        except Exception:
+            pass
+
+        try:
+            from pages.loan_actions import _record_cash_for_loan
+            _record_cash_for_loan('new_loan', loan=loan_data, user_id=self.user['id'])
         except Exception:
             pass
 
@@ -1366,6 +1373,65 @@ class AdminSettingsPage:
                 continue
             set_setting(key, var.get().strip(), user_id=self.user['id'])
         messagebox.showinfo('Success', 'Company settings saved.')
+
+    # ── Cash Settings ──
+    def _show_cash_settings(self):
+        self._clear_tab()
+        card = self.theme.make_card(self.tab_content, bg=self.theme.palette.bg_surface)
+        card.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(card.inner, text='💰 Cash Management Settings', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 4))
+        tk.Label(card.inner, text='Configure the cash management popup that records opening cash balance.',
+                 font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 12))
+
+        form = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
+        form.pack(fill=tk.X, padx=14, pady=(0, 14))
+
+        # Enable/Disable
+        self.cash_enabled_var = tk.BooleanVar(value=get_setting('cash_management_enabled', '0') == '1')
+        tk.Checkbutton(
+            form, text='✅  Enable Cash Management Popup',
+            variable=self.cash_enabled_var,
+            bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
+            selectcolor=self.theme.palette.bg_surface,
+            font=('Segoe UI', 10, 'bold'),
+        ).pack(anchor='w', pady=(0, 12))
+
+        # Popup mode
+        tk.Label(form, text='Popup Display Mode:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w')
+        self.cash_mode_var = tk.StringVar(value=get_setting('cash_management_popup_mode', 'daily'))
+
+        mode_frame = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        mode_frame.pack(fill=tk.X, pady=(6, 12))
+
+        modes = [
+            ('daily', '🔄 Once per day — Show popup only on first launch each day'),
+            ('startup', '🚀 Every startup — Show popup every time the app opens'),
+            ('off', '❌ Disabled — Do not show popup automatically'),
+        ]
+        for val, label in modes:
+            tk.Radiobutton(
+                mode_frame, text=label, variable=self.cash_mode_var, value=val,
+                bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary,
+                selectcolor=self.theme.palette.bg_surface,
+                font=('Segoe UI', 9),
+            ).pack(anchor='w', pady=2)
+
+        tk.Label(form, text='When enabled, a popup will ask for the opening cash balance.\n'
+                 'Records are stored in the Cash Management section accessible from the sidebar.',
+                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted, wraplength=600, justify='left').pack(anchor='w', pady=(0, 12))
+
+        self.theme.make_button(form, text='💾 Save Cash Settings', command=self._save_cash_settings,
+                               kind='primary', width=18, pady=8).pack()
+
+    def _save_cash_settings(self):
+        set_setting('cash_management_enabled', '1' if self.cash_enabled_var.get() else '0', user_id=self.user['id'])
+        set_setting('cash_management_popup_mode', self.cash_mode_var.get().strip(), user_id=self.user['id'])
+        messagebox.showinfo('Success', 'Cash management settings saved.')
 
     # ── Printer Settings ──
     def _show_printer_settings(self):

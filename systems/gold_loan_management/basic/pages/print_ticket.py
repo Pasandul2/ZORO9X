@@ -169,7 +169,7 @@ class PrintTicketPage:
 <html><head><meta charset="utf-8">
 <title>Cash Credit Slip - {loan['ticket_no']}</title>
 <style>
-@page {{ size: {'210mm 297mm' if format_type == 'a4' else '80mm auto'}; margin: 10mm; }}
+@page {{ size: {'210mm 297mm' if format_type == 'a4' else '80mm auto'}; margin: 10mm; margin-top: 0; margin-bottom: 0; }}
 body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format_type == 'a4' else '8pt'}; color: #333; max-width: {'210mm' if format_type == 'a4' else '80mm'}; margin: 0 auto; }}
 .header {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 10px; }}
 .title {{ text-align: center; font-size: {'14pt' if format_type == 'a4' else '10pt'}; font-weight: bold; color: #415bd8; margin: 10px 0; }}
@@ -625,29 +625,41 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
         )
 
     def _get_logo_src(self):
+        """Resolve logo source using the same priority as the sidebar."""
+        # 1. HTTP/HTTPS logo URL (same first priority as sidebar)
+        configured_logo_url = (get_setting('company_logo_url', '') or '').strip()
+        if configured_logo_url:
+            if configured_logo_url.startswith(('http://', 'https://')):
+                return configured_logo_url
+            if configured_logo_url.startswith('/'):
+                server_url_file = Path(__file__).resolve().parent.parent / 'server_api_url.txt'
+                api_base = ''
+                if server_url_file.exists():
+                    try:
+                        api_base = (server_url_file.read_text(encoding='utf-8') or '').strip()
+                    except Exception:
+                        pass
+                if not api_base:
+                    api_base = os.getenv('ZORO9X_PUBLIC_API_URL', '').strip() or 'https://www.zoro9x.com'
+                return f"{api_base.rstrip('/')}{configured_logo_url}"
+            if configured_logo_url.startswith(('file://', 'data:')):
+                return configured_logo_url
+
+        # 2. Local path stored in settings
         configured_logo_path = (get_setting('company_logo_path', '') or '').strip()
         if configured_logo_path:
             logo_path = Path(configured_logo_path)
             if logo_path.exists():
                 return logo_path.as_uri()
 
-        configured_logo_url = (get_setting('company_logo_url', '') or '').strip()
-        if configured_logo_url:
-            if configured_logo_url.startswith(('http://', 'https://', 'file://', 'data:')):
-                return configured_logo_url
-            if configured_logo_url.startswith('/'):
-                api_base = os.getenv('ZORO9X_PUBLIC_API_URL', '').strip()
-                if not api_base:
-                    server_url_file = Path(__file__).resolve().parent.parent / 'server_api_url.txt'
-                    if server_url_file.exists():
-                        try:
-                            api_base = (server_url_file.read_text(encoding='utf-8') or '').strip()
-                        except Exception:
-                            api_base = ''
-                if not api_base:
-                    api_base = 'https://www.zoro9x.com'
-                return f"{api_base.rstrip('/')}{configured_logo_url}"
+        # 3. APP_DIR/logo.png  (same as DEFAULT_LOCAL_LOGO_PATH in the main app)
+        app_dir = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent
+        for fallback_name in ('logo.png', 'pms_logo.png'):
+            candidate = app_dir / fallback_name
+            if candidate.exists():
+                return candidate.as_uri()
 
+        # 4. pawn_ticket folder
         for fallback_name in ('logo.png', 'pms_logo.png'):
             try:
                 fallback_logo_path = Path(self._resolve_ticket_asset_path(fallback_name))
@@ -1029,3 +1041,266 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
         except Exception as e:
             messagebox.showerror('Print Error', f'Could not open print preview:\n{str(e)}')
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Auction / Letter of Notice
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _build_notice_html(self, notice_type='letter'):
+        """
+        Build HTML for:
+          notice_type='letter'  → Letter of Notice  (30-day warning)
+          notice_type='auction' → Auction Notice     (7-day final warning)
+        """
+        loan  = self.loan
+        items = self.items or []
+        logo_src       = self._get_logo_src()
+        company_name   = (get_setting('company_name',    '') or '').strip() or 'Gold Loan Center'
+        company_phone  = (get_setting('company_phone',   '') or '').strip()
+        company_address= (get_setting('company_address', '') or '').strip()
+        branch         = 'Kolonna'
+
+        ticket_no   = loan.get('ticket_no', '')
+        cust_name   = loan.get('customer_name', '')
+        advance_amt = loan.get('advance_amount') or loan.get('loan_amount') or 0
+        today_str   = datetime.now().strftime('%Y-%m-%d')
+
+        # Article description for the notice body
+        article_lines = []
+        for it in items:
+            desc = it.get('description') or ''
+            wt   = it.get('total_weight') or ''
+            at   = it.get('article_type') or ''
+            ct   = it.get('carat') or ''
+            article_lines.append(f"{at} ({ct}K) {desc} — {wt}g".strip(' —'))
+        articles_text = '; '.join(article_lines) if article_lines else '-'
+
+        logo_html = (
+            f'<img src="{logo_src}" alt="{html_escape.escape(company_name)}" class="logo-img">'
+            if logo_src else
+            f'<div class="logo-text">{html_escape.escape(company_name)}</div>'
+        )
+
+        if notice_type == 'auction':
+            doc_title_si = 'වෙන්දේසි නිවේදනය'
+            doc_title_en = 'Auction Notice'
+            doc_title_ta = 'ஏல அறிவித்தல்'
+            days_given   = '07'
+            extra_fields = f'''
+            <tr>
+              <td class="field-label">වෙන්දේසි දිනය / Auction Date / ஏலத் திகதி</td>
+              <td class="field-colon">:</td>
+              <td class="field-value">&nbsp;</td>
+            </tr>'''
+            body_si = (
+                'ඔබ විසින් අප ආයතනයේ උකස් තබන ලද රත් භාණ්ඩ සඳහා ගිවිසගත් නියමිත කාලය ඉකුත්ව ගොස් '
+                'ඇත. මේ දක්වා එම භාණ්ඩ ගැනීමට හෝ පොලිය ගෙවා අලුත් කිරීමට ඔබ අපොහොසත් ව ඇති '
+                'නිසාවෙන් උකස් පනත යටතේ 85 වන වගන්තිය ප්‍රකාරව රන් භාණ්ඩ මෙම ලිපියේ සඳහන් දින සිට '
+                f'දින {days_given} ක් ඇතුළත බෙරා ගැනීමට හෝ පොලිය ගෙවා අලුත් කිරීමට කටයුතු කරන '
+                'මෙන් දන්වා සිටිමු. එසේ නොකළහොත් ඒ භාණ්ඩ වෙන්දේසියේ විකිණීමට සිදුවන බව වැඩිදුරටත් '
+                'දන්වා සිටිමු.'
+            )
+            body_en = (
+                'We write to inform you that you have failed to redeem or renew the articles, even after '
+                'the contract period has lapsed. Accordingly, as per Section 85 of the Mortgage Act of '
+                'the Democratic Socialist Republic of Sri Lanka, please make immediate arrangements to '
+                f'renew or redeem the said articles within {days_given} days from the date of this letter. '
+                'If no action is taken, please know these items will be sold at a auction.'
+            )
+            body_ta = (
+                'நாங்கள் உங்களுக்கு தகவல் அளிக்கிறோம், உங்கள் ஒப்பந்தக் காலம் முடிந்த பிறகும் கூட, '
+                'நீங்கள் பொருட்களை மீட்டுக் கொள்ளவோ புதுப்பிக்கவோ தவறியுள்ளீர்கள். இதற்கொவாத, '
+                'இலங்கை ஜனநாயக சோசலிசக் குடியரசின் கடன் சட்டத்தின் 85ம் பிரிவின் படி, இந்தக் கடிதம் '
+                f'பெற்று நாளிலிருந்து {days_given} நாட்களுக்குள் குறிப்பிடப்பட்ட பொருட்களை புதுப்பிக்கவோ '
+                'மீட்டுக் கொள்ளவோ உடனடியாக ஏற்பாடுகளை செய்யுமாறு கேட்டுக்கொள்கிறோம். எந்த '
+                'நடவடிக்கையும் எடுக்கப்படாவிடின், இந்தப் பொருட்கள் ஏலத்தில் விற்பனை '
+                'செய்யப்படுவதாக உங்களுக்குத் தெரிவிக்கிறோம்.'
+            )
+        else:  # letter of notice
+            doc_title_si = 'නිවේදන දැන්වීම'
+            doc_title_en = 'Letter of Notice'
+            doc_title_ta = 'அறிவிப்பு கடிதம்'
+            days_given   = '30'
+            extra_fields = ''
+            body_si = (
+                'ඔබ විසින් අප ආයතනයේ උකස් තබන ලද රන් භාණ්ඩ සඳහා ගිවිසගත් නියමිත කාලය ඉකුත්ව ගොස් '
+                'ඇත. මේ දක්වා ඒ භාණ්ඩ ගැනීමට හෝ පොලිය ගෙවා අලුත් කිරීමට ඔබ අපොහොසත් ව ඇති '
+                'නිසාවෙන් උකස් පනත යටතේ 85 වන වගන්තිය ප්‍රකාරව රත් භාණ්ඩ මෙම ලිපියේ සඳහන් දින සිට '
+                f'දින {days_given} ක් ඇතුළත බෙරා ගැනීමට හෝ පොලිය ගෙවා අලුත් කිරීමට කටයුතු කරන '
+                'මෙන් දන්වා සිටිමු. එසේ නොකළහොත් ඒ භාණ්ඩ වෙන්දේසියේ විකිණීමට සිදුවන බව '
+                'වැඩිදුරටත් දන්වා සිටිමු.'
+            )
+            body_en = (
+                'We write to inform you that you have failed to redeem or renew the articles, even after '
+                'the contract period has lapsed. Accordingly, as per Section 85 of the Mortgage Act of '
+                'the Democratic Socialist Republic of Sri Lanka, please make immediate arrangements to '
+                f'renew or redeem the said articles within {days_given} days from the date of this letter. '
+                'If no action is taken, please be informed that these items will be sold at an auction.'
+            )
+            body_ta = (
+                'நாங்கள் உங்களுக்கு தகவல் தெரிவிக்கிறோம், உங்கள் ஒப்பந்தக் காலம் முடிந்த பிறகும், '
+                'நீங்கள் தங்க நகைகளை மீட்டுக் கொள்ளவோ புதுப்பிக்கவோ தவறியுள்ளீர்கள். இதற்கொவாத, '
+                'இலங்கை ஜனநாயக சோசலிசக் குடியரசின் கடன் சட்டத்தின் 85ம் பிரிவின் படி, இந்தக் கடிதம் '
+                f'பெற்று நாளிலிருந்து {days_given} நாட்களுக்குள் குறிப்பிடப்பட்ட தங்க நகைகளை புதுப்பிக்கவோ '
+                'மீட்டுக் கொள்ளவோ உடனடியாக ஏற்பாடுகளை செய்யுமாறு கேட்டுக்கொள்கிறோம். எந்த '
+                'நடவடிக்கையும் எடுக்கப்படாவிடின், இந்த தங்க நகைகளை ஏலத்தில் விற்பனை '
+                'செய்யப்படுவதாக உங்களுக்குத் தெரிவிக்கிறோம்.'
+            )
+
+        footer_si = (
+            'ඔබ දැනටමත් පොලිය ගෙවා රන් භාණ්ඩ යාවත්කාලීන කර ඇත්නම් මෙම ලිපිය නොසලකා හරිත්න. / '
+            'Please ignore this letter if you have already paid the interest and renewed the articles. / '
+            'இந்தக் கடிதத்தைப் பெறுவதற்கு முன்பாகவே நீங்கள் வட்டியை செலுத்தி நகைகளை '
+            'புதுப்பித்திருந்தால், இந்தக் கடிதத்தைப் புறக்கணிக்கவும்.'
+        )
+
+        html = f'''<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>{doc_title_en} — {html_escape.escape(ticket_no)}</title>
+<style>
+  @page {{ size: A4; margin: 12mm 8mm 5mm 8mm; }}
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: "Segoe UI", Arial, sans-serif; font-size: 10.5pt; color: #111; background: #fff; }}
+  .page {{ max-width: 170mm; margin: 0 auto; }}
+
+  /* Header */
+  .header {{ text-align: center; margin-bottom: 10px; }}
+  .logo-img {{ max-height: 80px; max-width: 200px; object-fit: contain; margin-bottom: 4px; }}
+  .logo-text {{ font-size: 22pt; font-weight: 700; letter-spacing: 1px; }}
+  .company-sub {{ font-size: 8pt; color: #555; margin-bottom: 4px; }}
+  .doc-title {{
+    font-size: 11.5pt; font-weight: 700; border-top: 1.5px solid #111;
+    border-bottom: 1.5px solid #111; padding: 4px 0; margin: 8px 0 14px;
+    text-align: center; letter-spacing: 0.5px;
+  }}
+
+  /* Fields */
+  .fields-table {{ width: 100%; border-collapse: collapse; margin-bottom: 14px; }}
+  .fields-table td {{ padding: 2px 4px; vertical-align: top; }}
+  .field-label {{ width: 52%; font-size: 8pt; }}
+  .field-colon {{ width: 4px; text-align: center; }}
+  .field-value {{ font-weight: 600; font-size: 8pt; }}
+  .dear-row {{ margin-bottom: 10px; font-size: 8pt; }}
+  .dear-row span {{ display: block; }}
+
+  /* Body paragraphs */
+  .body-para {{ margin-bottom: 11px; font-size: 9pt; line-height: 1.65; text-align: justify; }}
+  .body-para.si {{ font-family: "Iskoola Pota", "Nirmala UI", Arial, sans-serif; }}
+  .body-para.ta {{ font-family: "Latha", "Nirmala UI", Arial, sans-serif; }}
+
+  /* Closing */
+  .closing {{ margin-top: 18px; font-size: 9pt; }}
+  .closing span {{ display: block; margin-bottom: 2px; }}
+  .sign-block {{ margin-top: 28px; font-size: 9pt; }}
+  .sign-line {{ border-top: 1px solid #333; width: 160px; margin-bottom: 4px; margin-top: 60px; }}
+  .sign-block p {{ margin-bottom: 2px; }}
+
+  /* Footer notice */
+  .footer-notice {{
+    margin-top: 22px; padding-top: 8px; border-top: 1px dashed #aaa;
+    font-size: 8.5pt; color: #444; line-height: 1.6; font-style: italic;
+  }}
+
+  @media print {{
+    .no-print {{ display: none !important; }}
+    body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+  }}
+</style>
+</head>
+<body>
+<div class="no-print" style="padding:10px;background:#f0f0f0;margin-bottom:14px;display:flex;gap:10px;">
+  <button onclick="window.print()" style="padding:8px 20px;font-size:11pt;cursor:pointer;">🖨 Print</button>
+  <button onclick="window.close()" style="padding:8px 20px;font-size:11pt;cursor:pointer;">✕ Close</button>
+</div>
+<div class="page">
+  <!-- Logo & Title -->
+  <div class="header">
+    {logo_html}
+    {'<div class="company-sub">' + html_escape.escape(company_address) + '</div>' if company_address else ''}
+    {'<div class="company-sub">' + html_escape.escape(company_phone) + '</div>' if company_phone else ''}
+  </div>
+
+  <div class="doc-title">
+    {html_escape.escape(doc_title_si)} / {html_escape.escape(doc_title_en)} / {html_escape.escape(doc_title_ta)}
+  </div>
+
+  <!-- Fields -->
+  <table class="fields-table">
+    <tr>
+      <td class="field-label">දිනය / Date / திகதி</td>
+      <td class="field-colon">:</td>
+      <td class="field-value">{html_escape.escape(today_str)}</td>
+    </tr>
+    <tr>
+      <td class="field-label">ශාඛාව / Branch / கிளை</td>
+      <td class="field-colon">:</td>
+      <td class="field-value">{html_escape.escape(branch)}</td>
+    </tr>
+  </table>
+
+  <div class="dear-row">
+    <span>මහත්මයාණනි/මහත්මියයනි,</span>
+    <span>Dear Sir / Madam,</span>
+    <span>மாண்புமிகு ஐயா / அம்மணி :</span>
+  </div>
+
+  <table class="fields-table">
+    <tr>
+      <td class="field-label">ගනුදෙනුකරුගේ නම / Customer's Name / வாடிக்கையாளர் பெயர்</td>
+      <td class="field-colon">:</td>
+      <td class="field-value">{html_escape.escape(cust_name)}</td>
+    </tr>
+    <tr>
+      <td class="field-label">රන් ණය කුවිතාන්සි අංකය / Gold Loan Ticket Number / தங்க கடன் டிக்கெட் எண்</td>
+      <td class="field-colon">:</td>
+      <td class="field-value">{html_escape.escape(ticket_no)}</td>
+    </tr>
+    <tr>
+      <td class="field-label">අත්තිකාරම් මුදල / Advance Amount / முற்பணம்</td>
+      <td class="field-colon">:</td>
+      <td class="field-value">Rs. {float(advance_amt):,.2f}</td>
+    </tr>
+    {extra_fields}
+  </table>
+
+  <!-- Body paragraphs — trilingual -->
+  <p class="body-para si">{html_escape.escape(body_si)}</p>
+  <p class="body-para">{html_escape.escape(body_en)}</p>
+  <p class="body-para ta">{html_escape.escape(body_ta)}</p>
+
+  <!-- Closing -->
+  <div class="closing">
+    <span>මේයට විශ්වාසී,</span>
+    <span>Your faithfully,</span>
+    <span>அன்புடன்,</span>
+  </div>
+
+  <div class="sign-block">
+    <div class="sign-line"></div>
+    <p>බලයලත් නිලධාරී - රන් ණය</p>
+    <p>Authorized officer - Gold Loan</p>
+    <p>அங்கீகரிக்கப்பட்ட அதிகாரி - தங்க கடன்</p>
+  </div>
+
+  <div class="footer-notice">
+    {html_escape.escape(footer_si)}
+  </div>
+</div>
+</body>
+</html>'''
+        return html
+
+    def _open_notice_preview(self, notice_type='letter'):
+        try:
+            html_content = self._build_notice_html(notice_type)
+            html_path = self._write_temp_html(html_content)
+            titles = {'letter': 'Letter of Notice', 'auction': 'Auction Notice'}
+            title = f"{titles.get(notice_type, 'Notice')} - {self.loan.get('ticket_no', '')}"
+            if self._try_open_webview(html_path, title, print_on_open=False):
+                return
+            webbrowser.open(Path(html_path).as_uri())
+        except Exception as exc:
+            messagebox.showerror('Notice Error', f'Could not open notice:\n{exc}')

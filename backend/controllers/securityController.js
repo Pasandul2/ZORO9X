@@ -102,12 +102,20 @@ async function logAuditEvent({ subscriptionId, deviceFingerprint, eventType, act
 /**
  * Generate secure license token
  */
-function generateLicenseToken(subscriptionId, deviceFingerprint) {
+function generateLicenseToken(subscriptionId, deviceFingerprint, endDate) {
+  let expires = Date.now() + (LICENSE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+  if (endDate) {
+    const endMs = new Date(endDate).getTime();
+    if (endMs < expires) {
+      expires = endMs;
+    }
+  }
   const payload = {
     sub_id: subscriptionId,
     device: deviceFingerprint,
     issued: Date.now(),
-    expires: Date.now() + (LICENSE_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000)
+    expires: expires,
+    sub_expires: endDate ? new Date(endDate).getTime() : null
   };
   
   const secret = process.env.OFFLINE_TOKEN_SECRET || process.env.JWT_SECRET || 'your-secret-key';
@@ -152,6 +160,17 @@ exports.activateDevice = async (req, res) => {
 
     const subscription = subscriptions[0];
 
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const subscriptionEndIso = subscription.end_date ? new Date(subscription.end_date).toISOString().slice(0, 10) : null;
+    const isCurrentActiveWindow = subscription.status === 'active' && (!subscriptionEndIso || subscriptionEndIso >= todayIso);
+
+    if (!isCurrentActiveWindow) {
+      return res.status(402).json({
+        success: false,
+        message: 'Subscription has expired. Please renew your subscription to continue.'
+      });
+    }
+
     // Check if device already activated
     const [existingDevices] = await pool.execute(
       `SELECT * FROM device_activations 
@@ -165,7 +184,7 @@ exports.activateDevice = async (req, res) => {
       
       if (device.status === 'active') {
         // Already activated, generate new token
-        const token = generateLicenseToken(subscription.id, device_fingerprint);
+        const token = generateLicenseToken(subscription.id, device_fingerprint, subscription.end_date);
         
         // Save token
         await pool.execute(
@@ -195,7 +214,7 @@ exports.activateDevice = async (req, res) => {
           [ip, device.id]
         );
 
-        const token = generateLicenseToken(subscription.id, device_fingerprint);
+        const token = generateLicenseToken(subscription.id, device_fingerprint, subscription.end_date);
         await pool.execute(
           `INSERT INTO license_tokens 
            (subscription_id, device_fingerprint, token, expires_at) 
@@ -239,7 +258,7 @@ exports.activateDevice = async (req, res) => {
       [subscription.id]
     );
 
-    const token = generateLicenseToken(subscription.id, device_fingerprint);
+    const token = generateLicenseToken(subscription.id, device_fingerprint, subscription.end_date);
 
     await pool.execute(
       `INSERT INTO license_tokens 
@@ -329,7 +348,17 @@ exports.validateApiKey = async (req, res) => {
     const subscriptionEndIso = subscription.end_date ? new Date(subscription.end_date).toISOString().slice(0, 10) : null;
     const isCurrentActiveWindow = subscription.status === 'active' && (!subscriptionEndIso || subscriptionEndIso >= todayIso);
 
-    if (recentPayments.length > 0 && paymentStatus !== 'completed' && !isCurrentActiveWindow) {
+    if (!isCurrentActiveWindow) {
+      return res.status(402).json({
+        success: false,
+        valid: false,
+        message: `Subscription has expired. Please renew your subscription to continue.`,
+        subscription_status: subscription.status,
+        payment_status: paymentStatus,
+      });
+    }
+
+    if (recentPayments.length > 0 && paymentStatus !== 'completed') {
       return res.status(402).json({
         success: false,
         valid: false,
@@ -572,7 +601,7 @@ exports.validateApiKey = async (req, res) => {
 
     // Generate new token
     const token = device_fingerprint 
-      ? generateLicenseToken(subscription.id, device_fingerprint)
+      ? generateLicenseToken(subscription.id, device_fingerprint, subscription.end_date)
       : null;
 
     // Save token if generated

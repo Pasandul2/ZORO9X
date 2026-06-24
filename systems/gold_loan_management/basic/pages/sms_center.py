@@ -78,6 +78,7 @@ SMS_PLACEHOLDERS = [
     ('⏳ Expire Date', '{{expire_date}}'),
     ('📌 Loan Status', '{{loan_status}}'),
     ('💵 Total Payable', '{{total_payable}}'),
+    ('📊 Total Interest', '{{total_interest}}'),
     ('🎂 Birthday Date', '{{birthday_date}}'),
     ('🏢 Company Name', '{{company_name}}'),
     ('📞 Company Phone', '{{company_phone}}'),
@@ -85,6 +86,25 @@ SMS_PLACEHOLDERS = [
     ('📆 Current Date', '{{date}}'),
     ('🕐 Current Time', '{{time}}'),
     ('💬 Message', '{{message}}'),
+    # ── Payment & Renewal Fields ──
+    ('💰 Payment Amount', '{{payment_amount}}'),
+    ('🆕 New Loan Amount', '{{new_loan_amount}}'),
+    ('📉 Normal Interest Due', '{{normal_interest_due}}'),
+    ('⚠️ Overdue Interest Due', '{{overdue_interest_due}}'),
+    ('🔽 Principal Reduction', '{{principal_reduction}}'),
+    ('🆕 New Interest Rate', '{{new_interest_rate}}'),
+    ('🆕 New Assessed Value', '{{new_assessed_value}}'),
+    # ── All Interest Fields ──
+    ('💹 Interest Principal Amt', '{{interest_principal_amount}}'),
+    ('📊 Overdue Interest Rate', '{{overdue_interest_rate}}'),
+    ('💸 OD Interest Amount', '{{od_interest}}'),
+    ('🔧 Service Charge Rate', '{{service_charge_rate}}'),
+    ('🔧 Service Charge Amount', '{{service_charge_amount}}'),
+    # ── Additional Loan Fields ──
+    ('💵 Advance Amount', '{{advance_amount}}'),
+    ('⚖️ Customer Balance', '{{customer_balance_amount}}'),
+    ('🏅 Total Gold Weight', '{{total_gold_weight}}'),
+    ('📦 Total Item Weight', '{{total_item_weight}}'),
 ]
 
 AUTO_EVENTS = [
@@ -968,12 +988,26 @@ class SmsCenterPage:
             tk.Label(event_card, text=description, font=('Segoe UI', 9),
                      bg=self.MC.surface_alt, fg=self.MC.text_muted).pack(anchor='w', padx=16, pady=(0, 6))
 
-            tk.Label(event_card, text='Template:', font=('Segoe UI', 9, 'bold'),
-                     bg=self.MC.surface_alt, fg=self.MC.text).pack(anchor='w', padx=16)
-            text_widget = self._message_box(event_card, height=10)
-            text_widget.pack(fill=tk.X, padx=16, pady=(4, 14))
+            tpl_label = tk.Label(event_card, text='Template:', font=('Segoe UI', 9, 'bold'),
+                     bg=self.MC.surface_alt, fg=self.MC.text)
+            tpl_label.pack(anchor='w', padx=16)
+
+            # Template editor row: text widget + placeholder panel side-by-side
+            tpl_row = tk.Frame(event_card, bg=self.MC.surface_alt)
+            tpl_row.pack(fill=tk.X, padx=16, pady=(4, 14))
+            tpl_row.grid_columnconfigure(0, weight=3)
+            tpl_row.grid_columnconfigure(1, weight=1)
+
+            text_widget = self._message_box(tpl_row, height=10)
+            text_widget.grid(row=0, column=0, sticky='nsew', padx=(0, 8))
             self._set_text(text_widget, self._template_body(template_cat, f'Dear {{{{customer_name}}}},\n\n{{{{message}}}}\n\nTicket: {{{{ticket_no}}}}\n{{{{company_name}}}}'))
             self.auto_event_texts[template_cat] = text_widget
+
+            # Placeholder panel for this event
+            ph_frame = tk.Frame(tpl_row, bg=self.MC.surface_alt)
+            ph_frame.grid(row=0, column=1, sticky='nsew')
+            event_placeholder = self._placeholder_panel(ph_frame, text_widget)
+            event_placeholder.pack(fill=tk.BOTH, expand=True)
 
         btn_row = tk.Frame(card, bg=self.MC.surface)
         btn_row.pack(fill=tk.X, padx=16, pady=(0, 14))
@@ -1058,26 +1092,29 @@ class SmsCenterPage:
         tk.Label(left, textvariable=self.promo_count_var, font=('Segoe UI', 8),
                  bg=self.MC.surface, fg=self.MC.text_muted).pack(anchor='w', pady=(4, 0))
 
-        # Right — Message composer
+        # Right — Message composer with placeholder panel
         right = tk.Frame(body, bg=self.MC.surface)
         right.grid(row=0, column=1, sticky='nsew')
+        right.grid_columnconfigure(0, weight=3)
+        right.grid_columnconfigure(1, weight=1)
+        right.grid_rowconfigure(1, weight=1)
 
-        tk.Label(right, text='✉️  Promotion Message', font=('Segoe UI', 10, 'bold'),
+        # Composer area (left)
+        composer_area = tk.Frame(right, bg=self.MC.surface)
+        composer_area.grid(row=0, column=0, rowspan=3, sticky='nsew', padx=(0, 8))
+
+        tk.Label(composer_area, text='✉️  Promotion Message', font=('Segoe UI', 10, 'bold'),
                  bg=self.MC.surface, fg=self.MC.text).pack(anchor='w', pady=(0, 6))
 
-        self.promo_message_text = self._message_box(right, height=10)
+        self.promo_message_text = self._message_box(composer_area, height=10)
         self.promo_message_text.pack(fill=tk.BOTH, expand=True)
         self._set_text(self.promo_message_text,
                        self._template_body('promotion', '{{company_name}} has a special offer for you!\n\nContact us today for exclusive gold loan rates.\n\n📞 {{company_phone}}'))
 
-        counter_lbl = self._char_counter(right, self.promo_message_text)
+        counter_lbl = self._char_counter(composer_area, self.promo_message_text)
         counter_lbl.pack(anchor='e', pady=(4, 0))
 
-        tk.Label(right, text='Placeholders: {{customer_name}}, {{company_name}}, {{company_phone}}, {{date}}',
-                 font=('Segoe UI', 8), bg=self.MC.surface,
-                 fg=self.MC.text_muted, wraplength=500).pack(anchor='w', pady=(4, 0))
-
-        btn_row = tk.Frame(right, bg=self.MC.surface)
+        btn_row = tk.Frame(composer_area, bg=self.MC.surface)
         btn_row.pack(fill=tk.X, pady=(10, 0))
         self._modern_button(btn_row, 'Preview', self._preview_promo_sms,
                             kind='ghost', width=10, pady=8, icon='👁️').pack(side=tk.LEFT, padx=(0, 6))
@@ -1085,6 +1122,12 @@ class SmsCenterPage:
                             kind='ghost', width=12, pady=8, icon='💾').pack(side=tk.LEFT, padx=(0, 6))
         self._modern_button(btn_row, 'Send Promotion', self._send_promotion_sms,
                             kind='primary', width=16, pady=8, icon='📤').pack(side=tk.LEFT)
+
+        # Placeholder panel (right column)
+        ph_frame = tk.Frame(right, bg=self.MC.surface)
+        ph_frame.grid(row=0, column=1, rowspan=3, sticky='nsew')
+        promo_placeholder_panel = self._placeholder_panel(ph_frame, self.promo_message_text)
+        promo_placeholder_panel.pack(fill=tk.BOTH, expand=True)
 
         self._refresh_promo_customers()
 

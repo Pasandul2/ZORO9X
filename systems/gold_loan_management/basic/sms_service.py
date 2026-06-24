@@ -13,6 +13,7 @@ from database import (
     get_sms_settings,
     log_sms_message,
 )
+from utils import calculate_total_payable
 
 
 TEXTLK_DEFAULT_URL = 'https://app.text.lk/api/v3/sms/send'
@@ -87,6 +88,25 @@ def build_sms_context(customer=None, loan=None, message=''):
         'renew_date': '',
         'expire_date': '',
         'total_payable': '',
+        'total_interest': '',
+        # New loan fields
+        'advance_amount': '',
+        'interest_principal_amount': '',
+        'overdue_interest_rate': '',
+        'service_charge_rate': '',
+        'service_charge_amount': '',
+        'customer_balance_amount': '',
+        'total_gold_weight': '',
+        'total_item_weight': '',
+        # Renewal / payment fields
+        'payment_amount': '',
+        'new_loan_amount': '',
+        'normal_interest_due': '',
+        'overdue_interest_due': '',
+        'principal_reduction': '',
+        'new_interest_rate': '',
+        'new_assessed_value': '',
+        'od_interest': '',
     }
 
     if customer:
@@ -109,6 +129,17 @@ def build_sms_context(customer=None, loan=None, message=''):
         # Simple payable projection used in templates: principal + normal interest for duration.
         total_payable = principal + (principal * (monthly_rate_pct / 100.0) * duration_months)
 
+        # Accurate total interest = accrued interest + overdue interest (actual current values)
+        _principal_base = _to_float(loan.get('interest_principal_amount') or loan.get('loan_amount'))
+        _accrual_start = loan.get('renew_date') or loan.get('issue_date') or ''
+        _expire_date = loan.get('expire_date') or ''
+        _payable = calculate_total_payable(
+            _principal_base, monthly_rate_pct, duration_months,
+            _to_float(loan.get('overdue_interest_rate', 0)),
+            _expire_date, _accrual_start
+        )
+        total_interest = round(_payable['interest'] + _payable['overdue_interest'], 2)
+
         context.update({
             'loan_id': loan.get('id', ''),
             'ticket_no': loan.get('ticket_no', ''),
@@ -121,9 +152,28 @@ def build_sms_context(customer=None, loan=None, message=''):
             'renew_date': loan.get('renew_date', ''),
             'expire_date': loan.get('expire_date', ''),
             'total_payable': f"{total_payable:.2f}",
+            'total_interest': f"{total_interest:.2f}",
             'customer_name': loan.get('customer_name', context.get('customer_name', '')),
             'customer_nic': loan.get('customer_nic', context.get('customer_nic', '')),
             'customer_phone': loan.get('customer_phone', context.get('customer_phone', '')),
+            # New loan fields from loans table
+            'advance_amount': loan.get('advance_amount', ''),
+            'interest_principal_amount': loan.get('interest_principal_amount', ''),
+            'overdue_interest_rate': loan.get('overdue_interest_rate', ''),
+            'service_charge_rate': loan.get('service_charge_rate', ''),
+            'service_charge_amount': loan.get('service_charge_amount', ''),
+            'customer_balance_amount': loan.get('customer_balance_amount', ''),
+            'total_gold_weight': loan.get('total_gold_weight', ''),
+            'total_item_weight': loan.get('total_item_weight', ''),
+            # Renewal-specific fields (from loan_renewals or passed in loan dict)
+            'payment_amount': loan.get('payment_amount', ''),
+            'new_loan_amount': loan.get('new_loan_amount', ''),
+            'normal_interest_due': loan.get('normal_interest_due', ''),
+            'overdue_interest_due': loan.get('overdue_interest_due', ''),
+            'principal_reduction': loan.get('principal_reduction', ''),
+            'new_interest_rate': loan.get('new_interest_rate', ''),
+            'new_assessed_value': loan.get('new_assessed_value', ''),
+            'od_interest': loan.get('od_interest', loan.get('overdue_interest_amount', '')),
         })
 
     return context

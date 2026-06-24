@@ -1034,20 +1034,33 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
 
                 
 
-                <button
-                  onClick={() => navigate(`/client-dashboard/renewal/${selectedSubscription.id}`)}
-                  className={`${showRenewalAction ? 'bg-red-600 hover:bg-red-500' : 'bg-purple-600 hover:bg-purple-500'} text-white px-5 py-3 rounded-lg font-semibold mr-3`}
-                >
-                  Renewal & Payment Verification
-                </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => navigate(`/client-dashboard/renewal/${selectedSubscription.id}`)}
+                    className={`${showRenewalAction ? 'bg-red-600 hover:bg-red-500' : 'bg-purple-600 hover:bg-purple-500'} text-white px-5 py-3 rounded-lg font-semibold`}
+                  >
+                    Renewal & Payment Verification
+                  </button>
 
-                {!showRenewalAction && (
-                  <span className={`inline-block text-sm px-3 py-2 rounded-lg ${
-                    darkMode ? 'bg-gray-800 text-gray-300 border border-gray-700' : 'bg-gray-100 text-gray-700 border border-gray-200'
-                  }`}>
-                    You can also renew early from this page.
-                  </span>
-                )}
+                  <button
+                    onClick={() => navigate(`/client-dashboard/renewal/${selectedSubscription.id}#history`)}
+                    className={`px-5 py-3 rounded-lg font-semibold border transition-colors ${
+                      darkMode
+                        ? 'bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700 hover:text-white'
+                        : 'bg-gray-100 hover:bg-gray-200 text-gray-800 border-gray-300'
+                    }`}
+                  >
+                    View Renewal History
+                  </button>
+
+                  {!showRenewalAction && (
+                    <span className={`text-sm px-3 py-2 rounded-lg ${
+                      darkMode ? 'bg-gray-800 text-gray-300 border border-gray-700' : 'bg-gray-100 text-gray-700 border border-gray-200'
+                    }`}>
+                      You can also renew early from this page.
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Business Information */}

@@ -25,6 +25,7 @@ interface SubscriptionDetails {
   start_date?: string;
   end_date?: string;
   next_billing_date?: string;
+  last_payment_date?: string;
   api_key?: string;
   subdomain?: string;
   database_name?: string;
@@ -149,6 +150,16 @@ const formatDate = (value?: string | null) => {
   return parsed.toLocaleString();
 };
 
+const toInputDate = (value?: string | null) => {
+  if (!value) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+};
+
 const formatCountdownDays = (days: number | null) => {
   if (days === null) return '-';
   if (days <= 0) return 'Expired';
@@ -175,11 +186,25 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'dates' | 'activity'>('overview');
   const [manageLoading, setManageLoading] = useState(false);
   const [manageNote, setManageNote] = useState('');
   const [extendDays, setExtendDays] = useState(30);
   const [setEndDate, setSetEndDate] = useState('');
+
+  const [startDateVal, setStartDateVal] = useState('');
+  const [endDateVal, setEndDateVal] = useState('');
+  const [nextBillingDateVal, setNextBillingDateVal] = useState('');
+  const [lastPaymentDateVal, setLastPaymentDateVal] = useState('');
+
+  useEffect(() => {
+    if (dashboard?.subscription) {
+      setStartDateVal(toInputDate(dashboard.subscription.start_date));
+      setEndDateVal(toInputDate(dashboard.subscription.end_date));
+      setNextBillingDateVal(toInputDate(dashboard.subscription.next_billing_date));
+      setLastPaymentDateVal(toInputDate(dashboard.subscription.last_payment_date));
+    }
+  }, [dashboard]);
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -378,11 +403,12 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
           {[
             { id: 'overview', label: 'Overview' },
             { id: 'manage', label: 'Manage Subscription' },
+            { id: 'dates', label: 'Manage Dates' },
             { id: 'activity', label: 'Renewals & Activity' },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as 'overview' | 'manage' | 'activity')}
+              onClick={() => setActiveTab(tab.id as 'overview' | 'manage' | 'dates' | 'activity')}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 activeTab === tab.id
                   ? 'bg-cyan-600 text-white'
@@ -418,6 +444,7 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
             <DetailRow label="Price" value={`$${toCurrency(subscription.price)}`} />
             <DetailRow label="Start Date" value={formatDate(subscription.start_date)} />
             <DetailRow label="End Date" value={formatDate(subscription.end_date)} />
+            <DetailRow label="Recent Renewal" value={formatDate(subscription.last_payment_date)} />
             <DetailRow label="Next Billing" value={formatDate(subscription.next_billing_date)} />
           </Panel>
 
@@ -556,6 +583,132 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
                       Set End Date
                     </button>
                   </div>
+                </div>
+              </div>
+            </Panel>
+          </div>
+        )}
+
+        {activeTab === 'dates' && (
+          <div className="grid lg:grid-cols-2 gap-6 mb-6">
+            <Panel darkMode={darkMode} title="Current Dates Overview">
+              <div className="space-y-4">
+                <DetailRow label="Subscription Start Date" value={formatDate(subscription.start_date)} />
+                <DetailRow label="Subscription End Date" value={formatDate(subscription.end_date)} />
+                <DetailRow label="Recent Renewal (Payment) Date" value={formatDate(subscription.last_payment_date)} />
+                <DetailRow label="Next Billing (Renew) Date" value={formatDate(subscription.next_billing_date)} />
+                <div className={`p-4 rounded-xl border mt-6 ${darkMode ? 'bg-gray-900/40 border-gray-700 text-gray-300' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
+                  <h3 className="font-semibold text-sm mb-2 text-purple-400">Note on Date Rules:</h3>
+                  <ul className="list-disc pl-5 text-xs space-y-1 text-gray-400">
+                    <li>Changing the End Date updates the subscription state automatically.</li>
+                    <li>If the End Date is set to a past date, the system status shifts to <span className="text-red-400 font-semibold">Expired</span>.</li>
+                    <li>Setting Next Billing Date is optional (can be cleared for lifetime plans).</li>
+                  </ul>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel darkMode={darkMode} title="Modify Subscription Dates">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-1 text-gray-400">Start Date</label>
+                  <input
+                    type="date"
+                    value={startDateVal}
+                    onChange={(e) => setStartDateVal(e.target.value)}
+                    className={`w-full rounded-lg p-2.5 text-sm border ${
+                      darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold mb-1 text-gray-400">End Date</label>
+                  <input
+                    type="date"
+                    value={endDateVal}
+                    onChange={(e) => setEndDateVal(e.target.value)}
+                    className={`w-full rounded-lg p-2.5 text-sm border ${
+                      darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>                 <div>
+                  <label className="block text-sm font-semibold mb-1 text-gray-400">Next Billing (Renew) Date</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="date"
+                      value={nextBillingDateVal}
+                      onChange={(e) => setNextBillingDateVal(e.target.value)}
+                      className={`flex-1 rounded-lg p-2.5 text-sm border ${
+                        darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
+                      }`}
+                    />
+                    {nextBillingDateVal && (
+                      <button
+                        type="button"
+                        onClick={() => setNextBillingDateVal('')}
+                        className={`px-3 py-2.5 rounded-lg text-sm transition-colors border ${
+                          darkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 border-gray-200 hover:bg-gray-200 text-gray-700'
+                        }`}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold mb-1 text-gray-400">Recent Renewal (Payment) Date</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="date"
+                      value={lastPaymentDateVal}
+                      onChange={(e) => setLastPaymentDateVal(e.target.value)}
+                      className={`flex-1 rounded-lg p-2.5 text-sm border ${
+                        darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
+                      }`}
+                    />
+                    {lastPaymentDateVal && (
+                      <button
+                        type="button"
+                        onClick={() => setLastPaymentDateVal('')}
+                        className={`px-3 py-2.5 rounded-lg text-sm transition-colors border ${
+                          darkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 border-gray-200 hover:bg-gray-200 text-gray-700'
+                        }`}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold mb-1 text-gray-400">Optional Notification Note</label>
+                  <textarea
+                    value={manageNote}
+                    onChange={(e) => setManageNote(e.target.value)}
+                    placeholder="E.g., Adjusted billing cycle manually."
+                    className={`w-full h-20 rounded-lg p-3 text-sm border ${
+                      darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    disabled={manageLoading}
+                    onClick={() =>
+                      runManageAction('update_dates', {
+                        start_date: startDateVal,
+                        end_date: endDateVal,
+                        next_billing_date: nextBillingDateVal || null,
+                        last_payment_date: lastPaymentDateVal || null,
+                      })
+                    }
+                    className="w-full px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-sm font-semibold transition-colors"
+                  >
+                    {manageLoading ? 'Updating...' : 'Update Subscription Dates'}
+                  </button>
                 </div>
               </div>
             </Panel>

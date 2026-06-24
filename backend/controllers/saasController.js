@@ -2179,7 +2179,7 @@ exports.setSubscriptionStatusAdmin = async (req, res) => {
 exports.manageSubscriptionAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const { api_key, action, days, end_date, note, activated } = req.body || {};
+    const { api_key, action, days, start_date, end_date, next_billing_date, last_payment_date, note, activated } = req.body || {};
     const adminId = req.user?.id || null;
 
     if (!api_key || !action) {
@@ -2194,6 +2194,7 @@ exports.manageSubscriptionAdmin = async (req, res) => {
       'set_end_date',
       'lifetime',
       'set_activation',
+      'update_dates',
     ];
 
     if (!allowedActions.includes(action)) {
@@ -2324,6 +2325,51 @@ exports.manageSubscriptionAdmin = async (req, res) => {
       );
       message = nextActivated ? 'System activation enabled' : 'System activation disabled';
       details.is_activated = nextActivated;
+    }
+
+    if (action === 'update_dates') {
+      if (!start_date || Number.isNaN(new Date(start_date).getTime())) {
+        return res.status(400).json({ success: false, message: 'Valid start_date is required' });
+      }
+
+      if (!end_date || Number.isNaN(new Date(end_date).getTime())) {
+        return res.status(400).json({ success: false, message: 'Valid end_date is required' });
+      }
+
+      const formattedStartDate = new Date(start_date).toISOString().slice(0, 10);
+      const formattedEndDate = new Date(end_date).toISOString().slice(0, 10);
+      let formattedNextBillingDate = null;
+
+      if (next_billing_date) {
+        if (Number.isNaN(new Date(next_billing_date).getTime())) {
+          return res.status(400).json({ success: false, message: 'Valid next_billing_date is required' });
+        }
+        formattedNextBillingDate = new Date(next_billing_date).toISOString().slice(0, 10);
+      }
+
+      let formattedLastPaymentDate = null;
+      if (last_payment_date) {
+        if (Number.isNaN(new Date(last_payment_date).getTime())) {
+          return res.status(400).json({ success: false, message: 'Valid last_payment_date is required' });
+        }
+        formattedLastPaymentDate = new Date(last_payment_date).toISOString().slice(0, 19).replace('T', ' ');
+      }
+
+      const nextStatus = formattedEndDate < todayIso ? 'expired' : 'active';
+
+      await pool.execute(
+        `UPDATE client_subscriptions
+         SET status = ?, start_date = ?, end_date = ?, next_billing_date = ?, last_payment_date = ?, updated_at = NOW()
+         WHERE id = ? AND api_key = ?`,
+        [nextStatus, formattedStartDate, formattedEndDate, formattedNextBillingDate, formattedLastPaymentDate, id, api_key]
+      );
+
+      message = 'Subscription dates updated successfully';
+      details.start_date = formattedStartDate;
+      details.end_date = formattedEndDate;
+      details.next_billing_date = formattedNextBillingDate;
+      details.last_payment_date = formattedLastPaymentDate;
+      details.status = nextStatus;
     }
 
     await pool.execute(

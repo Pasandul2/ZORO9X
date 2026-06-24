@@ -1574,8 +1574,8 @@ class NewTicketPage:
                 customer = get_customer(self.customer_id)
                 loan_record = get_loan(loan_id)
                 if customer:
-                    template = get_sms_template('auto')
-                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
+                    template = get_sms_template('auto_new_loan')
+                    sms_body = template['body'] if template else 'Dear {{customer_name}},\n\nYour gold loan has been issued successfully.\n\nTicket: {{ticket_no}}\nAmount: Rs. {{loan_amount}}\nDuration: {{duration}} months\nExpiry: {{expire_date}}\n\nThank you,\n{{company_name}}'
                     sms_context = build_sms_context(
                         customer=customer,
                         loan=loan_record or loan_data,
@@ -1592,6 +1592,12 @@ class NewTicketPage:
                     )
         except Exception:
             pass
+
+        try:
+            from pages.loan_actions import _record_cash_for_loan
+            _record_cash_for_loan('new_loan', loan=loan_data, user_id=self.user['id'])
+        except Exception as e:
+            print(f"[CashMgmt] new_ticket error: {e}")
 
         # Check if custom assessed percentage was used - if so, request admin approval
         needs_approval = getattr(self, '_assessed_pct_user_edited', False)

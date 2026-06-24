@@ -135,6 +135,17 @@ const ClientRenewalPage: React.FC<ClientRenewalPageProps> = ({ darkMode }) => {
     fetchAll();
   }, [subscriptionId]);
 
+  useEffect(() => {
+    if (!loading && window.location.hash === '#history') {
+      const el = document.getElementById('history');
+      if (el) {
+        setTimeout(() => {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      }
+    }
+  }, [loading]);
+
   const handleSubmitRenewal = async () => {
     if (!token || !subscriptionId) return;
 
@@ -324,7 +335,7 @@ const ClientRenewalPage: React.FC<ClientRenewalPageProps> = ({ darkMode }) => {
           </button>
         </div>
 
-        <div className={`rounded-2xl p-6 border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <div id="history" className={`rounded-2xl p-6 border ${darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
           <h2 className="text-xl font-bold mb-4">Recent Renewal Requests</h2>
 
           {requests.length === 0 ? (

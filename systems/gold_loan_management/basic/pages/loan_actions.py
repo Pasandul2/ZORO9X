@@ -3,11 +3,91 @@
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
-from database import (get_loan, renew_loan, redeem_loan,
+from database import (get_loan, renew_loan, redeem_loan, get_loan_renewals,
                       get_duration_rate, add_audit_log, create_approval_request, get_setting, get_sms_template)
 from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, format_date, calculate_total_payable,
                    calculate_interest, get_expire_date, is_overdue)
+from database import add_cash_transaction, get_cash_balance
+
+
+def _latest_balance(db_path=None):
+    """Get the absolute latest balance_after from any transaction."""
+    return get_cash_balance(db_path=db_path)
+
+
+def _record_cash_for_loan(action, *, loan, user_id, amount=None, breakdown=None):
+    """Record cash transaction for loan actions if cash management is enabled.
+
+    Each insertion fetches the latest balance from DB so that intra-day
+    parallel operations never get stale balances.
+    """
+    try:
+        # Always record if the cash_register table exists (no settings gate)
+        # This ensures loan actions always update cash balance.
+        import sqlite3
+        from database import DB_FILE
+        conn = sqlite3.connect(DB_FILE)
+        table_exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='cash_register'"
+        ).fetchone() is not None
+        conn.close()
+        if not table_exists:
+            return
+
+        today = datetime.now().strftime('%Y-%m-%d')
+        ticket = loan.get('ticket_no', '')
+        ticket = loan.get('ticket_no', '')
+
+        def _ins(ttype, amt, desc):
+            """Insert one cash row with a live balance."""
+            bal = _latest_balance()
+            # Determine direction: most inflow types add to balance,
+            # outflow types subtract from balance
+            if ttype in ('loan_disbursement', 'owner_withdrawal', 'expense', 'other_out'):
+                bal -= amt
+            else:
+                # opening_balance, loan_payment, interest_income, owner_deposit, other_in
+                bal += amt
+            add_cash_transaction(today, ttype, amt, desc, bal, created_by=user_id)
+
+        if action == 'new_loan':
+            amt = amount or float(loan.get('loan_amount', 0))
+            _ins('loan_disbursement', amt, f'New loan disbursement — Ticket: {ticket}')
+
+        elif action == 'renewal':
+            if breakdown:
+                interest = float(breakdown.get('interest_applied', 0))
+                principal_red = float(breakdown.get('principal_reduction', 0))
+                if interest > 0:
+                    _ins('interest_income', interest,
+                         f'Renewal interest — Ticket: {ticket}')
+                if principal_red > 0:
+                    _ins('loan_payment', principal_red,
+                         f'Renewal principal reduction — Ticket: {ticket}')
+
+        elif action == 'redemption':
+            if breakdown:
+                interest_part = float(breakdown.get('interest_amount', 0))
+                overdue_part = float(breakdown.get('overdue_amount', 0))
+                other_part = float(breakdown.get('other_amount', 0))
+                principal_part = float(breakdown.get('principal_amount', 0))
+                total_interest = interest_part + overdue_part
+                if total_interest > 0:
+                    _ins('interest_income', total_interest,
+                         f'Redemption interest — Ticket: {ticket}')
+                if principal_part > 0:
+                    _ins('loan_payment', principal_part,
+                         f'Redemption principal — Ticket: {ticket}')
+                if other_part > 0:
+                    _ins('other_in', other_part,
+                         f'Redemption charges — Ticket: {ticket}')
+            else:
+                amt = amount or 0
+                _ins('loan_payment', amt,
+                     f'Loan redemption — Ticket: {ticket}')
+    except Exception as e:
+        print(f"[CashMgmt] Error recording {action}: {e}")  # Never block the main flow
 
 
 def _send_auto_sms_for_loan(loan, *, event_message, setting_key, user_id):
@@ -25,7 +105,35 @@ def _send_auto_sms_for_loan(loan, *, event_message, setting_key, user_id):
         'language': loan.get('customer_language', ''),
     }
     loan_context = dict(loan)
-    template = get_sms_template('auto')
+
+    # Merge latest renewal data into context for renewal-specific placeholders
+    # (payment_amount, new_loan_amount, normal_interest_due, overdue_interest_due, etc.)
+    if setting_key == 'sms_auto_renewal':
+        try:
+            renewals = get_loan_renewals(loan.get('id'))
+            if renewals:
+                latest_renewal = renewals[0]
+                loan_context.update({
+                    'payment_amount': latest_renewal.get('payment_amount', ''),
+                    'new_loan_amount': latest_renewal.get('new_loan_amount', ''),
+                    'normal_interest_due': latest_renewal.get('normal_interest_due', ''),
+                    'overdue_interest_due': latest_renewal.get('overdue_interest_due', ''),
+                    'principal_reduction': latest_renewal.get('principal_reduction', ''),
+                    'new_interest_rate': latest_renewal.get('new_interest_rate', ''),
+                    'new_assessed_value': latest_renewal.get('new_assessed_value', ''),
+                })
+        except Exception:
+            pass
+
+    # Map setting_key to the specific template category the user edits in SMS Center
+    _TEMPLATE_CATEGORY_MAP = {
+        'sms_auto_new_loan': 'auto_new_loan',
+        'sms_auto_renewal': 'auto_renewal',
+        'sms_auto_redemption': 'auto_redemption',
+        'sms_auto_reminder': 'auto_reminder',
+    }
+    template_cat = _TEMPLATE_CATEGORY_MAP.get(setting_key, 'auto')
+    template = get_sms_template(template_cat)
     sms_body = template['body'] if template else 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'
     sms_context = build_sms_context(customer=customer, loan=loan_context, message=event_message)
     sms_message = render_template(sms_body, sms_context)
@@ -473,6 +581,7 @@ class RenewLoanPage:
         )
         add_audit_log(self.user['id'], 'RENEW_LOAN', 'loan', self.loan_id, msg)
         if ok:
+            _record_cash_for_loan('renewal', loan=self.loan, user_id=self.user['id'], breakdown=breakdown)
             _send_auto_sms_for_loan(
                 self.loan,
                 event_message=f'Your loan {self.loan["ticket_no"]} has been renewed successfully for {months} month(s).',
@@ -764,6 +873,14 @@ class RedeemLoanPage:
         )
         add_audit_log(self.user['id'], 'REDEEM_LOAN', 'loan', self.loan_id, msg)
         if ok:
+            redeem_breakdown = {
+                'interest_amount': self.payable['interest'],
+                'overdue_amount': overdue_paid,
+                'other_amount': other_charges_paid,
+                'principal_amount': self.payable['loan_amount'],
+            }
+            _record_cash_for_loan('redemption', loan=self.loan, user_id=self.user['id'],
+                                  amount=total_paid, breakdown=redeem_breakdown)
             _send_auto_sms_for_loan(
                 self.loan,
                 event_message=f'Your loan {self.loan["ticket_no"]} has been redeemed successfully.',

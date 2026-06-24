@@ -282,6 +282,20 @@ def init_database(db_path=None):
         FOREIGN KEY (created_by) REFERENCES users(id)
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS cash_register (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_date TEXT NOT NULL,
+        transaction_type TEXT NOT NULL,
+        description TEXT,
+        amount REAL NOT NULL,
+        balance_after REAL NOT NULL DEFAULT 0,
+        reference_id INTEGER,
+        reference_type TEXT,
+        created_by INTEGER,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY (created_by) REFERENCES users(id)
+    )''')
+
     # Backward-compatible schema updates for existing databases.
     loan_cols = {row['name'] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
     if 'renew_date' not in loan_cols:
@@ -469,6 +483,9 @@ def init_database(db_path=None):
         'sms_auto_renewal': '0',
         'sms_auto_redemption': '0',
         'sms_auto_reminder': '0',
+        'cash_management_enabled': '0',
+        'cash_management_popup_mode': 'daily',
+        'cash_management_last_date': '',
     }
     for key, val in defaults.items():
         existing = c.execute("SELECT key FROM settings WHERE key=?", (key,)).fetchone()
@@ -481,7 +498,7 @@ def init_database(db_path=None):
             ('custom', 'Custom SMS', 'Dear {{customer_name}},\n\nThank you for choosing our service.\n\n{{company_name}}'),
             ('auto', 'Auto SMS', 'Dear {{customer_name}},\n\n{{message}}\n\nTicket: {{ticket_no}}\n{{company_name}}'),
             ('auto_new_loan', 'New Loan SMS', 'Dear {{customer_name}},\n\nYour gold loan has been issued successfully.\n\nTicket: {{ticket_no}}\nAmount: Rs. {{loan_amount}}\nDuration: {{duration}} months\nExpiry: {{expire_date}}\n\nThank you,\n{{company_name}}'),
-            ('auto_renewal', 'Renewal SMS', 'Dear {{customer_name}},\n\nYour gold loan {{ticket_no}} has been renewed successfully.\n\nNew Expiry: {{expire_date}}\n\nThank you,\n{{company_name}}'),
+            ('auto_renewal', 'Renewal SMS', 'Dear {{customer_name}},\n\nYour gold loan {{ticket_no}} has been renewed successfully.\n\nNew Expiry: {{expire_date}}\nPayment: Rs. {{payment_amount}}\nNew Loan Amount: Rs. {{new_loan_amount}}\nInterest Due: Rs. {{normal_interest_due}}\nOD Interest Due: Rs. {{overdue_interest_due}}\n\nThank you,\n{{company_name}}'),
             ('auto_redemption', 'Redemption SMS', 'Dear {{customer_name}},\n\nYour gold loan {{ticket_no}} has been redeemed successfully. Please collect your items.\n\nThank you,\n{{company_name}}'),
             ('auto_reminder', 'Reminder SMS', 'Dear {{customer_name}},\n\nThis is a reminder that your gold loan {{ticket_no}} is due for renewal.\n\nExpiry: {{expire_date}}\nAmount: Rs. {{loan_amount}}\n\nPlease visit us soon.\n{{company_name}}'),
             ('promotion', 'Promotion SMS', '{{company_name}} has a special offer for you. Contact us today.'),
@@ -930,7 +947,7 @@ def get_loan_items(loan_id, db_path=None):
     return [dict(r) for r in rows]
 
 
-def search_loans(query='', status='all', db_path=None):
+def search_loans(query='', status='all', sort_overdue=False, db_path=None):
     conn = get_connection(db_path)
     sql = '''SELECT l.*, c.name as customer_name, c.nic as customer_nic
              FROM loans l JOIN customers c ON l.customer_id = c.id WHERE 1=1'''
@@ -938,10 +955,19 @@ def search_loans(query='', status='all', db_path=None):
     if query:
         sql += " AND (l.ticket_no LIKE ? OR c.name LIKE ? OR c.nic LIKE ?)"
         params.extend([f'%{query}%'] * 3)
-    if status != 'all':
+    if status == 'overdue':
+        # Active/renewed loans whose expire_date is in the past
+        today = __import__('datetime').date.today().isoformat()
+        sql += " AND l.status IN ('active','renewed') AND l.expire_date < ?"
+        params.append(today)
+    elif status != 'all':
         sql += " AND l.status=?"
         params.append(status)
-    sql += " ORDER BY l.id DESC"
+    if sort_overdue:
+        # Most overdue first = earliest expire_date first
+        sql += " ORDER BY l.expire_date ASC"
+    else:
+        sql += " ORDER BY l.id DESC"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -1091,6 +1117,161 @@ def get_sms_settings(db_path=None):
     for row in rows:
         result[row['key']] = row['value']
     return result
+
+
+# ── Cash Management operations ──
+
+def add_cash_transaction(transaction_date, transaction_type, amount, description='',
+                         balance_after=0, reference_id=None, reference_type='',
+                         created_by=None, db_path=None):
+    conn = get_connection(db_path)
+    conn.execute('''INSERT INTO cash_register 
+        (transaction_date, transaction_type, amount, description, balance_after, reference_id, reference_type, created_by)
+        VALUES (?,?,?,?,?,?,?,?)''',
+                 (transaction_date, transaction_type, amount, description,
+                  balance_after, reference_id, reference_type, created_by))
+    conn.commit()
+    conn.close()
+
+
+def get_cash_transactions(transaction_date=None, transaction_type='', limit=500, db_path=None):
+    conn = get_connection(db_path)
+    query = "SELECT cr.*, u.full_name as created_by_name FROM cash_register cr LEFT JOIN users u ON cr.created_by = u.id WHERE 1=1"
+    params = []
+    if transaction_date:
+        query += " AND cr.transaction_date = ?"
+        params.append(transaction_date)
+    if transaction_type:
+        query += " AND cr.transaction_type = ?"
+        params.append(transaction_type)
+    query += " ORDER BY cr.id DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_cash_transactions_range(start_date, end_date, transaction_type='', limit=1000, db_path=None):
+    conn = get_connection(db_path)
+    query = ("SELECT cr.*, u.full_name as created_by_name FROM cash_register cr "
+             "LEFT JOIN users u ON cr.created_by = u.id WHERE cr.transaction_date >= ? AND cr.transaction_date <= ?")
+    params = [start_date, end_date]
+    if transaction_type:
+        query += " AND cr.transaction_type = ?"
+        params.append(transaction_type)
+    query += " ORDER BY cr.id DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_cash_summary(transaction_date, db_path=None):
+    """Return opening, total_in, total_out, and closing balance for a given date."""
+    conn = get_connection(db_path)
+    # Opening balance = closing balance from previous day
+    prev_date = (datetime.strptime(transaction_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+    prev = conn.execute(
+        "SELECT balance_after FROM cash_register WHERE transaction_date=? ORDER BY id DESC LIMIT 1",
+        (prev_date,)
+    ).fetchone()
+    opening = prev['balance_after'] if prev else 0.0
+
+    # Today's transactions
+    rows = conn.execute(
+        "SELECT transaction_type, amount FROM cash_register WHERE transaction_date=? ORDER BY id",
+        (transaction_date,)
+    ).fetchall()
+    
+    total_in = 0.0
+    total_out = 0.0
+    inflow_types = {'owner_deposit', 'loan_payment', 'interest_income', 'other_in'}
+    outflow_types = {'owner_withdrawal', 'loan_disbursement', 'expense', 'other_out'}
+    
+    for row in rows:
+        amt = float(row['amount'])
+        ttype = row['transaction_type']
+        if ttype == 'opening_balance':
+            continue  # opening balance is reflected in the 'opening' field
+        if ttype in inflow_types:
+            total_in += amt
+        elif ttype in outflow_types:
+            total_out += amt
+        else:
+            # Default: negative amounts are out, positive are in
+            if amt >= 0:
+                total_in += amt
+            else:
+                total_out += abs(amt)
+    
+    # Also check the last balance_after for today
+    last = conn.execute(
+        "SELECT balance_after FROM cash_register WHERE transaction_date=? ORDER BY id DESC LIMIT 1",
+        (transaction_date,)
+    ).fetchone()
+    closing = last['balance_after'] if last else opening
+    
+    conn.close()
+    return {
+        'opening': opening,
+        'total_in': total_in,
+        'total_out': total_out,
+        'closing': closing,
+    }
+
+
+def get_cash_balance(as_of_date=None, db_path=None):
+    """Get the latest cash balance up to and including as_of_date."""
+    conn = get_connection(db_path)
+    if as_of_date:
+        row = conn.execute(
+            "SELECT balance_after FROM cash_register WHERE transaction_date<=? ORDER BY id DESC LIMIT 1",
+            (as_of_date,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT balance_after FROM cash_register ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    conn.close()
+    return float(row['balance_after']) if row else 0.0
+
+
+def get_cash_balance_for_date(date_str, db_path=None):
+    """Get closing balance for a specific date only. Returns 0 if no transactions on that date."""
+    conn = get_connection(db_path)
+    row = conn.execute(
+        "SELECT balance_after FROM cash_register WHERE transaction_date=? ORDER BY id DESC LIMIT 1",
+        (date_str,)
+    ).fetchone()
+    conn.close()
+    return float(row['balance_after']) if row else 0.0
+
+
+def get_owner_transactions_summary(date_str=None, db_path=None):
+    """Return total owner deposits and withdrawals, optionally filtered to a specific date."""
+    conn = get_connection(db_path)
+    if date_str:
+        deposits = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM cash_register WHERE transaction_type='owner_deposit' AND transaction_date=?",
+            (date_str,)
+        ).fetchone()
+        withdrawals = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM cash_register WHERE transaction_type='owner_withdrawal' AND transaction_date=?",
+            (date_str,)
+        ).fetchone()
+    else:
+        deposits = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM cash_register WHERE transaction_type='owner_deposit'"
+        ).fetchone()
+        withdrawals = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM cash_register WHERE transaction_type='owner_withdrawal'"
+        ).fetchone()
+    conn.close()
+    return {
+        'total_deposits': float(deposits['total']),
+        'total_withdrawals': float(withdrawals['total']),
+        'net': float(deposits['total']) - float(withdrawals['total']),
+    }
 
 
 def get_sms_template(category, db_path=None):
