@@ -82,3 +82,8 @@ basic/
 ## Support
 
 For support, contact: support@zoro9x.com
+
+
+cd C:\ZORO9X\systems\gold_loan_management\basic
+$env:ZORO9X_DEV_BYPASS_LICENSE="1"; python gold_loan_app.py
+.\BUILD.bat

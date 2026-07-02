@@ -1219,6 +1219,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
   <!-- Logo & Title -->
   <div class="header">
     {logo_html}
+    <p><b>PMS GOLD LOAN</b></p>
     {'<div class="company-sub">' + html_escape.escape(company_address) + '</div>' if company_address else ''}
     {'<div class="company-sub">' + html_escape.escape(company_phone) + '</div>' if company_phone else ''}
   </div>
@@ -1244,7 +1245,7 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
   <div class="dear-row">
     <span>මහත්මයාණනි/මහත්මියයනි,</span>
     <span>Dear Sir / Madam,</span>
-    <span>மாண்புமிகு ஐயா / அம்மணி :</span>
+    <span>மாண்புமிகு ஐயா / அம்மணி ,</span>
   </div>
 
   <table class="fields-table">

@@ -17,7 +17,7 @@ from database import (get_all_market_rates, set_market_rate, get_all_duration_ra
                       search_loans, get_market_rate, create_customer, get_customer_by_nic, get_customer,
                       get_loan, get_sms_template,
                       create_loan, delete_loan, generate_ticket_no, add_audit_log,
-                      update_customer, add_cash_transaction, get_cash_balance)
+                      update_customer, add_cash_transaction, get_cash_balance, clear_cash_for_date)
 from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, calculate_market_value, calculate_assessed_value,
                    calculate_interest, get_expire_date)
@@ -1389,6 +1389,31 @@ class AdminSettingsPage:
         form = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
         form.pack(fill=tk.X, padx=14, pady=(0, 14))
 
+        # ── Today's Balance Display ──
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_balance = get_cash_balance(as_of_date=today_str)
+
+        balance_frame = tk.Frame(form, bg=self.theme.palette.bg_surface_alt,
+                                 highlightthickness=1, highlightbackground=self.theme.palette.border)
+        balance_frame.pack(fill=tk.X, pady=(0, 14))
+
+        inner_bal = tk.Frame(balance_frame, bg=self.theme.palette.bg_surface_alt)
+        inner_bal.pack(fill=tk.X, padx=14, pady=10)
+
+        tk.Label(inner_bal, text=f'📅 Today ({today_str})',
+                 font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface_alt,
+                 fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+
+        self._cash_balance_label = tk.Label(
+            inner_bal,
+            text=f'Current Balance:  Rs. {today_balance:,.2f}',
+            font=('Segoe UI', 12, 'bold'),
+            bg=self.theme.palette.bg_surface_alt,
+            fg=self.theme.palette.accent,
+        )
+        self._cash_balance_label.pack(side=tk.RIGHT)
+
         # Enable/Disable
         self.cash_enabled_var = tk.BooleanVar(value=get_setting('cash_management_enabled', '0') == '1')
         tk.Checkbutton(
@@ -1425,13 +1450,64 @@ class AdminSettingsPage:
                  font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
                  fg=self.theme.palette.text_muted, wraplength=600, justify='left').pack(anchor='w', pady=(0, 12))
 
-        self.theme.make_button(form, text='💾 Save Cash Settings', command=self._save_cash_settings,
-                               kind='primary', width=18, pady=8).pack()
+        btn_row = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        self.theme.make_button(btn_row, text='💾 Save Cash Settings', command=self._save_cash_settings,
+                               kind='primary', width=18, pady=8).pack(side=tk.LEFT, padx=(0, 10))
+
+        # ── Zero Balance Button ──
+        tk.Frame(form, bg=self.theme.palette.border, height=1).pack(fill=tk.X, pady=(14, 10))
+
+        tk.Label(form, text='⚠️  Danger Zone',
+                 font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.danger).pack(anchor='w', pady=(0, 4))
+
+        tk.Label(form, text='This will insert a zero-balance transaction for today, resetting the running balance to Rs. 0.00.',
+                 font=self.theme.fonts.small, bg=self.theme.palette.bg_surface,
+                 fg=self.theme.palette.text_muted, wraplength=600, justify='left').pack(anchor='w', pady=(0, 8))
+
+        self.theme.make_button(form, text='🔴  Zero Cash Balance (Today)',
+                               command=self._zero_cash_balance,
+                               kind='danger', width=24, pady=8).pack(anchor='w')
 
     def _save_cash_settings(self):
         set_setting('cash_management_enabled', '1' if self.cash_enabled_var.get() else '0', user_id=self.user['id'])
         set_setting('cash_management_popup_mode', self.cash_mode_var.get().strip(), user_id=self.user['id'])
         messagebox.showinfo('Success', 'Cash management settings saved.')
+
+    def _zero_cash_balance(self):
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        current = get_cash_balance(as_of_date=today_str)
+        confirmed = messagebox.askyesno(
+            'Reset Today\'s Cash',
+            f'Current balance is Rs. {current:,.2f}.\n\n'
+            f'This will permanently delete ALL cash transactions for today ({today_str}):\n'
+            f'  • Opening balance\n'
+            f'  • All money in / out\n'
+            f'  • All owner transactions\n\n'
+            f'Balance, Opening, Total In, Total Out will all reset to Rs. 0.00.\n\n'
+            f'This cannot be undone. Continue?',
+        )
+        if not confirmed:
+            return
+
+        clear_cash_for_date(today_str)
+
+        # Refresh the balance label in settings
+        if hasattr(self, '_cash_balance_label'):
+            self._cash_balance_label.config(text='Current Balance:  Rs. 0.00')
+
+        add_audit_log(
+            self.user['id'],
+            'CLEAR_CASH_DAY',
+            'cash_register',
+            None,
+            f'Admin cleared all cash transactions for {today_str} (was Rs. {current:,.2f})',
+        )
+
+        messagebox.showinfo('Done', f'All cash data for {today_str} has been cleared.\nBalance reset to Rs. 0.00.')
 
     # ── Printer Settings ──
     def _show_printer_settings(self):

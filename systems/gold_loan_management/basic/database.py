@@ -1169,13 +1169,23 @@ def get_cash_transactions_range(start_date, end_date, transaction_type='', limit
 def get_cash_summary(transaction_date, db_path=None):
     """Return opening, total_in, total_out, and closing balance for a given date."""
     conn = get_connection(db_path)
-    # Opening balance = closing balance from previous day
-    prev_date = (datetime.strptime(transaction_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
-    prev = conn.execute(
-        "SELECT balance_after FROM cash_register WHERE transaction_date=? ORDER BY id DESC LIMIT 1",
-        (prev_date,)
+
+    # Opening balance: prefer today's explicit opening_balance transaction,
+    # then fall back to previous day's closing balance.
+    today_opening = conn.execute(
+        "SELECT balance_after FROM cash_register WHERE transaction_date=? AND transaction_type='opening_balance' ORDER BY id ASC LIMIT 1",
+        (transaction_date,)
     ).fetchone()
-    opening = prev['balance_after'] if prev else 0.0
+
+    if today_opening:
+        opening = float(today_opening['balance_after'])
+    else:
+        prev_date = (datetime.strptime(transaction_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+        prev = conn.execute(
+            "SELECT balance_after FROM cash_register WHERE transaction_date=? ORDER BY id DESC LIMIT 1",
+            (prev_date,)
+        ).fetchone()
+        opening = float(prev['balance_after']) if prev else 0.0
 
     # Today's transactions
     rows = conn.execute(
@@ -1272,6 +1282,14 @@ def get_owner_transactions_summary(date_str=None, db_path=None):
         'total_withdrawals': float(withdrawals['total']),
         'net': float(deposits['total']) - float(withdrawals['total']),
     }
+
+
+def clear_cash_for_date(date_str, db_path=None):
+    """Delete ALL cash_register rows for date_str (full daily reset)."""
+    conn = get_connection(db_path)
+    conn.execute("DELETE FROM cash_register WHERE transaction_date=?", (date_str,))
+    conn.commit()
+    conn.close()
 
 
 def get_sms_template(category, db_path=None):

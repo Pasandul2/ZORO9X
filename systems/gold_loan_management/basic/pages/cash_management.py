@@ -497,13 +497,12 @@ class CashManagementPage:
                 return
 
             date_str = self.date_var.get().strip()
-            balance_before = get_cash_balance(as_of_date=date_str)
             add_cash_transaction(
                 transaction_date=date_str,
                 transaction_type='opening_balance',
                 amount=amount,
                 description=f'Opening cash balance for {date_str}',
-                balance_after=balance_before + amount,
+                balance_after=amount,
                 reference_type='cash_register',
                 created_by=self.user['id'],
             )
