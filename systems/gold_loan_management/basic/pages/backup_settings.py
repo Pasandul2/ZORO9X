@@ -24,9 +24,9 @@ class BackupSettingsPage:
         view = tk.Frame(self.container, bg=self.theme.palette.bg_app)
         view.pack(fill=tk.BOTH, expand=True)
         
-        # Header
+        # Header (reduced padding to save space)
         hdr = tk.Frame(view, bg=self.theme.palette.bg_app)
-        hdr.pack(fill=tk.X, pady=(0, 20))
+        hdr.pack(fill=tk.X, pady=(5, 10), padx=20)
         
         tk.Label(
             hdr,
@@ -45,23 +45,36 @@ class BackupSettingsPage:
             width=15
         ).pack(side=tk.RIGHT)
         
-        # Main content with scrollbar
-        main_canvas = tk.Canvas(view, bg=self.theme.palette.bg_app, highlightthickness=0)
+        # Main content with scrollbar - INCREASED HEIGHT
+        main_canvas = tk.Canvas(view, bg=self.theme.palette.bg_app, highlightthickness=0, height=700)
         scrollbar = tk.Scrollbar(view, orient='vertical', command=main_canvas.yview)
         scrollable = tk.Frame(main_canvas, bg=self.theme.palette.bg_app)
         
-        scrollable.bind(
-            '<Configure>',
-            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox('all'))
-        )
+        # Configure scrolling
+        def on_configure(event):
+            main_canvas.configure(scrollregion=main_canvas.bbox('all'))
         
-        main_canvas.create_window((0, 0), window=scrollable, anchor='nw')
+        def on_mousewheel(event):
+            # Check if canvas still exists before scrolling
+            try:
+                if main_canvas.winfo_exists():
+                    main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except:
+                pass
+        
+        scrollable.bind('<Configure>', on_configure)
+        
+        # Bind mousewheel only to the canvas frame, not globally
+        main_canvas.bind("<Enter>", lambda e: main_canvas.bind_all("<MouseWheel>", on_mousewheel))
+        main_canvas.bind("<Leave>", lambda e: main_canvas.unbind_all("<MouseWheel>"))
+        
+        main_canvas.create_window((0, 0), window=scrollable, anchor='nw', width=view.winfo_width())
         main_canvas.configure(yscrollcommand=scrollbar.set)
         
-        main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=0)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Sync Status Card
+        # Sync Status Card - reduced padding
         self._create_sync_status_card(scrollable)
         
         # Settings Card
@@ -75,11 +88,39 @@ class BackupSettingsPage:
         
         # Queue Status Card
         self._create_queue_card(scrollable)
+        
+        # Update canvas window width on resize
+        def on_frame_configure(event):
+            canvas_id = main_canvas.find_withtag('all')
+            if canvas_id:
+                main_canvas.itemconfig(canvas_id[0], width=event.width)
+        
+        view.bind('<Configure>', on_frame_configure)
+        
+        # Cleanup when leaving the page
+        def cleanup():
+            try:
+                main_canvas.unbind_all("<MouseWheel>")
+            except:
+                pass
+        
+        view.bind('<Destroy>', lambda e: cleanup())
+        # Queue Status Card
+        self._create_queue_card(scrollable)
     
     def _create_sync_status_card(self, parent):
         """Create sync status card"""
-        card = self.theme.make_card(parent, 'Sync Status')
-        card.pack(fill=tk.X, padx=20, pady=(0, 15))
+        card = self.theme.make_card(parent)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Title
+        tk.Label(
+            card.inner,
+            text='Sync Status',
+            font=self.theme.fonts.h3,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary
+        ).pack(anchor='w', pady=(0, 10))
         
         # Status grid
         status_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
@@ -139,13 +180,22 @@ class BackupSettingsPage:
             text=value,
             font=self.theme.fonts.body,
             bg=self.theme.palette.bg_surface,
-            fg=self.theme.palette.text_secondary
+            fg=self.theme.palette.text_muted
         ).grid(row=row, column=1, sticky='w', pady=5)
     
     def _create_settings_card(self, parent):
         """Create settings card"""
-        card = self.theme.make_card(parent, 'Settings')
-        card.pack(fill=tk.X, padx=20, pady=(0, 15))
+        card = self.theme.make_card(parent)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Title
+        tk.Label(
+            card.inner,
+            text='Settings',
+            font=self.theme.fonts.h3,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary
+        ).pack(anchor='w', pady=(0, 10))
         
         # Auto-sync toggle
         auto_sync_var = tk.BooleanVar(value=self.backup_manager.get_sync_setting('auto_sync_enabled', True))
@@ -220,7 +270,7 @@ class BackupSettingsPage:
             text=f'Location 1: {loc1}',
             font=self.theme.fonts.small,
             bg=self.theme.palette.bg_surface,
-            fg=self.theme.palette.text_secondary
+            fg=self.theme.palette.text_muted
         ).pack(anchor='w', padx=(10, 0))
         
         tk.Label(
@@ -228,13 +278,22 @@ class BackupSettingsPage:
             text=f'Location 2: {loc2}',
             font=self.theme.fonts.small,
             bg=self.theme.palette.bg_surface,
-            fg=self.theme.palette.text_secondary
+            fg=self.theme.palette.text_muted
         ).pack(anchor='w', padx=(10, 0))
     
     def _create_local_backups_card(self, parent):
         """Create local backups list card"""
-        card = self.theme.make_card(parent, 'Local Backups')
-        card.pack(fill=tk.X, padx=20, pady=(0, 15))
+        card = self.theme.make_card(parent)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Title
+        tk.Label(
+            card.inner,
+            text='Local Backups',
+            font=self.theme.fonts.h3,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary
+        ).pack(anchor='w', pady=(0, 10))
         
         backups = self.backup_manager.get_backups(10)
         
@@ -252,8 +311,17 @@ class BackupSettingsPage:
     
     def _create_server_backups_card(self, parent):
         """Create server backups list card"""
-        card = self.theme.make_card(parent, 'Server Backups')
-        card.pack(fill=tk.X, padx=20, pady=(0, 15))
+        card = self.theme.make_card(parent)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Title
+        tk.Label(
+            card.inner,
+            text='Server Backups',
+            font=self.theme.fonts.h3,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary
+        ).pack(anchor='w', pady=(0, 10))
         
         # Refresh button
         refresh_btn_frame = tk.Frame(card.inner, bg=self.theme.palette.bg_surface)
@@ -382,8 +450,17 @@ class BackupSettingsPage:
     
     def _create_queue_card(self, parent):
         """Create upload queue status card"""
-        card = self.theme.make_card(parent, 'Upload Queue')
-        card.pack(fill=tk.X, padx=20, pady=(0, 20))
+        card = self.theme.make_card(parent)
+        card.pack(fill=tk.X, padx=20, pady=(0, 10))
+        
+        # Title
+        tk.Label(
+            card.inner,
+            text='Upload Queue',
+            font=self.theme.fonts.h3,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary
+        ).pack(anchor='w', pady=(0, 10))
         
         queue_status = self.backup_manager.get_queue_status()
         total = queue_status.get('total', 0)
@@ -393,7 +470,7 @@ class BackupSettingsPage:
             text=f'{total} backup(s) queued for upload',
             font=self.theme.fonts.body,
             bg=self.theme.palette.bg_surface,
-            fg=self.theme.palette.text_secondary
+            fg=self.theme.palette.text_muted
         )
         status_label.pack(pady=10)
         

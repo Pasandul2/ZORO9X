@@ -186,11 +186,16 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'dates' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manage' | 'dates' | 'activity' | 'backups'>('overview');
   const [manageLoading, setManageLoading] = useState(false);
   const [manageNote, setManageNote] = useState('');
   const [extendDays, setExtendDays] = useState(30);
   const [setEndDate, setSetEndDate] = useState('');
+  
+  // Backups state
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupsError, setBackupsError] = useState('');
 
   const [startDateVal, setStartDateVal] = useState('');
   const [endDateVal, setEndDateVal] = useState('');
@@ -322,6 +327,74 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
     }
   };
 
+  // Fetch backups when backups tab is active
+  useEffect(() => {
+    if (activeTab === 'backups' && subscriptionId) {
+      fetchBackups();
+    }
+  }, [activeTab, subscriptionId]);
+
+  const fetchBackups = async () => {
+    try {
+      setBackupsLoading(true);
+      setBackupsError('');
+      const token = localStorage.getItem('adminToken');
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/saas/subscriptions/${subscriptionId}/backups`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setBackups(data.backups);
+      } else {
+        setBackupsError(data.message || 'Failed to load backups');
+      }
+    } catch (err: any) {
+      setBackupsError(err.message || 'Failed to load backups');
+    } finally {
+      setBackupsLoading(false);
+    }
+  };
+
+  const handleDownloadBackup = async (backup: any) => {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await fetch(backup.download_url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) throw new Error('Download failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = backup.backup_name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || 'Failed to download backup');
+    }
+  };
+
+  const formatBackupSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
   if (loading) {
     return (
       <div
@@ -405,10 +478,11 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
             { id: 'manage', label: 'Manage Subscription' },
             { id: 'dates', label: 'Manage Dates' },
             { id: 'activity', label: 'Renewals & Activity' },
+            { id: 'backups', label: 'Backups' },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as 'overview' | 'manage' | 'dates' | 'activity')}
+              onClick={() => setActiveTab(tab.id as 'overview' | 'manage' | 'dates' | 'activity' | 'backups')}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                 activeTab === tab.id
                   ? 'bg-cyan-600 text-white'
@@ -757,6 +831,80 @@ const AdminSubscriptionDashboard: React.FC<AdminSubscriptionDashboardProps> = ({
             </div>
           </Panel>
         </div>
+        )}
+
+        {activeTab === 'backups' && (
+          <div className={`rounded-2xl p-6 border ${darkMode ? 'bg-gray-800/50 border-purple-500/20' : 'bg-white/80 border-purple-200'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold">Subscription Backups</h2>
+              <button
+                onClick={fetchBackups}
+                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {backupsLoading ? (
+              <div className="py-12 flex items-center justify-center">
+                <div className="h-10 w-10 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent"></div>
+              </div>
+            ) : backupsError ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-200">
+                {backupsError}
+              </div>
+            ) : backups.length === 0 ? (
+              <div className={`rounded-lg border p-6 text-center ${darkMode ? 'border-gray-700 bg-gray-800/60 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+                No backups have been uploaded yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-gray-700/30">
+                <table className="min-w-full divide-y divide-gray-700/30">
+                  <thead className={darkMode ? 'bg-gray-800' : 'bg-gray-50'}>
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Backup</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Size</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Source</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Encryption</th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Download</th>
+                    </tr>
+                  </thead>
+                  <tbody className={darkMode ? 'divide-y divide-gray-700/30 bg-gray-900' : 'divide-y divide-gray-200 bg-white'}>
+                    {backups.map((backup) => (
+                      <tr key={backup.id}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold">{backup.backup_name}</div>
+                          <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            {backup.original_name || 'Database backup'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">{new Date(backup.uploaded_at || backup.created_at).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-sm">{formatBackupSize(Number(backup.file_size || 0))}</td>
+                        <td className="px-4 py-3 text-sm capitalize">{backup.source}</td>
+                        <td className="px-4 py-3">
+                          {backup.is_encrypted ? (
+                            <span className="text-green-400 text-sm">🔒 {backup.encryption_method}</span>
+                          ) : (
+                            <span className="text-gray-400 text-sm">Not encrypted</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => handleDownloadBackup(backup)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                          >
+                            <Download className="h-4 w-4" />
+                            Download
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

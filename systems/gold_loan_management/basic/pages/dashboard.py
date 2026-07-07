@@ -173,7 +173,7 @@ class DashboardPage:
                     text=f'Last sync: {last_sync}',
                     font=self.theme.fonts.body,
                     bg=self.theme.palette.bg_surface,
-                    fg=self.theme.palette.text_secondary
+                    fg=self.theme.palette.text_muted
                 )
                 sync_label.pack(side=tk.LEFT, padx=(0, 20))
                 

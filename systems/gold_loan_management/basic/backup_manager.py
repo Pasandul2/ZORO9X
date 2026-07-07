@@ -17,11 +17,17 @@ try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     ENCRYPTION_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     ENCRYPTION_AVAILABLE = False
-    print("Warning: cryptography package not available. Backup encryption disabled.")
+    print(f"Warning: cryptography package not available. Backup encryption disabled.")
+    print(f"Import error details: {e}")
+except Exception as e:
+    ENCRYPTION_AVAILABLE = False
+    print(f"Warning: cryptography package error. Backup encryption disabled.")
+    print(f"Error details: {e}")
+
 
 
 class BackupManager:
@@ -71,7 +77,7 @@ class BackupManager:
         
         password = f"{api_key}:{subscription_id}".encode('utf-8')
         
-        kdf = PBKDF2(
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,
