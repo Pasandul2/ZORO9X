@@ -354,14 +354,18 @@ class BackupManager:
         })
         self._save_pending_uploads(pending_uploads)
 
-    def _upload_backup_file(self, backup_path: str, backup_name: str = None, source: str = 'desktop', encrypt: bool = True) -> bool:
+    def _upload_backup_file(self, backup_path: str, backup_name: str = None, source: str = 'desktop', encrypt: bool = True) -> tuple[bool, str]:
+        """
+        Upload backup file to server
+        Returns: (success, error_message)
+        """
         api_key, subscription_id = self._get_upload_credentials()
         if not api_key or not subscription_id:
-            return False
+            return False, "No API credentials configured"
 
         backup_file = Path(backup_path)
         if not backup_file.exists():
-            return False
+            return False, f"Backup file not found: {backup_path}"
 
         api_url = self._resolve_server_api_url()
         upload_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups/upload"
@@ -370,11 +374,23 @@ class BackupManager:
             # Encrypt if enabled
             upload_file_path = backup_path
             is_encrypted = False
-            if encrypt and self.get_sync_setting('encrypt_backups', True):
+            encrypt_enabled = self.get_sync_setting('encrypt_backups', True)
+            
+            print(f"Uploading backup: {backup_name or backup_file.name}")
+            print(f"Encryption enabled: {encrypt_enabled}, ENCRYPTION_AVAILABLE: {ENCRYPTION_AVAILABLE}")
+            
+            if encrypt and encrypt_enabled and ENCRYPTION_AVAILABLE:
+                print("Encrypting backup before upload...")
                 encrypted_path = self._encrypt_file(backup_path)
-                if encrypted_path != backup_path:
+                if encrypted_path and encrypted_path != backup_path:
                     upload_file_path = encrypted_path
                     is_encrypted = True
+                    print(f"Backup encrypted: {encrypted_path}")
+                else:
+                    print("Encryption failed, uploading unencrypted")
+            
+            print(f"Uploading to: {upload_url}")
+            print(f"Upload file size: {Path(upload_file_path).stat().st_size} bytes")
             
             with open(upload_file_path, 'rb') as file_handle:
                 response = requests.post(
@@ -387,33 +403,59 @@ class BackupManager:
                         'source': source,
                         'is_encrypted': 'true' if is_encrypted else 'false',
                     },
-                    timeout=float(os.getenv('ZORO9X_BACKUP_UPLOAD_TIMEOUT_SECONDS', '10')),
+                    timeout=60,  # Increased timeout for large files
                 )
+            
+            print(f"Upload response status: {response.status_code}")
+            print(f"Upload response: {response.text[:500]}")
             
             # Clean up encrypted temp file
             if is_encrypted and upload_file_path != backup_path:
                 try:
                     Path(upload_file_path).unlink()
-                except Exception:
-                    pass
+                    print("Cleaned up encrypted temp file")
+                except Exception as e:
+                    print(f"Failed to clean up temp file: {e}")
             
-            success = response.status_code == 200 and bool(response.json().get('success'))
-            if success:
-                self._update_last_sync_time()
-            return success
+            if response.status_code == 200:
+                result = response.json()
+                success = bool(result.get('success'))
+                if success:
+                    self._update_last_sync_time()
+                    print("Upload successful!")
+                    return True, ""
+                else:
+                    error_msg = result.get('message', 'Unknown error')
+                    print(f"Upload failed: {error_msg}")
+                    return False, error_msg
+            else:
+                error_msg = f"Server returned status {response.status_code}"
+                print(error_msg)
+                return False, error_msg
             
+        except requests.exceptions.Timeout:
+            return False, "Upload timeout - file may be too large or connection slow"
+        except requests.exceptions.ConnectionError:
+            return False, "Cannot connect to server - check internet connection"
         except Exception as e:
-            print(f"Warning: backup upload failed: {e}")
-            return False
+            error_msg = f"Upload error: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            return False, error_msg
 
-    def sync_pending_uploads(self) -> int:
-        """Sync pending uploads with retry logic"""
+    def sync_pending_uploads(self) -> tuple[int, list]:
+        """
+        Sync pending uploads with retry logic
+        Returns: (uploaded_count, error_messages)
+        """
         pending_uploads = self._load_pending_uploads()
         if not pending_uploads:
-            return 0
+            return 0, []
 
         remaining = []
         uploaded_count = 0
+        errors = []
         max_retries = self.get_sync_setting('max_retry_count', 3)
 
         for item in pending_uploads:
@@ -422,22 +464,27 @@ class BackupManager:
             retry_count = item.get('retry_count', 0)
             
             if not backup_path or not Path(backup_path).exists():
+                errors.append(f"{backup_name}: File not found")
                 continue
             
             # Skip if max retries exceeded
             if retry_count >= max_retries:
+                errors.append(f"{backup_name}: Max retries exceeded")
                 continue
 
-            if self._upload_backup_file(backup_path, backup_name, source='queued'):
+            result, error = self._upload_backup_file(backup_path, backup_name, source='queued')
+            if result:
                 uploaded_count += 1
             else:
                 # Increment retry count and re-queue
                 item['retry_count'] = retry_count + 1
                 item['last_retry'] = datetime.now().isoformat()
+                item['last_error'] = error or 'Upload failed'
                 remaining.append(item)
+                errors.append(f"{backup_name}: {error or 'Upload failed'}")
 
         self._save_pending_uploads(remaining)
-        return uploaded_count
+        return uploaded_count, errors
     
     def clear_old_queue_items(self, days: int = 30) -> int:
         """Clear queue items older than specified days"""

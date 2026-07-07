@@ -1,20 +1,12 @@
 {
   "pending_uploads": [
     {
-      "backup_path": "C:\\GLB\\backup_20260707_234457.db",
-      "backup_name": "backup_20260707_234457.db",
-      "queued_at": "2026-07-07T23:44:57.816902",
-      "retry_count": 3,
-      "last_error": null,
-      "last_retry": "2026-07-08T00:10:00.369500"
-    },
-    {
-      "backup_path": "C:\\GLB\\backup_20260708_000942.db",
-      "backup_name": "backup_20260708_000942.db",
-      "queued_at": "2026-07-08T00:09:42.460663",
+      "backup_path": "C:\\GLB\\backup_20260708_002806.db",
+      "backup_name": "backup_20260708_002806.db",
+      "queued_at": "2026-07-08T00:28:06.782905",
       "retry_count": 2,
-      "last_error": null,
-      "last_retry": "2026-07-08T00:10:00.370028"
+      "last_error": "No API credentials configured",
+      "last_retry": "2026-07-08T00:28:16.759784"
     }
   ]
 }

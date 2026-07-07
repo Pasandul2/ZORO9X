@@ -514,8 +514,8 @@ class BackupSettingsPage:
         
         def sync_thread():
             try:
-                count = self.backup_manager.sync_pending_uploads()
-                self.container.after(0, lambda: self._sync_complete(count))
+                count, errors = self.backup_manager.sync_pending_uploads()
+                self.container.after(0, lambda: self._sync_complete(count, errors))
             except Exception as e:
                 self.container.after(0, lambda: self._sync_error(str(e)))
         
@@ -524,16 +524,33 @@ class BackupSettingsPage:
         
         messagebox.showinfo('Syncing', 'Syncing backups to server...')
     
-    def _sync_complete(self, count):
+    def _sync_complete(self, count, errors):
         """Handle sync completion"""
         self.sync_in_progress = False
-        messagebox.showinfo('Success', f'Synced {count} backup(s) to server')
+        
+        if count > 0 and not errors:
+            messagebox.showinfo('Success', f'Successfully synced {count} backup(s) to server!')
+        elif count > 0 and errors:
+            error_text = '\n'.join(errors[:5])  # Show first 5 errors
+            if len(errors) > 5:
+                error_text += f'\n... and {len(errors) - 5} more errors'
+            messagebox.showwarning('Partial Success', 
+                f'Synced {count} backup(s) successfully.\n\nErrors:\n{error_text}')
+        elif errors:
+            error_text = '\n'.join(errors[:5])  # Show first 5 errors
+            if len(errors) > 5:
+                error_text += f'\n... and {len(errors) - 5} more errors'
+            messagebox.showerror('Sync Failed', 
+                f'Failed to sync backups.\n\nErrors:\n{error_text}')
+        else:
+            messagebox.showinfo('No Backups', 'No backups in queue to sync')
+        
         self.show()  # Refresh page
     
     def _sync_error(self, error):
         """Handle sync error"""
         self.sync_in_progress = False
-        messagebox.showerror('Error', f'Sync failed: {error}')
+        messagebox.showerror('Error', f'Sync failed with exception:\n{error}')
     
     def _create_manual_backup(self):
         """Create manual backup"""
