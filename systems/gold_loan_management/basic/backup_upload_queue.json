@@ -1,28 +1,20 @@
 {
   "pending_uploads": [
     {
-      "backup_path": "C:\\GLB\\backup_20260707_233918.db",
-      "backup_name": "backup_20260707_233918.db",
-      "queued_at": "2026-07-07T23:39:18.355061",
-      "retry_count": 3,
-      "last_error": null,
-      "last_retry": "2026-07-07T23:44:57.823699"
-    },
-    {
-      "backup_path": "C:\\GLB\\backup_20260707_234217.db",
-      "backup_name": "backup_20260707_234217.db",
-      "queued_at": "2026-07-07T23:42:17.811393",
-      "retry_count": 2,
-      "last_error": null,
-      "last_retry": "2026-07-07T23:44:57.823814"
-    },
-    {
       "backup_path": "C:\\GLB\\backup_20260707_234457.db",
       "backup_name": "backup_20260707_234457.db",
       "queued_at": "2026-07-07T23:44:57.816902",
-      "retry_count": 1,
+      "retry_count": 3,
       "last_error": null,
-      "last_retry": "2026-07-07T23:44:57.823920"
+      "last_retry": "2026-07-08T00:10:00.369500"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260708_000942.db",
+      "backup_name": "backup_20260708_000942.db",
+      "queued_at": "2026-07-08T00:09:42.460663",
+      "retry_count": 2,
+      "last_error": null,
+      "last_retry": "2026-07-08T00:10:00.370028"
     }
   ]
 }

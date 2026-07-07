@@ -575,30 +575,39 @@ class BackupManager:
         """Get list of backups stored on server"""
         api_key, subscription_id = self._get_upload_credentials()
         if not api_key or not subscription_id:
+            print("No upload credentials available")
             return []
         
         api_url = self._resolve_server_api_url()
         list_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups"
         
         try:
+            # Try without authentication first (for desktop app direct access)
             response = requests.get(
                 list_url,
-                params={
-                    'api_key': api_key,
-                    'subscription_id': subscription_id,
+                headers={
+                    'X-API-Key': api_key,
+                    'X-Subscription-ID': str(subscription_id),
                 },
-                timeout=10,
+                timeout=15,
             )
             
             if response.status_code == 200:
                 data = response.json()
-                return data.get('backups', [])
+                if data.get('success'):
+                    return data.get('backups', [])
+                else:
+                    print(f"Server returned error: {data.get('message')}")
+                    return []
             else:
                 print(f"Failed to get server backups: {response.status_code}")
+                print(f"Response: {response.text[:200]}")
                 return []
                 
         except Exception as e:
             print(f"Error getting server backups: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def download_server_backup(self, backup_id: int, destination_path: str = None) -> str:

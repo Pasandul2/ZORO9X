@@ -105,8 +105,6 @@ class BackupSettingsPage:
                 pass
         
         view.bind('<Destroy>', lambda e: cleanup())
-        # Queue Status Card
-        self._create_queue_card(scrollable)
     
     def _create_sync_status_card(self, parent):
         """Create sync status card"""

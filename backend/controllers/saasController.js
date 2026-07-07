@@ -3585,6 +3585,63 @@ exports.getSubscriptionBackups = async (req, res) => {
 };
 
 /**
+ * List server backups via API key (for desktop app)
+ */
+exports.getSubscriptionBackupsViaApiKey = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    const subscriptionId = Number(req.params.subscriptionId || 0);
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+
+    if (!apiKey) {
+      return res.status(401).json({
+        success: false,
+        message: 'API key required',
+      });
+    }
+
+    // Verify API key matches subscription
+    const [subscriptions] = await pool.execute(
+      `SELECT id FROM client_subscriptions WHERE id = ? AND api_key = ?`,
+      [subscriptionId, apiKey]
+    );
+
+    if (subscriptions.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid API key for this subscription',
+      });
+    }
+
+    const [backups] = await pool.execute(
+      `SELECT id, backup_name, original_name, file_size, source, is_encrypted, encryption_method, created_at, uploaded_at
+       FROM subscription_backups
+       WHERE subscription_id = ?
+       ORDER BY uploaded_at DESC, id DESC
+       LIMIT 50`,
+      [subscriptionId]
+    );
+
+    res.json({
+      success: true,
+      backups: backups.map((backup) => ({
+        ...backup,
+        is_encrypted: Boolean(backup.is_encrypted),
+        download_url: `/api/saas/subscriptions/${subscriptionId}/backups/${backup.id}/download`,
+      })),
+    });
+  } catch (error) {
+    console.error('Error listing subscription backups via API key:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load backups',
+      error: error.message,
+    });
+  }
+};
+
+/**
  * Download a stored server backup
  */
 exports.downloadSubscriptionBackup = async (req, res) => {

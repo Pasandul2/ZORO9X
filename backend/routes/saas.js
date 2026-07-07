@@ -466,9 +466,37 @@ router.post('/subscriptions/:subscriptionId/backups/upload', handleBackupUpload,
 
 /**
  * GET /api/saas/subscriptions/:subscriptionId/backups
- * List server backups for the client dashboard
+ * List server backups for the client dashboard or desktop app
+ * Supports both JWT token and API key authentication
  */
-router.get('/subscriptions/:subscriptionId/backups', authenticateToken, saasController.getSubscriptionBackups);
+router.get('/subscriptions/:subscriptionId/backups', async (req, res) => {
+  try {
+    const subscriptionId = Number(req.params.subscriptionId);
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    
+    // Check if user is authenticated via JWT (web dashboard)
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (token) {
+      // Web dashboard access - verify JWT and ownership
+      return saasController.getSubscriptionBackups(req, res);
+    } else if (apiKey) {
+      // Desktop app access - verify API key matches subscription
+      return saasController.getSubscriptionBackupsViaApiKey(req, res);
+    } else {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+  } catch (error) {
+    console.error('Error in backups route:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+});
 
 /**
  * GET /api/saas/subscriptions/:subscriptionId/backups/:backupId/download
