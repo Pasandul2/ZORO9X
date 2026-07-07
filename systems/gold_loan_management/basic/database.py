@@ -37,6 +37,25 @@ def init_database(db_path=None):
     if db_path:
         set_db_file(db_path)
 
+    # Check if database file exists and is valid
+    db_file_to_use = db_path or DB_FILE
+    if os.path.exists(db_file_to_use):
+        try:
+            # Try to open and verify it's a valid SQLite database
+            test_conn = sqlite3.connect(db_file_to_use)
+            test_conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+            test_conn.close()
+        except sqlite3.DatabaseError as e:
+            # Database is corrupted or encrypted, remove it
+            print(f"Warning: Corrupted database detected: {e}")
+            print(f"Removing corrupted database: {db_file_to_use}")
+            try:
+                os.remove(db_file_to_use)
+                print("Corrupted database removed. Creating fresh database...")
+            except Exception as remove_error:
+                print(f"Error removing corrupted database: {remove_error}")
+                raise Exception(f"Cannot remove corrupted database file: {db_file_to_use}")
+
     conn = get_connection(db_path)
     c = conn.cursor()
 

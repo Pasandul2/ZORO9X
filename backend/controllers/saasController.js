@@ -2898,38 +2898,39 @@ exports.downloadSystem = async (req, res) => {
     copyRecursive(systemFolder, packageDir);
 
     // Remove sensitive artifacts and database files that shouldn't be bundled
-    const sensitiveArtifacts = [
-      'business_config.json',
-      '*.db',           // All database files
-      '*.db-journal',   // SQLite journal files
-      '*.db-wal',       // SQLite WAL files
-      '*.db-shm',       // SQLite shared memory files
-      'backups/**',     // Backup directories
-      'backups_cloud/**'
-    ];
-    
-    for (const artifact of sensitiveArtifacts) {
-      if (artifact.includes('*') || artifact.includes('**')) {
-        // Glob pattern - find and remove matching files
-        const glob = require('glob');
-        const matches = glob.sync(artifact, { cwd: packageDir, absolute: true });
-        matches.forEach(matchPath => {
-          if (fs.existsSync(matchPath)) {
-            const stat = fs.statSync(matchPath);
-            if (stat.isDirectory()) {
-              fs.rmSync(matchPath, { recursive: true, force: true });
+    // This ensures fresh database is created on first launch
+    const removeDbFiles = (dir) => {
+      try {
+        const items = fs.readdirSync(dir);
+        items.forEach(item => {
+          const fullPath = path.join(dir, item);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isDirectory()) {
+            // Remove backup directories entirely
+            if (item === 'backups' || item === 'backups_cloud' || item === '__pycache__') {
+              fs.rmSync(fullPath, { recursive: true, force: true });
             } else {
-              fs.rmSync(matchPath, { force: true });
+              // Recursively check subdirectories
+              removeDbFiles(fullPath);
+            }
+          } else if (stat.isFile()) {
+            // Remove database files and related SQLite files
+            const ext = path.extname(item).toLowerCase();
+            if (ext === '.db' || ext === '.sqlite' || ext === '.sqlite3' || 
+                item.endsWith('.db-journal') || item.endsWith('.db-wal') || item.endsWith('.db-shm') ||
+                item === 'business_config.json') {
+              fs.rmSync(fullPath, { force: true });
+              console.log(`Removed bundled file: ${item}`);
             }
           }
         });
-      } else {
-        const artifactPath = path.join(packageDir, artifact);
-        if (fs.existsSync(artifactPath)) {
-          fs.rmSync(artifactPath, { force: true });
-        }
+      } catch (err) {
+        console.error(`Error removing db files from ${dir}:`, err);
       }
-    }
+    };
+    
+    removeDbFiles(packageDir);
 
     const categoryFromPath = cleanPath.split('/').filter(Boolean)[0] || 'system';
     const sanitizedCategory = String(subscription.category || categoryFromPath)

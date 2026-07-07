@@ -875,6 +875,42 @@ class BackupManager:
                 print(f"Backup file not found: {backup_path}")
                 return False
             
+            # Check if backup is encrypted and decrypt if needed
+            actual_backup_path = backup_path
+            temp_decrypted = None
+            
+            try:
+                # Try to open as SQLite database
+                test_conn = sqlite3.connect(backup_path)
+                test_conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+                test_conn.close()
+            except sqlite3.DatabaseError:
+                # File might be encrypted, try to decrypt
+                print("Backup appears to be encrypted, attempting to decrypt...")
+                if not ENCRYPTION_AVAILABLE:
+                    print("Error: Backup is encrypted but cryptography module is not available")
+                    return False
+                
+                temp_decrypted = backup_path + '.decrypted.tmp'
+                decrypted_path = self._decrypt_file(backup_path, temp_decrypted)
+                
+                if not decrypted_path or decrypted_path == backup_path:
+                    print("Error: Failed to decrypt backup file")
+                    return False
+                
+                # Verify decrypted file is valid
+                try:
+                    test_conn = sqlite3.connect(decrypted_path)
+                    test_conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+                    test_conn.close()
+                    actual_backup_path = decrypted_path
+                    print("Backup decrypted successfully")
+                except sqlite3.DatabaseError as e:
+                    print(f"Error: Decrypted backup is not a valid database: {e}")
+                    if temp_decrypted and Path(temp_decrypted).exists():
+                        Path(temp_decrypted).unlink()
+                    return False
+            
             # Close any open connections to the database
             # (This would need to be coordinated with the app)
             
@@ -884,7 +920,14 @@ class BackupManager:
                 shutil.copy2(str(self.db_full_path), str(current_backup))
             
             # Restore from backup
-            shutil.copy2(str(backup_file), str(self.db_full_path))
+            shutil.copy2(str(actual_backup_path), str(self.db_full_path))
+            
+            # Clean up temp decrypted file if created
+            if temp_decrypted and Path(temp_decrypted).exists():
+                try:
+                    Path(temp_decrypted).unlink()
+                except Exception:
+                    pass
             
             # Also update the backup files
             loc1, loc2 = self.get_backup_locations()
@@ -898,6 +941,8 @@ class BackupManager:
             return True
         except Exception as e:
             print(f"Error restoring backup: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def delete_backup(self, backup_name: str) -> bool:
