@@ -3574,7 +3574,6 @@ exports.getSubscriptionBackups = async (req, res) => {
         download_url: `/api/saas/subscriptions/${subscriptionId}/backups/${backup.id}/download`,
       })),
     });
-    });
   } catch (error) {
     console.error('Error listing subscription backups:', error);
     res.status(500).json({
