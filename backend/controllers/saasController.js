@@ -2897,11 +2897,37 @@ exports.downloadSystem = async (req, res) => {
 
     copyRecursive(systemFolder, packageDir);
 
-    const sensitiveArtifacts = ['business_config.json'];
+    // Remove sensitive artifacts and database files that shouldn't be bundled
+    const sensitiveArtifacts = [
+      'business_config.json',
+      '*.db',           // All database files
+      '*.db-journal',   // SQLite journal files
+      '*.db-wal',       // SQLite WAL files
+      '*.db-shm',       // SQLite shared memory files
+      'backups/**',     // Backup directories
+      'backups_cloud/**'
+    ];
+    
     for (const artifact of sensitiveArtifacts) {
-      const artifactPath = path.join(packageDir, artifact);
-      if (fs.existsSync(artifactPath)) {
-        fs.rmSync(artifactPath, { force: true });
+      if (artifact.includes('*') || artifact.includes('**')) {
+        // Glob pattern - find and remove matching files
+        const glob = require('glob');
+        const matches = glob.sync(artifact, { cwd: packageDir, absolute: true });
+        matches.forEach(matchPath => {
+          if (fs.existsSync(matchPath)) {
+            const stat = fs.statSync(matchPath);
+            if (stat.isDirectory()) {
+              fs.rmSync(matchPath, { recursive: true, force: true });
+            } else {
+              fs.rmSync(matchPath, { force: true });
+            }
+          }
+        });
+      } else {
+        const artifactPath = path.join(packageDir, artifact);
+        if (fs.existsSync(artifactPath)) {
+          fs.rmSync(artifactPath, { force: true });
+        }
       }
     }
 
