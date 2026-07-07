@@ -72,6 +72,7 @@ class AdminSettingsPage:
             ('🖨 Printer Settings', self._show_printer_settings),
             ('🏢 Company Settings', self._show_company_settings),
             (' Backup & Restore', self._show_backup_restore),
+            ('☁️ Backup & Sync', self._show_backup_sync),
         ]
         tabs1 = tabs[:4]
         tabs2 = tabs[4:8]
@@ -2152,3 +2153,8 @@ class AdminSettingsPage:
             self._show_backup_restore()
         else:
             messagebox.showerror('Error', 'Failed to delete backup.')
+
+    # ── Backup & Sync (Cloud) ──
+    def _show_backup_sync(self):
+        """Navigate to backup sync settings page"""
+        self.navigate('backup_settings')

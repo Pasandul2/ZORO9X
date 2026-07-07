@@ -83,6 +83,90 @@ basic/
 
 For support, contact: support@zoro9x.com
 
+## Backup & Cloud Sync
+
+### Overview
+The Gold Loan System includes automatic encrypted backup synchronization to the ZORO9X server. Your database is securely backed up and accessible from your client dashboard.
+
+### Features
+- **Auto-Sync**: Automatic backup uploads when online
+- **Encryption**: AES-256-CBC encryption before upload
+- **Queue System**: Offline backups queued for later sync
+- **Server Storage**: Latest 50 backups stored on server
+- **Client Dashboard**: Download backups anytime from web dashboard
+
+### How It Works
+
+**Desktop Application:**
+1. Backups are created automatically or manually
+2. System encrypts backup using your API key
+3. Encrypted file uploads to server (if online)
+4. Failed uploads are queued for retry (max 3 attempts)
+5. Queue syncs automatically when reconnecting
+
+**Encryption:**
+- Method: AES-256-CBC with PBKDF2 key derivation
+- Key Source: Derived from API key + subscription ID
+- Files are encrypted before leaving your device
+- Only you can decrypt with your API key
+
+**Accessing Backups:**
+1. Login to ZORO9X client dashboard
+2. Select your subscription
+3. Navigate to "Backups" tab
+4. View all server backups
+5. Download encrypted backup
+6. Desktop app can decrypt and restore
+
+### Admin Access
+Administrators can:
+- View all client backups across subscriptions
+- Download any backup for support purposes
+- Access via Admin Panel → Client Backups
+
+### Settings
+
+**Enable/Disable Auto-Sync:**
+- Open Admin Settings → Backup & Sync
+- Toggle "Auto-Sync Enabled"
+
+**Enable/Disable Encryption:**
+- Open Admin Settings → Backup & Sync  
+- Toggle "Encrypt Backups"
+- ⚠️ Disabling encryption not recommended
+
+**Manual Operations:**
+- Create Backup: Backup & Sync → Create Backup Now
+- Force Sync: Backup & Sync → Sync Now
+- View Queue: Backup & Sync → Upload Queue section
+- Download from Server: Backup & Sync → Server Backups → Download
+
+### Troubleshooting
+
+**Backups not uploading:**
+- Check internet connection
+- Verify API key is valid
+- Check upload queue for errors
+- Check last sync time in Backup & Sync settings
+
+**Cannot download from server:**
+- Verify subscription is active
+- Check internet connection
+- Login to client dashboard and try again
+
+**Restore backup:**
+1. Download backup from server or local
+2. If encrypted, desktop app will auto-decrypt
+3. Go to Backup & Sync → Local Backups
+4. Click "Restore" on desired backup
+5. System will restart with restored data
+
+**Failed uploads:**
+- System retries 3 times automatically
+- Check error log in upload queue
+- Old failed items (>30 days) are auto-cleared
+- Manual retry: Sync Now button
+
 
 cd C:\ZORO9X\systems\gold_loan_management\basic
 $env:ZORO9X_DEV_BYPASS_LICENSE="1"; python gold_loan_app.py

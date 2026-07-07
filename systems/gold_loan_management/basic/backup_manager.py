@@ -10,6 +10,18 @@ from datetime import datetime
 from pathlib import Path
 import json
 import requests
+import hashlib
+import base64
+
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
+    print("Warning: cryptography package not available. Backup encryption disabled.")
 
 
 class BackupManager:
@@ -39,6 +51,174 @@ class BackupManager:
         # Load or create backup config
         self.config = self._load_config()
     
+    def _derive_encryption_key(self, api_key: str, subscription_id: str, salt: bytes = None) -> tuple:
+        """
+        Derive encryption key from API key and subscription ID using PBKDF2
+        
+        Args:
+            api_key: API key for authentication
+            subscription_id: Subscription ID
+            salt: Salt for key derivation (generated if None)
+        
+        Returns:
+            tuple: (key, salt)
+        """
+        if not ENCRYPTION_AVAILABLE:
+            raise RuntimeError("Encryption not available. Install cryptography package.")
+        
+        if salt is None:
+            salt = os.urandom(32)
+        
+        password = f"{api_key}:{subscription_id}".encode('utf-8')
+        
+        kdf = PBKDF2(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        
+        key = kdf.derive(password)
+        return key, salt
+    
+    def _encrypt_file(self, input_path: str, output_path: str = None) -> str:
+        """
+        Encrypt a backup file using AES-256
+        
+        Args:
+            input_path: Path to the file to encrypt
+            output_path: Path for encrypted file (auto-generated if None)
+        
+        Returns:
+            str: Path to encrypted file
+        """
+        if not ENCRYPTION_AVAILABLE:
+            print("Warning: Encryption not available. File not encrypted.")
+            return input_path
+        
+        api_key, subscription_id = self._get_upload_credentials()
+        if not api_key or not subscription_id:
+            print("Warning: No credentials available for encryption. File not encrypted.")
+            return input_path
+        
+        if not self.get_sync_setting('encrypt_backups', True):
+            return input_path
+        
+        try:
+            input_file = Path(input_path)
+            if not input_file.exists():
+                return input_path
+            
+            if output_path is None:
+                output_path = str(input_file.parent / f"{input_file.stem}.encrypted{input_file.suffix}")
+            
+            # Generate encryption key
+            key, salt = self._derive_encryption_key(api_key, subscription_id)
+            
+            # Generate IV
+            iv = os.urandom(16)
+            
+            # Read file data
+            with open(input_path, 'rb') as f:
+                plaintext = f.read()
+            
+            # Encrypt
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.CBC(iv),
+                backend=default_backend()
+            )
+            encryptor = cipher.encryptor()
+            
+            # Add padding
+            padding_length = 16 - (len(plaintext) % 16)
+            padded_plaintext = plaintext + bytes([padding_length] * padding_length)
+            
+            ciphertext = encryptor.update(padded_plaintext) + encryptor.finalize()
+            
+            # Write encrypted file: [salt(32)][iv(16)][ciphertext]
+            with open(output_path, 'wb') as f:
+                f.write(salt)
+                f.write(iv)
+                f.write(ciphertext)
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error encrypting file: {e}")
+            return input_path
+    
+    def _decrypt_file(self, input_path: str, output_path: str = None) -> str:
+        """
+        Decrypt an encrypted backup file
+        
+        Args:
+            input_path: Path to encrypted file
+            output_path: Path for decrypted file (auto-generated if None)
+        
+        Returns:
+            str: Path to decrypted file
+        """
+        if not ENCRYPTION_AVAILABLE:
+            print("Warning: Encryption not available. Assuming file is not encrypted.")
+            return input_path
+        
+        api_key, subscription_id = self._get_upload_credentials()
+        if not api_key or not subscription_id:
+            print("Warning: No credentials available for decryption.")
+            return input_path
+        
+        try:
+            input_file = Path(input_path)
+            if not input_file.exists():
+                return input_path
+            
+            if output_path is None:
+                output_path = str(input_file.parent / f"{input_file.stem}.decrypted{input_file.suffix}")
+                if '.encrypted' in str(input_file):
+                    output_path = str(input_file).replace('.encrypted', '')
+            
+            # Read encrypted file
+            with open(input_path, 'rb') as f:
+                salt = f.read(32)
+                iv = f.read(16)
+                ciphertext = f.read()
+            
+            # Check if file is actually encrypted (has proper header)
+            if len(salt) != 32 or len(iv) != 16:
+                print("Warning: File does not appear to be encrypted. Copying as-is.")
+                if input_path != output_path:
+                    shutil.copy2(input_path, output_path)
+                return output_path
+            
+            # Derive decryption key
+            key, _ = self._derive_encryption_key(api_key, subscription_id, salt)
+            
+            # Decrypt
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.CBC(iv),
+                backend=default_backend()
+            )
+            decryptor = cipher.decryptor()
+            
+            padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+            
+            # Remove padding
+            padding_length = padded_plaintext[-1]
+            plaintext = padded_plaintext[:-padding_length]
+            
+            # Write decrypted file
+            with open(output_path, 'wb') as f:
+                f.write(plaintext)
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error decrypting file: {e}")
+            return input_path
+    
     def _load_config(self) -> dict:
         """Load backup configuration from file"""
         if self.config_file.exists():
@@ -58,6 +238,9 @@ class BackupManager:
         return {
             'backup_location1': str(self.default_backup_dir1),
             'backup_location2': str(self.default_backup_dir2),
+            'auto_sync_enabled': True,
+            'encrypt_backups': True,
+            'max_retry_count': 3,
         }
     
     def _save_config(self):
@@ -72,6 +255,29 @@ class BackupManager:
                 json.dump(self.config, f, indent=2)
         except Exception as e:
             print(f"Error saving backup config: {e}")
+    
+    def get_sync_setting(self, key: str, default=None):
+        """Get a sync setting value"""
+        return self.config.get(key, default)
+    
+    def set_sync_setting(self, key: str, value) -> bool:
+        """Set a sync setting value"""
+        try:
+            self.config[key] = value
+            self._save_config()
+            return True
+        except Exception as e:
+            print(f"Error setting sync setting: {e}")
+            return False
+    
+    def get_last_sync_time(self) -> str:
+        """Get the last successful sync time"""
+        return self.config.get('last_sync_time', 'Never')
+    
+    def _update_last_sync_time(self):
+        """Update last sync timestamp"""
+        self.config['last_sync_time'] = datetime.now().isoformat()
+        self._save_config()
 
     def _load_json_file(self, file_path: Path) -> dict:
         if not file_path.exists():
@@ -122,12 +328,14 @@ class BackupManager:
     def _save_pending_uploads(self, pending_uploads: list) -> None:
         self._save_json_file(self.pending_uploads_file, {'pending_uploads': pending_uploads})
 
-    def _queue_backup_upload(self, backup_path: str, backup_name: str = None) -> None:
+    def _queue_backup_upload(self, backup_path: str, backup_name: str = None, retry_count: int = 0) -> None:
         if not backup_path:
             return
 
         pending_uploads = self._load_pending_uploads()
         queued_name = backup_name or Path(backup_path).name
+        
+        # Check if already queued
         if any(item.get('backup_path') == backup_path for item in pending_uploads):
             return
 
@@ -135,10 +343,12 @@ class BackupManager:
             'backup_path': backup_path,
             'backup_name': queued_name,
             'queued_at': datetime.now().isoformat(),
+            'retry_count': retry_count,
+            'last_error': None,
         })
         self._save_pending_uploads(pending_uploads)
 
-    def _upload_backup_file(self, backup_path: str, backup_name: str = None, source: str = 'desktop') -> bool:
+    def _upload_backup_file(self, backup_path: str, backup_name: str = None, source: str = 'desktop', encrypt: bool = True) -> bool:
         api_key, subscription_id = self._get_upload_credentials()
         if not api_key or not subscription_id:
             return False
@@ -151,7 +361,16 @@ class BackupManager:
         upload_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups/upload"
 
         try:
-            with open(backup_file, 'rb') as file_handle:
+            # Encrypt if enabled
+            upload_file_path = backup_path
+            is_encrypted = False
+            if encrypt and self.get_sync_setting('encrypt_backups', True):
+                encrypted_path = self._encrypt_file(backup_path)
+                if encrypted_path != backup_path:
+                    upload_file_path = encrypted_path
+                    is_encrypted = True
+            
+            with open(upload_file_path, 'rb') as file_handle:
                 response = requests.post(
                     upload_url,
                     files={'backup_file': (backup_name or backup_file.name, file_handle, 'application/octet-stream')},
@@ -160,36 +379,90 @@ class BackupManager:
                         'subscription_id': subscription_id,
                         'backup_name': backup_name or backup_file.name,
                         'source': source,
+                        'is_encrypted': 'true' if is_encrypted else 'false',
                     },
-                    timeout=float(os.getenv('ZORO9X_BACKUP_UPLOAD_TIMEOUT_SECONDS', '6')),
+                    timeout=float(os.getenv('ZORO9X_BACKUP_UPLOAD_TIMEOUT_SECONDS', '10')),
                 )
-
-            return response.status_code == 200 and bool(response.json().get('success'))
+            
+            # Clean up encrypted temp file
+            if is_encrypted and upload_file_path != backup_path:
+                try:
+                    Path(upload_file_path).unlink()
+                except Exception:
+                    pass
+            
+            success = response.status_code == 200 and bool(response.json().get('success'))
+            if success:
+                self._update_last_sync_time()
+            return success
+            
         except Exception as e:
             print(f"Warning: backup upload failed: {e}")
             return False
 
     def sync_pending_uploads(self) -> int:
+        """Sync pending uploads with retry logic"""
         pending_uploads = self._load_pending_uploads()
         if not pending_uploads:
             return 0
 
         remaining = []
         uploaded_count = 0
+        max_retries = self.get_sync_setting('max_retry_count', 3)
 
         for item in pending_uploads:
             backup_path = item.get('backup_path', '')
             backup_name = item.get('backup_name', '')
+            retry_count = item.get('retry_count', 0)
+            
             if not backup_path or not Path(backup_path).exists():
+                continue
+            
+            # Skip if max retries exceeded
+            if retry_count >= max_retries:
                 continue
 
             if self._upload_backup_file(backup_path, backup_name, source='queued'):
                 uploaded_count += 1
             else:
+                # Increment retry count and re-queue
+                item['retry_count'] = retry_count + 1
+                item['last_retry'] = datetime.now().isoformat()
                 remaining.append(item)
 
         self._save_pending_uploads(remaining)
         return uploaded_count
+    
+    def clear_old_queue_items(self, days: int = 30) -> int:
+        """Clear queue items older than specified days"""
+        pending_uploads = self._load_pending_uploads()
+        if not pending_uploads:
+            return 0
+        
+        cutoff = datetime.now().timestamp() - (days * 24 * 60 * 60)
+        remaining = []
+        cleared = 0
+        
+        for item in pending_uploads:
+            try:
+                queued_at = datetime.fromisoformat(item.get('queued_at', ''))
+                if queued_at.timestamp() > cutoff:
+                    remaining.append(item)
+                else:
+                    cleared += 1
+            except Exception:
+                remaining.append(item)
+        
+        self._save_pending_uploads(remaining)
+        return cleared
+    
+    def get_queue_status(self) -> dict:
+        """Get current queue status"""
+        pending_uploads = self._load_pending_uploads()
+        return {
+            'total': len(pending_uploads),
+            'items': pending_uploads,
+        }
     
     def set_backup_locations(self, location1: str, location2: str) -> bool:
         """
@@ -274,8 +547,15 @@ class BackupManager:
         return True
 
     def create_backup_and_upload(self, backup_name: str = None) -> bool:
+        """Create backup and upload to server"""
         if not self.create_backup(backup_name):
             return False
+        
+        # Check if auto-sync is enabled
+        if not self.get_sync_setting('auto_sync_enabled', True):
+            if self.last_backup_path:
+                self._queue_backup_upload(self.last_backup_path, self.last_backup_name)
+            return True
 
         if self.last_backup_path and self._upload_backup_file(self.last_backup_path, self.last_backup_name):
             return True
@@ -284,6 +564,109 @@ class BackupManager:
             self._queue_backup_upload(self.last_backup_path, self.last_backup_name)
 
         return True
+    
+    def get_server_backups(self) -> list:
+        """Get list of backups stored on server"""
+        api_key, subscription_id = self._get_upload_credentials()
+        if not api_key or not subscription_id:
+            return []
+        
+        api_url = self._resolve_server_api_url()
+        list_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups"
+        
+        try:
+            response = requests.get(
+                list_url,
+                params={
+                    'api_key': api_key,
+                    'subscription_id': subscription_id,
+                },
+                timeout=10,
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('backups', [])
+            else:
+                print(f"Failed to get server backups: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"Error getting server backups: {e}")
+            return []
+    
+    def download_server_backup(self, backup_id: int, destination_path: str = None) -> str:
+        """
+        Download and decrypt a backup from server
+        
+        Args:
+            backup_id: ID of the backup on server
+            destination_path: Local path to save (auto-generated if None)
+        
+        Returns:
+            str: Path to downloaded backup (empty string on failure)
+        """
+        api_key, subscription_id = self._get_upload_credentials()
+        if not api_key or not subscription_id:
+            return ''
+        
+        api_url = self._resolve_server_api_url()
+        download_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups/{backup_id}/download"
+        
+        try:
+            response = requests.get(
+                download_url,
+                params={
+                    'api_key': api_key,
+                    'subscription_id': subscription_id,
+                },
+                timeout=60,
+                stream=True,
+            )
+            
+            if response.status_code != 200:
+                print(f"Failed to download backup: {response.status_code}")
+                return ''
+            
+            # Determine destination path
+            if destination_path is None:
+                loc1, _ = self.get_backup_locations()
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                destination_path = str(Path(loc1) / f"server_backup_{timestamp}.db")
+            
+            # Save encrypted file
+            temp_path = destination_path + '.tmp'
+            with open(temp_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            # Check if file is encrypted (has encryption header)
+            try:
+                with open(temp_path, 'rb') as f:
+                    header = f.read(48)  # salt(32) + iv(16)
+                    if len(header) == 48:
+                        # File appears encrypted, decrypt it
+                        decrypted_path = self._decrypt_file(temp_path, destination_path)
+                        # Remove temp file
+                        try:
+                            Path(temp_path).unlink()
+                        except Exception:
+                            pass
+                        return decrypted_path
+                    else:
+                        # File is not encrypted, just rename
+                        shutil.move(temp_path, destination_path)
+                        return destination_path
+            except Exception as e:
+                print(f"Error processing downloaded backup: {e}")
+                # Just move temp file to destination
+                shutil.move(temp_path, destination_path)
+                return destination_path
+                
+        except Exception as e:
+            print(f"Error downloading server backup: {e}")
+            return ''
     
     def get_backups(self, max_count: int = 20) -> list:
         """

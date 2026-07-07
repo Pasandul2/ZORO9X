@@ -19,7 +19,8 @@ import {
   MapPin,
   Lock,
   UserCheck,
-  Receipt
+  Receipt,
+  Archive
 } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -58,6 +59,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children, darkMode, setDarkMo
     { icon: MapPin, label: 'Leads', path: '/admin/leads' },
     { icon: FileText, label: 'Quotations', path: '/admin/quotations' },
     { icon: Receipt, label: 'Invoices', path: '/admin/invoices' },
+    { icon: Archive, label: 'Client Backups', path: '/admin/backups' },
     { icon: TrendingUp, label: 'Analytics', path: '/admin/analytics' },
     { icon: Database, label: 'Database', path: '/admin/database' },
     { icon: Settings, label: 'Settings', path: '/admin/settings' },

@@ -107,8 +107,6 @@ interface ServerBackup {
   source: string;
   created_at: string;
   uploaded_at: string;
-  is_encrypted?: boolean;
-  storage_format?: string;
   download_url: string;
 }
 
@@ -1526,7 +1524,7 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                 </div>
 
                 <div className={`mb-4 rounded-lg border p-4 ${darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-100' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                  <p className="text-sm font-medium">Desktop backups sync automatically when the app reconnects online, and server copies stay encrypted at rest.</p>
+                  <p className="text-sm font-medium">Desktop backups sync automatically when the app reconnects online.</p>
                 </div>
 
                 {backupsLoading ? (
@@ -1550,7 +1548,6 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Date</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Size</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Source</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Storage</th>
                           <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Download</th>
                         </tr>
                       </thead>
@@ -1566,11 +1563,6 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
                             <td className="px-4 py-3 text-sm">{new Date(backup.uploaded_at || backup.created_at).toLocaleString()}</td>
                             <td className="px-4 py-3 text-sm">{formatBackupSize(Number(backup.file_size || 0))}</td>
                             <td className="px-4 py-3 text-sm capitalize">{backup.source}</td>
-                            <td className="px-4 py-3 text-sm">
-                              <span className={`rounded-full px-2 py-1 text-xs font-semibold ${backup.is_encrypted ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-300'}`}>
-                                {backup.is_encrypted ? 'Encrypted' : 'Plain'}
-                              </span>
-                            </td>
                             <td className="px-4 py-3 text-right">
                               <button
                                 type="button"

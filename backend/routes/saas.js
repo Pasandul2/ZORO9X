@@ -429,6 +429,25 @@ router.post('/admin/security/alerts/:id/resolve', authenticateToken, authenticat
 router.get('/admin/security/subscriptions/:id/devices', authenticateToken, authenticateAdmin, saasController.getSubscriptionDevices);
 
 // ============================================
+// ADMIN ROUTES - Backup Management
+// ============================================
+
+/**
+ * GET /api/saas/admin/backups
+ * Get all client backups across all subscriptions
+ * Requires admin authentication
+ * Query params: client_id, subscription_id, limit, offset
+ */
+router.get('/admin/backups', authenticateToken, authenticateAdmin, saasController.getAllClientBackups);
+
+/**
+ * GET /api/saas/admin/backups/:backupId/download
+ * Download any client backup
+ * Requires admin authentication
+ */
+router.get('/admin/backups/:backupId/download', authenticateToken, authenticateAdmin, saasController.downloadClientBackup);
+
+// ============================================
 // DATABASE SYNC ROUTES (No authentication - uses API key)
 // ============================================
 

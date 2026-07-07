@@ -124,6 +124,93 @@ class DashboardPage:
         for text, cmd, kind in actions:
             btn = self.theme.make_button(btn_frame, text=text, command=cmd, kind=kind, width=16, pady=8)
             btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Backup status card (admin only)
+        if self.user['role'] == 'admin':
+            try:
+                from backup_manager import get_backup_manager
+                backup_mgr = get_backup_manager()
+                
+                backup_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
+                backup_card.pack(fill=tk.X, pady=(0, 16))
+                
+                # Header
+                backup_header = tk.Frame(backup_card.inner, bg=self.theme.palette.bg_surface)
+                backup_header.pack(fill=tk.X, padx=16, pady=(12, 8))
+                
+                tk.Label(
+                    backup_header,
+                    text='☁️ Cloud Backup Status',
+                    font=self.theme.fonts.h3,
+                    bg=self.theme.palette.bg_surface,
+                    fg=self.theme.palette.text_primary
+                ).pack(side=tk.LEFT)
+                
+                self.theme.make_button(
+                    backup_header,
+                    text='Manage',
+                    command=lambda: self.navigate('backup_settings'),
+                    kind='ghost',
+                    width=10,
+                    pady=4
+                ).pack(side=tk.RIGHT)
+                
+                # Status info
+                backup_info = tk.Frame(backup_card.inner, bg=self.theme.palette.bg_surface)
+                backup_info.pack(fill=tk.X, padx=16, pady=(0, 12))
+                
+                # Last sync time
+                last_sync = backup_mgr.get_last_sync_time()
+                if last_sync != 'Never':
+                    try:
+                        dt = datetime.fromisoformat(last_sync)
+                        last_sync = dt.strftime('%Y-%m-%d %H:%M')
+                    except Exception:
+                        pass
+                
+                sync_label = tk.Label(
+                    backup_info,
+                    text=f'Last sync: {last_sync}',
+                    font=self.theme.fonts.body,
+                    bg=self.theme.palette.bg_surface,
+                    fg=self.theme.palette.text_secondary
+                )
+                sync_label.pack(side=tk.LEFT, padx=(0, 20))
+                
+                # Queue status
+                queue = backup_mgr.get_queue_status()
+                queue_count = queue.get('total', 0)
+                
+                if queue_count > 0:
+                    queue_color = self.theme.palette.warning
+                    queue_text = f'⏳ {queue_count} pending upload(s)'
+                else:
+                    queue_color = self.theme.palette.success
+                    queue_text = '✓ All synced'
+                
+                tk.Label(
+                    backup_info,
+                    text=queue_text,
+                    font=self.theme.fonts.body,
+                    bg=self.theme.palette.bg_surface,
+                    fg=queue_color
+                ).pack(side=tk.LEFT)
+                
+                # Auto-sync status
+                auto_sync = backup_mgr.get_sync_setting('auto_sync_enabled', True)
+                status_text = 'Auto-sync: ON' if auto_sync else 'Auto-sync: OFF'
+                status_color = self.theme.palette.success if auto_sync else self.theme.palette.text_muted
+                
+                tk.Label(
+                    backup_info,
+                    text=status_text,
+                    font=self.theme.fonts.body,
+                    bg=self.theme.palette.bg_surface,
+                    fg=status_color
+                ).pack(side=tk.LEFT, padx=(20, 0))
+                
+            except Exception as e:
+                print(f"Error loading backup status: {e}")
 
         # Recent loans table
         recent_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)

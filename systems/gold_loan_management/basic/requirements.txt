@@ -3,3 +3,4 @@ Pillow
 pywebview
 pyinstaller
 pywin32
+cryptography

@@ -283,7 +283,6 @@ class GoldLoanSystemApp:
         self.theme = GOLD_THEME
         self.current_user = None
         self.heartbeat_job = None
-        self.backup_sync_job = None
         self.is_offline = False
 
         # Load configuration
@@ -313,7 +312,6 @@ class GoldLoanSystemApp:
             # Create initial backup on app start
             self.backup_manager.create_backup_and_queue()
             self.backup_manager.sync_pending_uploads()
-            self._start_backup_sync_scheduler()
         except Exception as e:
             print(f"Warning: Backup manager initialization failed: {e}")
             self.backup_manager = None
@@ -1166,6 +1164,10 @@ class GoldLoanSystemApp:
         elif page_name == 'print_ticket':
             from pages.print_ticket import PrintTicketPage
             PrintTicketPage(self.page_content, self.theme, self.current_user, self.navigate, param).render()
+        
+        elif page_name == 'backup_settings':
+            from pages.backup_settings import BackupSettingsPage
+            BackupSettingsPage(self.page_content, self.theme, self.current_user, self.navigate, self.backup_manager).show()
 
         # Some pages resize async; enforce top position after geometry updates to avoid blank top gaps.
         self.root.after_idle(lambda: self.page_canvas.yview_moveto(0))
@@ -1230,24 +1232,6 @@ class GoldLoanSystemApp:
             self.sms_scheduler_job = self.root.after(30000, sms_tick)
 
         self.sms_scheduler_job = self.root.after(5000, sms_tick) # Start first tick after 5 seconds
-
-    def _start_backup_sync_scheduler(self):
-        if self.backup_sync_job:
-            try:
-                self.root.after_cancel(self.backup_sync_job)
-            except Exception:
-                pass
-
-        def backup_tick():
-            try:
-                if self.backup_manager:
-                    self.backup_manager.sync_pending_uploads()
-            except Exception as e:
-                print(f"Warning: backup sync scheduler failed: {e}")
-            finally:
-                self.backup_sync_job = self.root.after(60000, backup_tick)
-
-        self.backup_sync_job = self.root.after(60000, backup_tick)
 
     def _check_sms_scheduler(self):
         # We need database functions

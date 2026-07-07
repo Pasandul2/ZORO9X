@@ -19,114 +19,6 @@ let renewalSchemaReady = false;
 let deviceRuntimeSchemaReady = false;
 let backupSchemaReady = false;
 
-const BACKUP_ENCRYPTION_MAGIC = Buffer.from('Z9BKP1');
-const BACKUP_ENCRYPTION_IV_LENGTH = 16;
-
-function getBackupEncryptionKey() {
-  const secret = process.env.ZORO9X_BACKUP_ENCRYPTION_SECRET
-    || process.env.JWT_SECRET
-    || 'your_jwt_secret_key_change_this_in_production_12345678';
-
-  return crypto.createHash('sha256').update(String(secret)).digest();
-}
-
-function isEncryptedBackupPath(filePath) {
-  return /\.enc$/i.test(String(filePath || ''));
-}
-
-function sanitizeDownloadFilename(fileName) {
-  return String(fileName || 'backup.db').replace(/[\r\n"]/g, '_');
-}
-
-function deriveBackupDownloadName(backup) {
-  const plainName = backup?.original_name || backup?.backup_name || path.basename(backup?.file_path || 'backup.db');
-  const normalized = path.basename(String(plainName || 'backup.db'));
-  return normalized.endsWith('.enc') ? normalized.replace(/\.enc$/i, '') : normalized;
-}
-
-function encryptBackupFile(sourcePath, destinationPath) {
-  return new Promise((resolve, reject) => {
-    const iv = crypto.randomBytes(BACKUP_ENCRYPTION_IV_LENGTH);
-    const cipher = crypto.createCipheriv('aes-256-cbc', getBackupEncryptionKey(), iv);
-    const inputStream = fs.createReadStream(sourcePath);
-    const outputStream = fs.createWriteStream(destinationPath);
-
-    outputStream.on('error', reject);
-    inputStream.on('error', reject);
-    cipher.on('error', reject);
-
-    outputStream.write(BACKUP_ENCRYPTION_MAGIC);
-    outputStream.write(iv);
-
-    inputStream.pipe(cipher).pipe(outputStream);
-    outputStream.on('finish', resolve);
-  });
-}
-
-function streamBackupFile(backup, res) {
-  return new Promise((resolve, reject) => {
-    const filePath = backup.file_path;
-    const downloadName = sanitizeDownloadFilename(deriveBackupDownloadName(backup));
-
-    if (!filePath || !fs.existsSync(filePath)) {
-      reject(new Error('Backup file is missing on the server'));
-      return;
-    }
-
-    if (!isEncryptedBackupPath(filePath)) {
-      res.download(filePath, downloadName, (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-      return;
-    }
-
-    const fileHandle = fs.openSync(filePath, 'r');
-    const header = Buffer.alloc(BACKUP_ENCRYPTION_MAGIC.length + BACKUP_ENCRYPTION_IV_LENGTH);
-    fs.readSync(fileHandle, header, 0, header.length, 0);
-    fs.closeSync(fileHandle);
-
-    const magic = header.subarray(0, BACKUP_ENCRYPTION_MAGIC.length);
-    if (!magic.equals(BACKUP_ENCRYPTION_MAGIC)) {
-      res.download(filePath, downloadName, (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-      return;
-    }
-
-    const iv = header.subarray(BACKUP_ENCRYPTION_MAGIC.length);
-    const decipher = crypto.createDecipheriv('aes-256-cbc', getBackupEncryptionKey(), iv);
-    const inputStream = fs.createReadStream(filePath, { start: header.length });
-
-    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-
-    const cleanup = (error) => {
-      inputStream.destroy();
-      decipher.destroy();
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    };
-
-    inputStream.on('error', cleanup);
-    decipher.on('error', cleanup);
-    res.on('error', cleanup);
-    res.on('finish', () => cleanup());
-
-    inputStream.pipe(decipher).pipe(res);
-  });
-}
-
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
   const stats = exists && fs.statSync(src);
@@ -537,6 +429,29 @@ async function ensureBackupSchema() {
       INDEX idx_backup_uploaded_at (uploaded_at)
     )
   `);
+  
+  // Add encryption metadata columns
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_backups
+      ADD COLUMN is_encrypted BOOLEAN DEFAULT FALSE
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add is_encrypted column:', err.message);
+    }
+  }
+  
+  try {
+    await pool.execute(`
+      ALTER TABLE subscription_backups
+      ADD COLUMN encryption_method VARCHAR(50) NULL
+    `);
+  } catch (err) {
+    if (err.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('Warning: Could not add encryption_method column:', err.message);
+    }
+  }
 
   backupSchemaReady = true;
 }
@@ -664,22 +579,6 @@ function parseJsonObject(rawValue, fallback = {}) {
   } catch (error) {
     return fallback;
   }
-}
-
-async function getAccessibleSubscription(subscriptionId, user) {
-  if (user?.role === 'admin' || user?.role === 'super_admin') {
-    const [rows] = await pool.execute(
-      `SELECT id, client_id, api_key
-       FROM client_subscriptions
-       WHERE id = ?
-       LIMIT 1`,
-      [subscriptionId]
-    );
-
-    return rows[0] || null;
-  }
-
-  return getOwnedSubscription(subscriptionId, user?.id);
 }
 
 function boolFromValue(value) {
@@ -3548,7 +3447,7 @@ exports.uploadSubscriptionBackup = async (req, res) => {
     await ensureBackupSchema();
 
     const subscriptionId = Number(req.params.subscriptionId || req.body.subscription_id || 0);
-    const { api_key, source = 'desktop', backup_name } = req.body;
+    const { api_key, source = 'desktop', backup_name, is_encrypted } = req.body;
 
     if (!subscriptionId || !api_key) {
       return res.status(400).json({
@@ -3584,30 +3483,34 @@ exports.uploadSubscriptionBackup = async (req, res) => {
 
     const originalName = backup_name || req.file.originalname || path.basename(req.file.path);
     const safeName = String(originalName).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const plainName = safeName.endsWith('.db') ? safeName : `${safeName.replace(/\.[^/.]+$/, '')}.db`;
-    const encryptedName = `${plainName}.enc`;
-    const finalPath = path.join(storageDir, `${Date.now()}_${encryptedName}`);
+    const finalName = safeName.endsWith('.db') ? safeName : `${safeName.replace(/\.[^/.]+$/, '')}.db`;
+    const finalPath = path.join(storageDir, `${Date.now()}_${finalName}`);
 
-    await encryptBackupFile(req.file.path, finalPath);
-    if (fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file.path !== finalPath) {
+      fs.renameSync(req.file.path, finalPath);
     }
 
     const fileSize = fs.existsSync(finalPath) ? fs.statSync(finalPath).size : Number(req.file.size || 0);
+    
+    // Parse encryption flag
+    const isEncrypted = is_encrypted === 'true' || is_encrypted === true;
+    const encryptionMethod = isEncrypted ? 'AES-256-CBC' : null;
 
     const [insertResult] = await pool.execute(
       `INSERT INTO subscription_backups
-        (subscription_id, client_id, api_key, backup_name, original_name, file_path, file_size, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (subscription_id, client_id, api_key, backup_name, original_name, file_path, file_size, source, is_encrypted, encryption_method)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         subscription.id,
         subscription.client_id,
         api_key,
-        plainName,
+        path.basename(finalPath),
         originalName,
         finalPath,
         fileSize,
         source,
+        isEncrypted,
+        encryptionMethod,
       ]
     );
 
@@ -3618,11 +3521,11 @@ exports.uploadSubscriptionBackup = async (req, res) => {
       message: 'Backup uploaded successfully',
       backup: {
         id: insertResult.insertId,
-        backup_name: plainName,
-        original_name: originalName,
+        backup_name: path.basename(finalPath),
         file_size: fileSize,
         source,
-        storage_format: 'encrypted',
+        is_encrypted: isEncrypted,
+        encryption_method: encryptionMethod,
         uploaded_at: new Date().toISOString(),
       },
     });
@@ -3644,7 +3547,9 @@ exports.getSubscriptionBackups = async (req, res) => {
     await ensureBackupSchema();
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
-    const subscription = await getAccessibleSubscription(subscriptionId, req.user);
+    const userId = req.user.id;
+
+    const subscription = await getOwnedSubscription(subscriptionId, userId);
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -3653,7 +3558,7 @@ exports.getSubscriptionBackups = async (req, res) => {
     }
 
     const [backups] = await pool.execute(
-      `SELECT id, backup_name, original_name, file_size, source, created_at, uploaded_at, file_path
+      `SELECT id, backup_name, original_name, file_size, source, is_encrypted, encryption_method, created_at, uploaded_at
        FROM subscription_backups
        WHERE subscription_id = ?
        ORDER BY uploaded_at DESC, id DESC
@@ -3665,10 +3570,10 @@ exports.getSubscriptionBackups = async (req, res) => {
       success: true,
       backups: backups.map((backup) => ({
         ...backup,
-        is_encrypted: isEncryptedBackupPath(backup.file_path),
-        storage_format: isEncryptedBackupPath(backup.file_path) ? 'encrypted' : 'plain',
+        is_encrypted: Boolean(backup.is_encrypted),
         download_url: `/api/saas/subscriptions/${subscriptionId}/backups/${backup.id}/download`,
       })),
+    });
     });
   } catch (error) {
     console.error('Error listing subscription backups:', error);
@@ -3689,8 +3594,9 @@ exports.downloadSubscriptionBackup = async (req, res) => {
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
     const backupId = Number(req.params.backupId || 0);
+    const userId = req.user.id;
 
-    const subscription = await getAccessibleSubscription(subscriptionId, req.user);
+    const subscription = await getOwnedSubscription(subscriptionId, userId);
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -3718,8 +3624,7 @@ exports.downloadSubscriptionBackup = async (req, res) => {
       });
     }
 
-    await streamBackupFile(backup, res);
-    return;
+    return res.download(backup.file_path, backup.backup_name || path.basename(backup.file_path));
   } catch (error) {
     console.error('Error downloading subscription backup:', error);
     res.status(500).json({
@@ -3787,6 +3692,154 @@ exports.syncFromServer = async (req, res) => {
       success: false,
       message: 'Failed to sync data from server',
       error: error.message
+    });
+  }
+};
+
+/**
+ * Admin: Get all client backups across all subscriptions
+ */
+exports.getAllClientBackups = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    // Admin only - check in route middleware
+    const limit = Number(req.query.limit) || 100;
+    const offset = Number(req.query.offset) || 0;
+    const clientId = req.query.client_id ? Number(req.query.client_id) : null;
+    const subscriptionId = req.query.subscription_id ? Number(req.query.subscription_id) : null;
+
+    let query = `
+      SELECT 
+        sb.id,
+        sb.subscription_id,
+        sb.client_id,
+        sb.backup_name,
+        sb.original_name,
+        sb.file_size,
+        sb.source,
+        sb.is_encrypted,
+        sb.encryption_method,
+        sb.created_at,
+        sb.uploaded_at,
+        cs.subdomain,
+        c.email as client_email,
+        c.company_name as client_company,
+        s.name as system_name
+      FROM subscription_backups sb
+      JOIN client_subscriptions cs ON sb.subscription_id = cs.id
+      JOIN clients c ON sb.client_id = c.id
+      JOIN systems s ON cs.system_id = s.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    if (clientId) {
+      query += ' AND sb.client_id = ?';
+      params.push(clientId);
+    }
+
+    if (subscriptionId) {
+      query += ' AND sb.subscription_id = ?';
+      params.push(subscriptionId);
+    }
+
+    query += ' ORDER BY sb.uploaded_at DESC, sb.id DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    const [backups] = await pool.execute(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM subscription_backups sb WHERE 1=1';
+    const countParams = [];
+
+    if (clientId) {
+      countQuery += ' AND sb.client_id = ?';
+      countParams.push(clientId);
+    }
+
+    if (subscriptionId) {
+      countQuery += ' AND sb.subscription_id = ?';
+      countParams.push(subscriptionId);
+    }
+
+    const [countResult] = await pool.execute(countQuery, countParams);
+    const total = countResult[0].total;
+
+    res.json({
+      success: true,
+      backups: backups.map((backup) => ({
+        ...backup,
+        is_encrypted: Boolean(backup.is_encrypted),
+        download_url: `/api/saas/admin/backups/${backup.id}/download`,
+      })),
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + backups.length < total,
+      },
+    });
+  } catch (error) {
+    console.error('Error getting all client backups:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load backups',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Admin: Download any client backup
+ */
+exports.downloadClientBackup = async (req, res) => {
+  try {
+    await ensureBackupSchema();
+
+    const backupId = Number(req.params.backupId || 0);
+
+    if (!backupId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid backup ID',
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT sb.*, cs.subdomain, c.email as client_email, c.company_name
+       FROM subscription_backups sb
+       JOIN client_subscriptions cs ON sb.subscription_id = cs.id
+       JOIN clients c ON sb.client_id = c.id
+       WHERE sb.id = ?
+       LIMIT 1`,
+      [backupId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Backup not found',
+      });
+    }
+
+    const backup = rows[0];
+
+    if (!backup.file_path || !fs.existsSync(backup.file_path)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Backup file is missing on the server',
+      });
+    }
+
+    return res.download(backup.file_path, backup.backup_name || path.basename(backup.file_path));
+  } catch (error) {
+    console.error('Error downloading client backup:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download backup',
+      error: error.message,
     });
   }
 };
