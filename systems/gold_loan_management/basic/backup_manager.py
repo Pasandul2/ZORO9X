@@ -303,6 +303,32 @@ class BackupManager:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
 
+    def _get_device_fingerprint(self) -> str:
+        """Get device fingerprint for config decryption"""
+        import platform
+        import uuid
+        import hashlib
+        raw = '|'.join([platform.node(), platform.machine(), str(uuid.getnode())])
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+    
+    def _decrypt_config_value(self, value: str, device_fp: str) -> str:
+        """Decrypt an encrypted config value"""
+        if not value:
+            return ''
+        try:
+            import base64
+            import hashlib
+            
+            def xor_bytes(data, key_material):
+                key = hashlib.sha256(key_material.encode()).digest()
+                return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(data))
+            
+            decoded = base64.b64decode(value.encode('utf-8'))
+            decrypted = xor_bytes(decoded, f'config:{device_fp}')
+            return decrypted.decode('utf-8')
+        except Exception:
+            return value
+    
     def _resolve_server_api_url(self) -> str:
         env_url = (os.getenv('ZORO9X_PUBLIC_API_URL') or '').strip()
         if env_url.startswith('http://') or env_url.startswith('https://'):
@@ -322,13 +348,22 @@ class BackupManager:
         config = self._load_json_file(self.app_config_file)
         cache = self._load_json_file(self.license_cache_file)
 
-        api_key = (config.get('api_key') or '').strip()
+        device_fp = self._get_device_fingerprint()
+        
+        # Try to get encrypted api_key first, fallback to plain text
+        api_key_encrypted = config.get('api_key_encrypted', '')
+        if api_key_encrypted:
+            api_key = self._decrypt_config_value(api_key_encrypted, device_fp).strip()
+        else:
+            api_key = (config.get('api_key') or '').strip()
+        
         subscription_id = cache.get('subscription_id')
 
         print(f"Debug - Config file path: {self.app_config_file}")
         print(f"Debug - Config file exists: {self.app_config_file.exists()}")
         print(f"Debug - License cache path: {self.license_cache_file}")
         print(f"Debug - License cache exists: {self.license_cache_file.exists()}")
+        print(f"Debug - Has encrypted API key: {bool(api_key_encrypted)}")
         print(f"Debug - API key present: {bool(api_key)}")
         print(f"Debug - API key length: {len(api_key) if api_key else 0}")
         print(f"Debug - Subscription ID: {subscription_id}")
