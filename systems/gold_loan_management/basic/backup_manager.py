@@ -45,9 +45,13 @@ class BackupManager:
         self.db_file = db_file
         self.db_full_path = self.db_path / db_file
         self.config_file = self.db_path / 'backup_config.json'
+        
+        # Config and license files are in APP_DIR, not db_path
+        # APP_DIR is the same directory where the database file is located
         self.app_config_file = self.db_path / 'gold_loan_config.json'
         self.license_cache_file = self.db_path / 'gold_loan_license.json'
         self.server_api_url_file = self.db_path / 'server_api_url.txt'
+        
         self.pending_uploads_file = self.db_path / 'backup_upload_queue.json'
         self.default_backup_dir1 = self.db_path / 'backups'
         self.default_backup_dir2 = self.db_path / 'backups_cloud'
@@ -321,6 +325,14 @@ class BackupManager:
         api_key = (config.get('api_key') or '').strip()
         subscription_id = cache.get('subscription_id')
 
+        print(f"Debug - Config file path: {self.app_config_file}")
+        print(f"Debug - Config file exists: {self.app_config_file.exists()}")
+        print(f"Debug - License cache path: {self.license_cache_file}")
+        print(f"Debug - License cache exists: {self.license_cache_file.exists()}")
+        print(f"Debug - API key present: {bool(api_key)}")
+        print(f"Debug - API key length: {len(api_key) if api_key else 0}")
+        print(f"Debug - Subscription ID: {subscription_id}")
+        
         if not api_key or not subscription_id:
             return None, None
 
@@ -361,7 +373,12 @@ class BackupManager:
         """
         api_key, subscription_id = self._get_upload_credentials()
         if not api_key or not subscription_id:
-            return False, "No API credentials configured"
+            error_details = []
+            if not api_key:
+                error_details.append(f"API key not found in {self.app_config_file.name}")
+            if not subscription_id:
+                error_details.append(f"Subscription ID not found in {self.license_cache_file.name}")
+            return False, f"No API credentials configured\n\nMissing:\n" + "\n".join(error_details)
 
         backup_file = Path(backup_path)
         if not backup_file.exists():
