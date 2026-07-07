@@ -22,6 +22,7 @@ from database import (
     list_sms_templates,
     save_sms_template,
     search_customers,
+    search_customers_with_loan,
     search_loans,
     set_setting,
     add_scheduled_sms,
@@ -395,7 +396,7 @@ class SmsCenterPage:
         status_card = tk.Frame(status_frame, bg=status_bg,
                                highlightthickness=1, highlightbackground=self.MC.border,
                                padx=14, pady=8)
-        status_card.pack(side=tk.RIGHT)
+        status_card.pack(side=tk.RIGHT, padx=(8, 0))
 
         dot_color = self.MC.success if (sms_enabled and token_ok) else (self.MC.warning if sms_enabled else self.MC.text_muted)
         status_text = '●  Connected' if (sms_enabled and token_ok) else ('●  Enabled (no token)' if sms_enabled else '○  Disabled')
@@ -404,6 +405,16 @@ class SmsCenterPage:
                  bg=status_bg, fg=dot_color).pack(anchor='w')
         tk.Label(status_card, text='Text.lk Gateway', font=('Segoe UI', 8),
                  bg=status_bg, fg=self.MC.text_muted).pack(anchor='w')
+
+        # Reminders & Birthdays button — to the right of the status card
+        def _open_reminders():
+            from pages.morning_sms_popup import show_sms_reminders_popup
+            show_sms_reminders_popup(self.container.winfo_toplevel(), self.theme, self.user)
+
+        self._modern_button(
+            status_frame, '📨  Reminders & Birthdays', _open_reminders,
+            kind='primary', width=22, pady=6,
+        ).pack(side=tk.RIGHT, padx=(0, 10), pady=8)
 
         # ── Notebook with modern styling ──
         style = ttk.Style()
@@ -735,10 +746,10 @@ class SmsCenterPage:
             self.custom_manual_numbers.remove(number)
         self._refresh_recipient_tokens()
 
-    def _remove_selected_customer(self, cid):
-        self.custom_selected_ids.discard(cid)
-        if cid in self.custom_row_vars:
-            self.custom_row_vars[cid].set(False)
+    def _remove_selected_customer(self, row_key):
+        self.custom_selected_ids.discard(row_key)
+        if row_key in self.custom_row_vars:
+            self.custom_row_vars[row_key].set(False)
         self._update_custom_count()
         self._refresh_recipient_tokens()
 
@@ -746,30 +757,26 @@ class SmsCenterPage:
         for w in self.custom_tokens_frame.winfo_children():
             w.destroy()
 
-        all_customers = search_customers('')
         total = 0
+        loan_map = getattr(self, '_custom_loan_map', {})
 
-        for cid in list(self.custom_selected_ids):
-            customer = None
-            for c in all_customers:
-                if c['id'] == cid:
-                    customer = c
-                    break
-            if not customer:
+        for row_key in list(self.custom_selected_ids):
+            loan = loan_map.get(row_key)
+            if not loan:
                 continue
             total += 1
             token = tk.Frame(self.custom_tokens_frame, bg=self.MC.surface,
                              highlightthickness=1, highlightbackground=self.MC.border,
                              padx=8, pady=4)
             token.pack(fill=tk.X, padx=6, pady=2)
-            tk.Label(token, text=f"👤 {customer['name']}", font=('Segoe UI', 9),
-                     bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT)
-            tk.Label(token, text=customer.get('phone', ''), font=('Segoe UI', 8),
+            tk.Label(token, text=f"🎫 {loan.get('display_ticket', '')}  👤 {loan['name']}",
+                     font=('Segoe UI', 9), bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT)
+            tk.Label(token, text=loan.get('phone', ''), font=('Segoe UI', 8),
                      bg=self.MC.surface, fg=self.MC.text_muted).pack(side=tk.LEFT, padx=(8, 0))
             rm_btn = tk.Label(token, text='  ✕  ', font=('Segoe UI', 10, 'bold'),
                               bg=self.MC.surface, fg=self.MC.danger, cursor='hand2')
             rm_btn.pack(side=tk.RIGHT)
-            rm_btn.bind('<Button-1>', lambda _, c=cid: self._remove_selected_customer(c))
+            rm_btn.bind('<Button-1>', lambda _, k=row_key: self._remove_selected_customer(k))
 
         for num in list(self.custom_manual_numbers):
             total += 1
@@ -787,7 +794,7 @@ class SmsCenterPage:
             rm_btn.bind('<Button-1>', lambda _, n=num: self._remove_manual_number(n))
 
         if total == 0:
-            tk.Label(self.custom_tokens_frame, text='No recipients selected yet.\nSelect customers or add numbers.',
+            tk.Label(self.custom_tokens_frame, text='No recipients selected yet.\nSelect loans or add numbers.',
                      font=('Segoe UI', 9), bg=self.MC.surface_alt,
                      fg=self.MC.text_muted, justify='center').pack(pady=20)
 
@@ -795,7 +802,7 @@ class SmsCenterPage:
 
     def _refresh_custom_customers(self):
         query = self.custom_search_var.get().strip()
-        results = search_customers(query)
+        results = search_customers_with_loan(query)
         self.custom_results = results
 
         for w in self.custom_rows_frame.winfo_children():
@@ -803,48 +810,73 @@ class SmsCenterPage:
         self.custom_row_vars.clear()
 
         if not results:
-            tk.Label(self.custom_rows_frame, text='No customers found.',
+            tk.Label(self.custom_rows_frame, text='No loans found.',
                      font=('Segoe UI', 9), bg=self.MC.surface,
                      fg=self.MC.text_muted).pack(anchor='w', padx=6, pady=8)
             return
 
-        for customer in results:
-            cid = customer['id']
-            var = tk.BooleanVar(value=cid in self.custom_selected_ids)
-            self.custom_row_vars[cid] = var
+        STATUS_COLORS = {'active': self.MC.success, 'redeemed': self.MC.text_muted,
+                         'forfeited': self.MC.danger, 'renewed': self.MC.warning}
+
+        for loan in results:
+            # unique key per row = loan_id
+            row_key = f"loan_{loan['loan_id']}"
+            var = tk.BooleanVar(value=row_key in self.custom_selected_ids)
+            self.custom_row_vars[row_key] = var
+            # store full loan dict so send can use phone + loan context
+            if not hasattr(self, '_custom_loan_map'):
+                self._custom_loan_map = {}
+            self._custom_loan_map[row_key] = loan
+
             row = tk.Frame(self.custom_rows_frame, bg=self.MC.surface)
             row.pack(fill=tk.X, pady=1)
 
             tk.Checkbutton(
                 row, variable=var,
-                command=lambda c=cid: self._toggle_custom_customer(c),
+                command=lambda k=row_key: self._toggle_custom_customer(k),
                 bg=self.MC.surface, selectcolor=self.MC.surface,
                 activebackground=self.MC.surface,
             ).pack(side=tk.LEFT)
-            tk.Label(row, text=customer['name'], font=('Segoe UI', 9),
-                     bg=self.MC.surface, fg=self.MC.text, anchor='w').pack(side=tk.LEFT, padx=(0, 6))
-            tk.Label(row, text=customer.get('phone', ''), font=('Segoe UI', 8),
+
+            # Ticket no
+            ticket = loan.get('display_ticket', '')
+            status = (loan.get('loan_status') or 'active').lower()
+            tk.Label(row, text=ticket, font=('Segoe UI', 9, 'bold'),
+                     bg=self.MC.surface, fg=STATUS_COLORS.get(status, self.MC.primary),
+                     anchor='w', width=10).pack(side=tk.LEFT, padx=(0, 4))
+
+            # Customer name
+            tk.Label(row, text=loan['name'], font=('Segoe UI', 9),
+                     bg=self.MC.surface, fg=self.MC.text, anchor='w', width=28).pack(side=tk.LEFT, padx=(0, 4))
+
+            # Status badge
+            tk.Label(row, text=status.upper(), font=('Segoe UI', 7, 'bold'),
+                     bg=self.MC.surface, fg=STATUS_COLORS.get(status, self.MC.text_muted),
+                     anchor='w', width=12).pack(side=tk.LEFT, padx=(0, 4))
+
+            # Phone
+            tk.Label(row, text=loan.get('phone', ''), font=('Segoe UI', 8),
                      bg=self.MC.surface, fg=self.MC.text_muted, anchor='w').pack(side=tk.LEFT)
 
         self._update_custom_count()
 
-    def _toggle_custom_customer(self, cid):
-        var = self.custom_row_vars.get(cid)
+    def _toggle_custom_customer(self, row_key):
+        var = self.custom_row_vars.get(row_key)
         if var and var.get():
-            self.custom_selected_ids.add(cid)
+            self.custom_selected_ids.add(row_key)
         else:
-            self.custom_selected_ids.discard(cid)
+            self.custom_selected_ids.discard(row_key)
         self._update_custom_count()
         self._refresh_recipient_tokens()
 
     def _toggle_custom_select_all(self):
         select_all = self.custom_select_all_var.get()
-        for cid, var in self.custom_row_vars.items():
+        for key, var in self.custom_row_vars.items():
             var.set(select_all)
             if select_all:
-                self.custom_selected_ids.add(cid)
+                self.custom_selected_ids.add(key)
             else:
-                self.custom_selected_ids.discard(cid)
+                self.custom_selected_ids.discard(key)
         self._update_custom_count()
         self._refresh_recipient_tokens()
 
@@ -866,19 +898,18 @@ class SmsCenterPage:
             self._toast('SMS', 'Message cannot be empty.', 'warning')
             return
 
+        loan_map = getattr(self, '_custom_loan_map', {})
         recipients = []
-        all_customers = search_customers('')
-        for cid in self.custom_selected_ids:
-            for c in all_customers:
-                if c['id'] == cid:
-                    recipients.append(c)
-                    break
+        for row_key in self.custom_selected_ids:
+            loan = loan_map.get(row_key)
+            if loan:
+                recipients.append(loan)
 
         for num in getattr(self, 'custom_manual_numbers', []):
-            recipients.append({'phone': num, 'name': num})
+            recipients.append({'phone': num, 'name': num, 'id': None})
 
         if not recipients:
-            self._toast('SMS', 'Select customers or add recipient numbers.', 'warning')
+            self._toast('SMS', 'Select loans or add recipient numbers.', 'warning')
             return
 
         if len(recipients) > 1:
@@ -888,9 +919,12 @@ class SmsCenterPage:
         sent = failed = 0
         for r in recipients:
             phone = r.get('phone', '')
-            context = build_sms_context(customer=r, message=raw_message)
+            customer = {'id': r.get('id') or r.get('customer_id'), 'name': r.get('name', ''),
+                        'nic': r.get('nic', ''), 'phone': phone}
+            context = build_sms_context(customer=customer, loan=r, message=raw_message)
             final_message = render_template(raw_message, context)
-            ok, _, _ = send_sms(phone, final_message, customer=r, category='custom', sent_by=self.user['id'])
+            ok, _, _ = send_sms(phone, final_message, customer=customer, loan=r,
+                                category='custom', sent_by=self.user['id'])
             if ok:
                 sent += 1
             else:

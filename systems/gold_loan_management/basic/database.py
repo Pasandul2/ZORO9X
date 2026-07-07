@@ -296,6 +296,22 @@ def init_database(db_path=None):
         FOREIGN KEY (created_by) REFERENCES users(id)
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_reminder_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_id INTEGER NOT NULL,
+        reminder_month TEXT NOT NULL,
+        sent_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(loan_id, reminder_month)
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_birthday_wishes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        wish_year TEXT NOT NULL,
+        sent_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(customer_id, wish_year)
+    )''')
+
     # Backward-compatible schema updates for existing databases.
     loan_cols = {row['name'] for row in c.execute("PRAGMA table_info(loans)").fetchall()}
     if 'renew_date' not in loan_cols:
@@ -740,6 +756,31 @@ def search_customers(query='', db_path=None):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def search_customers_with_loan(query='', db_path=None):
+    """Return one row per loan (all statuses), searchable by name/nic/phone/ticket_no."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT l.id AS loan_id, l.ticket_no, l.status AS loan_status,
+                  l.loan_amount, l.expire_date,
+                  c.id AS customer_id, c.name, c.nic, c.phone, c.address,
+                  c.birthday, c.job, c.marital_status, c.language
+           FROM customers c
+           JOIN loans l ON l.customer_id = c.id
+           WHERE c.name LIKE ? OR c.nic LIKE ? OR c.phone LIKE ? OR l.ticket_no LIKE ?
+           ORDER BY l.id DESC""",
+        (f'%{query}%', f'%{query}%', f'%{query}%', f'%{query}%')
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        # keep customer id as 'id' so existing code that reads customer['id'] still works
+        d['id'] = d['customer_id']
+        d['display_ticket'] = d.get('ticket_no', '')
+        result.append(d)
+    return result
 
 
 def get_customer(customer_id, db_path=None):
@@ -1290,6 +1331,150 @@ def clear_cash_for_date(date_str, db_path=None):
     conn.execute("DELETE FROM cash_register WHERE transaction_date=?", (date_str,))
     conn.commit()
     conn.close()
+
+
+# ── SMS Reminder helpers ──
+
+def get_active_loans_for_reminder(db_path=None):
+    """Return active loans with customer phone for monthly reminder scheduling."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT l.*, c.name AS customer_name, c.nic AS customer_nic,
+                  c.phone AS customer_phone, c.id AS customer_id_ref
+           FROM loans l
+           JOIN customers c ON l.customer_id = c.id
+           WHERE l.status = 'active'
+           ORDER BY l.expire_date ASC"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_reminder_sent_months(loan_id, db_path=None):
+    """Return set of reminder_month strings already sent for a loan."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT reminder_month FROM sms_reminder_log WHERE loan_id=?", (loan_id,)
+    ).fetchall()
+    conn.close()
+    return {r['reminder_month'] for r in rows}
+
+
+def mark_reminder_sent(loan_id, reminder_month, db_path=None):
+    """Record that a monthly reminder was sent for a loan."""
+    conn = get_connection(db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO sms_reminder_log (loan_id, reminder_month) VALUES (?,?)",
+        (loan_id, reminder_month),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_due_reminder_loans(db_path=None):
+    """Return active loans that need a reminder SMS today (monthly on issue-day cadence)."""
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT l.*, c.name AS customer_name, c.nic AS customer_nic,
+                  c.phone AS customer_phone
+           FROM loans l
+           JOIN customers c ON l.customer_id = c.id
+           WHERE l.status = 'active'
+           ORDER BY l.issue_date ASC"""
+    ).fetchall()
+    conn.close()
+
+    today = datetime.now().date()
+    today_str = today.strftime('%Y-%m-%d')
+    due = []
+    for row in rows:
+        loan = dict(row)
+        issue_str = loan.get('issue_date', '')
+        if not issue_str:
+            continue
+        try:
+            issue = datetime.strptime(issue_str[:10], '%Y-%m-%d').date()
+        except ValueError:
+            continue
+
+        # Check every month from issue+1 month up to today
+        check = issue
+        found_pending = False
+        for _ in range(120):  # up to 10 years
+            month = check.month + 1
+            year = check.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            try:
+                day = min(issue.day, [31,29 if year % 4 == 0 else 28,31,30,31,30,31,31,30,31,30,31][month-1])
+                next_date = check.replace(year=year, month=month, day=day)
+            except ValueError:
+                break
+
+            if next_date > today:
+                break
+            check = next_date
+
+            reminder_month = next_date.strftime('%Y-%m')
+            sent_months = get_reminder_sent_months(loan['id'], db_path)
+            if reminder_month not in sent_months:
+                loan['reminder_month'] = reminder_month
+                loan['reminder_date'] = next_date.strftime('%Y-%m-%d')
+                found_pending = True
+                break
+
+        if found_pending:
+            due.append(loan)
+
+    return due
+
+
+# ── Birthday wish helpers ──
+
+def get_wished_customer_ids_this_year(db_path=None):
+    """Return set of customer IDs already wished this calendar year."""
+    conn = get_connection(db_path)
+    year = datetime.now().strftime('%Y')
+    rows = conn.execute(
+        "SELECT customer_id FROM sms_birthday_wishes WHERE wish_year=?", (year,)
+    ).fetchall()
+    conn.close()
+    return {r['customer_id'] for r in rows}
+
+
+def mark_birthday_wish_sent(customer_id, db_path=None):
+    """Record that a birthday wish was sent this year."""
+    year = datetime.now().strftime('%Y')
+    conn = get_connection(db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO sms_birthday_wishes (customer_id, wish_year) VALUES (?,?)",
+        (customer_id, year),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_due_birthday_customers(db_path=None):
+    """Return customers whose birthday is today and haven't been wished this year."""
+    today = datetime.now().date()
+    today_mmdd = today.strftime('%m-%d')
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT * FROM customers WHERE birthday IS NOT NULL AND birthday != ''"
+    ).fetchall()
+    conn.close()
+
+    year = str(today.year)
+    wished = get_wished_customer_ids_this_year(db_path)
+    result = []
+    for row in rows:
+        c = dict(row)
+        bday = c.get('birthday', '')
+        if not bday or len(bday) < 5:
+            continue
+        if bday[5:] == today_mmdd and c['id'] not in wished:
+            c['next_birthday'] = today.strftime('%Y-%m-%d')
+            result.append(c)
+    return result
 
 
 def get_sms_template(category, db_path=None):

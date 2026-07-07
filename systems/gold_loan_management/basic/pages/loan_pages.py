@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from database import (search_loans, get_loan, get_loan_items, get_loan_renewals,
                       get_loan_payments, update_loan_status, get_approval_request_by_loan, get_duration_rate,
-                      get_setting, list_customer_letters)
+                      get_setting, list_customer_letters, list_sms_messages_filtered)
 from utils import (format_currency, format_date, get_status_text, get_status_color,
                    calculate_total_payable, is_overdue)
 
@@ -806,6 +806,54 @@ class LoanHistoryPage:
         else:
             tk.Label(payment_card.inner, text='No payment records found.', font=self.theme.fonts.body,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 10))
+
+        # ── SMS History for this loan ──
+        sms_msgs = list_sms_messages_filtered(limit=200)
+        loan_sms = [m for m in sms_msgs if m.get('loan_id') == self.loan_id]
+
+        sms_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
+        sms_card.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(sms_card.inner, text=f'📨 SMS History ({len(loan_sms)})', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(anchor='w', padx=14, pady=(10, 6))
+
+        if loan_sms:
+            cols = ('created_at', 'category', 'status', 'recipient', 'message')
+            hdrs = ('Date / Time', 'Category', 'Status', 'Recipient', 'Message')
+            widths = (140, 100, 70, 120, 360)
+
+            tree_frame = tk.Frame(sms_card.inner, bg=self.theme.palette.bg_surface)
+            tree_frame.pack(fill=tk.X, padx=14, pady=(0, 12))
+
+            tree = ttk.Treeview(tree_frame, columns=cols, show='headings', height=min(len(loan_sms), 8))
+            for col, hd, wd in zip(cols, hdrs, widths):
+                tree.heading(col, text=hd)
+                tree.column(col, width=wd, anchor='w')
+
+            vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+            tree.configure(yscrollcommand=vsb.set)
+            vsb.pack(side=tk.RIGHT, fill=tk.Y)
+            tree.pack(fill=tk.X, expand=False)
+
+            STATUS_COLORS_SMS = {'sent': '#10b981', 'failed': '#ef4444', 'pending': '#f59e0b'}
+            CAT_LABELS = {
+                'auto_reminder': 'Reminder', 'birthday': 'Birthday',
+                'auto_new_loan': 'New Loan', 'auto_renewal': 'Renewal',
+                'auto_redemption': 'Redemption', 'custom': 'Custom',
+                'promotion': 'Promo', 'order_status': 'Status',
+            }
+            for msg in loan_sms:
+                cat = CAT_LABELS.get(msg.get('category', ''), msg.get('category', ''))
+                tree.insert('', tk.END, values=(
+                    str(msg.get('created_at', ''))[:16],
+                    cat,
+                    (msg.get('status') or '').upper(),
+                    msg.get('recipient', ''),
+                    (msg.get('message') or '').replace('\n', ' ')[:120],
+                ))
+        else:
+            tk.Label(sms_card.inner, text='No SMS messages sent for this loan.',
+                     font=self.theme.fonts.body, bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_muted).pack(anchor='w', padx=14, pady=(0, 10))
 
     def _build_display_payments(self, payments, renewals):
         renewal_entries = []

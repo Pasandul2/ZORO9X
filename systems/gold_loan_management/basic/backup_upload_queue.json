@@ -649,6 +649,71 @@
       "backup_path": "D:\\GLB\\backup_20260702_230641.db",
       "backup_name": "backup_20260702_230641.db",
       "queued_at": "2026-07-02T23:06:41.133288"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_104633.db",
+      "backup_name": "backup_20260706_104633.db",
+      "queued_at": "2026-07-06T10:46:33.354816"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_131602.db",
+      "backup_name": "backup_20260706_131602.db",
+      "queued_at": "2026-07-06T13:16:02.396318"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_143245.db",
+      "backup_name": "backup_20260706_143245.db",
+      "queued_at": "2026-07-06T14:32:45.893189"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_152918.db",
+      "backup_name": "backup_20260706_152918.db",
+      "queued_at": "2026-07-06T15:29:18.737067"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_154935.db",
+      "backup_name": "backup_20260706_154935.db",
+      "queued_at": "2026-07-06T15:49:35.307449"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_155833.db",
+      "backup_name": "backup_20260706_155833.db",
+      "queued_at": "2026-07-06T15:58:33.888660"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_160110.db",
+      "backup_name": "backup_20260706_160110.db",
+      "queued_at": "2026-07-06T16:01:10.082936"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_160501.db",
+      "backup_name": "backup_20260706_160501.db",
+      "queued_at": "2026-07-06T16:05:01.396945"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260706_161047.db",
+      "backup_name": "backup_20260706_161047.db",
+      "queued_at": "2026-07-06T16:10:47.340602"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260707_110109.db",
+      "backup_name": "backup_20260707_110109.db",
+      "queued_at": "2026-07-07T11:01:09.811446"
+    },
+    {
+      "backup_path": "D:\\GLB\\backup_20260707_110119.db",
+      "backup_name": "backup_20260707_110119.db",
+      "queued_at": "2026-07-07T11:01:19.663915"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260707_175200.db",
+      "backup_name": "backup_20260707_175200.db",
+      "queued_at": "2026-07-07T17:52:00.044591"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260707_175232.db",
+      "backup_name": "backup_20260707_175232.db",
+      "queued_at": "2026-07-07T17:52:32.406253"
     }
   ]
 }

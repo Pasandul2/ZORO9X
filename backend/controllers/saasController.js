@@ -19,6 +19,114 @@ let renewalSchemaReady = false;
 let deviceRuntimeSchemaReady = false;
 let backupSchemaReady = false;
 
+const BACKUP_ENCRYPTION_MAGIC = Buffer.from('Z9BKP1');
+const BACKUP_ENCRYPTION_IV_LENGTH = 16;
+
+function getBackupEncryptionKey() {
+  const secret = process.env.ZORO9X_BACKUP_ENCRYPTION_SECRET
+    || process.env.JWT_SECRET
+    || 'your_jwt_secret_key_change_this_in_production_12345678';
+
+  return crypto.createHash('sha256').update(String(secret)).digest();
+}
+
+function isEncryptedBackupPath(filePath) {
+  return /\.enc$/i.test(String(filePath || ''));
+}
+
+function sanitizeDownloadFilename(fileName) {
+  return String(fileName || 'backup.db').replace(/[\r\n"]/g, '_');
+}
+
+function deriveBackupDownloadName(backup) {
+  const plainName = backup?.original_name || backup?.backup_name || path.basename(backup?.file_path || 'backup.db');
+  const normalized = path.basename(String(plainName || 'backup.db'));
+  return normalized.endsWith('.enc') ? normalized.replace(/\.enc$/i, '') : normalized;
+}
+
+function encryptBackupFile(sourcePath, destinationPath) {
+  return new Promise((resolve, reject) => {
+    const iv = crypto.randomBytes(BACKUP_ENCRYPTION_IV_LENGTH);
+    const cipher = crypto.createCipheriv('aes-256-cbc', getBackupEncryptionKey(), iv);
+    const inputStream = fs.createReadStream(sourcePath);
+    const outputStream = fs.createWriteStream(destinationPath);
+
+    outputStream.on('error', reject);
+    inputStream.on('error', reject);
+    cipher.on('error', reject);
+
+    outputStream.write(BACKUP_ENCRYPTION_MAGIC);
+    outputStream.write(iv);
+
+    inputStream.pipe(cipher).pipe(outputStream);
+    outputStream.on('finish', resolve);
+  });
+}
+
+function streamBackupFile(backup, res) {
+  return new Promise((resolve, reject) => {
+    const filePath = backup.file_path;
+    const downloadName = sanitizeDownloadFilename(deriveBackupDownloadName(backup));
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      reject(new Error('Backup file is missing on the server'));
+      return;
+    }
+
+    if (!isEncryptedBackupPath(filePath)) {
+      res.download(filePath, downloadName, (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+      return;
+    }
+
+    const fileHandle = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(BACKUP_ENCRYPTION_MAGIC.length + BACKUP_ENCRYPTION_IV_LENGTH);
+    fs.readSync(fileHandle, header, 0, header.length, 0);
+    fs.closeSync(fileHandle);
+
+    const magic = header.subarray(0, BACKUP_ENCRYPTION_MAGIC.length);
+    if (!magic.equals(BACKUP_ENCRYPTION_MAGIC)) {
+      res.download(filePath, downloadName, (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+      return;
+    }
+
+    const iv = header.subarray(BACKUP_ENCRYPTION_MAGIC.length);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', getBackupEncryptionKey(), iv);
+    const inputStream = fs.createReadStream(filePath, { start: header.length });
+
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+
+    const cleanup = (error) => {
+      inputStream.destroy();
+      decipher.destroy();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    inputStream.on('error', cleanup);
+    decipher.on('error', cleanup);
+    res.on('error', cleanup);
+    res.on('finish', () => cleanup());
+
+    inputStream.pipe(decipher).pipe(res);
+  });
+}
+
 function copyRecursive(src, dest) {
   const exists = fs.existsSync(src);
   const stats = exists && fs.statSync(src);
@@ -556,6 +664,22 @@ function parseJsonObject(rawValue, fallback = {}) {
   } catch (error) {
     return fallback;
   }
+}
+
+async function getAccessibleSubscription(subscriptionId, user) {
+  if (user?.role === 'admin' || user?.role === 'super_admin') {
+    const [rows] = await pool.execute(
+      `SELECT id, client_id, api_key
+       FROM client_subscriptions
+       WHERE id = ?
+       LIMIT 1`,
+      [subscriptionId]
+    );
+
+    return rows[0] || null;
+  }
+
+  return getOwnedSubscription(subscriptionId, user?.id);
 }
 
 function boolFromValue(value) {
@@ -3460,11 +3584,13 @@ exports.uploadSubscriptionBackup = async (req, res) => {
 
     const originalName = backup_name || req.file.originalname || path.basename(req.file.path);
     const safeName = String(originalName).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const finalName = safeName.endsWith('.db') ? safeName : `${safeName.replace(/\.[^/.]+$/, '')}.db`;
-    const finalPath = path.join(storageDir, `${Date.now()}_${finalName}`);
+    const plainName = safeName.endsWith('.db') ? safeName : `${safeName.replace(/\.[^/.]+$/, '')}.db`;
+    const encryptedName = `${plainName}.enc`;
+    const finalPath = path.join(storageDir, `${Date.now()}_${encryptedName}`);
 
-    if (req.file.path !== finalPath) {
-      fs.renameSync(req.file.path, finalPath);
+    await encryptBackupFile(req.file.path, finalPath);
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
     }
 
     const fileSize = fs.existsSync(finalPath) ? fs.statSync(finalPath).size : Number(req.file.size || 0);
@@ -3477,7 +3603,7 @@ exports.uploadSubscriptionBackup = async (req, res) => {
         subscription.id,
         subscription.client_id,
         api_key,
-        path.basename(finalPath),
+        plainName,
         originalName,
         finalPath,
         fileSize,
@@ -3492,9 +3618,11 @@ exports.uploadSubscriptionBackup = async (req, res) => {
       message: 'Backup uploaded successfully',
       backup: {
         id: insertResult.insertId,
-        backup_name: path.basename(finalPath),
+        backup_name: plainName,
+        original_name: originalName,
         file_size: fileSize,
         source,
+        storage_format: 'encrypted',
         uploaded_at: new Date().toISOString(),
       },
     });
@@ -3516,9 +3644,7 @@ exports.getSubscriptionBackups = async (req, res) => {
     await ensureBackupSchema();
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
-    const userId = req.user.id;
-
-    const subscription = await getOwnedSubscription(subscriptionId, userId);
+    const subscription = await getAccessibleSubscription(subscriptionId, req.user);
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -3527,7 +3653,7 @@ exports.getSubscriptionBackups = async (req, res) => {
     }
 
     const [backups] = await pool.execute(
-      `SELECT id, backup_name, original_name, file_size, source, created_at, uploaded_at
+      `SELECT id, backup_name, original_name, file_size, source, created_at, uploaded_at, file_path
        FROM subscription_backups
        WHERE subscription_id = ?
        ORDER BY uploaded_at DESC, id DESC
@@ -3539,6 +3665,8 @@ exports.getSubscriptionBackups = async (req, res) => {
       success: true,
       backups: backups.map((backup) => ({
         ...backup,
+        is_encrypted: isEncryptedBackupPath(backup.file_path),
+        storage_format: isEncryptedBackupPath(backup.file_path) ? 'encrypted' : 'plain',
         download_url: `/api/saas/subscriptions/${subscriptionId}/backups/${backup.id}/download`,
       })),
     });
@@ -3561,9 +3689,8 @@ exports.downloadSubscriptionBackup = async (req, res) => {
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
     const backupId = Number(req.params.backupId || 0);
-    const userId = req.user.id;
 
-    const subscription = await getOwnedSubscription(subscriptionId, userId);
+    const subscription = await getAccessibleSubscription(subscriptionId, req.user);
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -3591,7 +3718,8 @@ exports.downloadSubscriptionBackup = async (req, res) => {
       });
     }
 
-    return res.download(backup.file_path, backup.backup_name || path.basename(backup.file_path));
+    await streamBackupFile(backup, res);
+    return;
   } catch (error) {
     console.error('Error downloading subscription backup:', error);
     res.status(500).json({

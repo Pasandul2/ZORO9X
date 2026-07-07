@@ -283,6 +283,7 @@ class GoldLoanSystemApp:
         self.theme = GOLD_THEME
         self.current_user = None
         self.heartbeat_job = None
+        self.backup_sync_job = None
         self.is_offline = False
 
         # Load configuration
@@ -312,6 +313,7 @@ class GoldLoanSystemApp:
             # Create initial backup on app start
             self.backup_manager.create_backup_and_queue()
             self.backup_manager.sync_pending_uploads()
+            self._start_backup_sync_scheduler()
         except Exception as e:
             print(f"Warning: Backup manager initialization failed: {e}")
             self.backup_manager = None
@@ -1021,11 +1023,20 @@ class GoldLoanSystemApp:
 
         # Show morning cash popup if enabled
         self.root.after(1000, lambda: self._show_morning_cash_popup())
+        # Show morning SMS popup (reminders + birthdays) — 2s after cash popup
+        self.root.after(2500, lambda: self._show_morning_sms_popup())
 
     def _show_morning_cash_popup(self):
         try:
             from pages.cash_management import show_morning_cash_popup
             show_morning_cash_popup(self.root, self.theme, self.current_user, db_file=self.db_file)
+        except Exception:
+            pass
+
+    def _show_morning_sms_popup(self):
+        try:
+            from pages.morning_sms_popup import show_morning_sms_popup
+            show_morning_sms_popup(self.root, self.theme, self.current_user, db_path=self.db_file)
         except Exception:
             pass
 
@@ -1219,6 +1230,24 @@ class GoldLoanSystemApp:
             self.sms_scheduler_job = self.root.after(30000, sms_tick)
 
         self.sms_scheduler_job = self.root.after(5000, sms_tick) # Start first tick after 5 seconds
+
+    def _start_backup_sync_scheduler(self):
+        if self.backup_sync_job:
+            try:
+                self.root.after_cancel(self.backup_sync_job)
+            except Exception:
+                pass
+
+        def backup_tick():
+            try:
+                if self.backup_manager:
+                    self.backup_manager.sync_pending_uploads()
+            except Exception as e:
+                print(f"Warning: backup sync scheduler failed: {e}")
+            finally:
+                self.backup_sync_job = self.root.after(60000, backup_tick)
+
+        self.backup_sync_job = self.root.after(60000, backup_tick)
 
     def _check_sms_scheduler(self):
         # We need database functions

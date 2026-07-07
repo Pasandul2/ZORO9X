@@ -899,7 +899,6 @@ class AdminSettingsPage:
             ('Auto SMS on New Loan', 'sms_auto_new_loan'),
             ('Auto SMS on Renewal', 'sms_auto_renewal'),
             ('Auto SMS on Redemption', 'sms_auto_redemption'),
-            ('Auto SMS Reminders', 'sms_auto_reminder'),
         ]:
             tk.Checkbutton(
                 switch_box,
@@ -910,6 +909,13 @@ class AdminSettingsPage:
                 selectcolor=self.theme.palette.bg_surface_alt,
                 font=self.theme.fonts.body,
             ).pack(anchor='w', padx=12, pady=(0, 6))
+
+        tk.Label(
+            switch_box,
+            text='ℹ️  Loan Reminders & Birthday Wishes are sent manually via the morning popup on first daily launch.',
+            font=('Segoe UI', 9), bg=self.theme.palette.bg_surface_alt,
+            fg=self.theme.palette.text_muted, wraplength=560, justify='left',
+        ).pack(anchor='w', padx=12, pady=(0, 10))
 
         tk.Label(
             form,
