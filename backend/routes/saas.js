@@ -479,7 +479,10 @@ router.get('/subscriptions/:subscriptionId/backups', async (req, res) => {
     
     if (token) {
       // Web dashboard access - verify JWT and ownership
-      return saasController.getSubscriptionBackups(req, res);
+      // Need to authenticate the token first
+      return authenticateToken(req, res, () => {
+        return saasController.getSubscriptionBackups(req, res);
+      });
     } else if (apiKey) {
       // Desktop app access - verify API key matches subscription
       return saasController.getSubscriptionBackupsViaApiKey(req, res);
