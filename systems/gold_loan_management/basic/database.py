@@ -49,12 +49,39 @@ def init_database(db_path=None):
             # Database is corrupted or encrypted, remove it
             print(f"Warning: Corrupted database detected: {e}")
             print(f"Removing corrupted database: {db_file_to_use}")
-            try:
-                os.remove(db_file_to_use)
-                print("Corrupted database removed. Creating fresh database...")
-            except Exception as remove_error:
-                print(f"Error removing corrupted database: {remove_error}")
-                raise Exception(f"Cannot remove corrupted database file: {db_file_to_use}")
+            
+            # Wait a moment for any locks to release
+            import time
+            time.sleep(0.5)
+            
+            # Try to remove with retries
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    if os.path.exists(db_file_to_use):
+                        os.remove(db_file_to_use)
+                        print("Corrupted database removed. Creating fresh database...")
+                        break
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        print(f"Database is locked, waiting... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(1)
+                    else:
+                        # Last attempt failed, try alternative approach
+                        print("Cannot remove database file directly. Renaming instead...")
+                        try:
+                            backup_name = f"{db_file_to_use}.corrupted.{int(time.time())}"
+                            os.rename(db_file_to_use, backup_name)
+                            print(f"Corrupted database renamed to: {backup_name}")
+                            print("You can manually delete it later.")
+                            break
+                        except Exception as rename_error:
+                            print(f"Error renaming corrupted database: {rename_error}")
+                            print("Please close any programs that might be using the database file and try again.")
+                            raise Exception(f"Cannot remove or rename corrupted database file. Please close all programs and delete manually: {db_file_to_use}")
+                except Exception as remove_error:
+                    print(f"Error removing corrupted database: {remove_error}")
+                    raise Exception(f"Cannot remove corrupted database file: {db_file_to_use}")
 
     conn = get_connection(db_path)
     c = conn.cursor()
