@@ -175,3 +175,8 @@ These systems are proprietary software licensed to ZORO9X clients based on their
 
 **ZORO9X** - SaaS Management Platform
 Version 1.0.0
+
+
+cd C:\ZORO9X\systems\gold_loan_management\basic
+$env:ZORO9X_DEV_BYPASS_LICENSE="1"; python gold_loan_app.py
+.\BUILD.bat   
