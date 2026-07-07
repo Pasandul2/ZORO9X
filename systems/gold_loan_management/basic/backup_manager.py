@@ -467,9 +467,10 @@ class BackupManager:
                 errors.append(f"{backup_name}: File not found")
                 continue
             
-            # Skip if max retries exceeded
+            # Skip if max retries exceeded but keep in queue
             if retry_count >= max_retries:
                 errors.append(f"{backup_name}: Max retries exceeded")
+                remaining.append(item)  # Keep in queue so user can retry manually
                 continue
 
             result, error = self._upload_backup_file(backup_path, backup_name, source='queued')
@@ -485,6 +486,20 @@ class BackupManager:
 
         self._save_pending_uploads(remaining)
         return uploaded_count, errors
+    
+    def reset_queue_retry_counts(self) -> int:
+        """Reset retry counts for all queued items"""
+        pending_uploads = self._load_pending_uploads()
+        reset_count = 0
+        
+        for item in pending_uploads:
+            if item.get('retry_count', 0) > 0:
+                item['retry_count'] = 0
+                item['last_error'] = ''
+                reset_count += 1
+        
+        self._save_pending_uploads(pending_uploads)
+        return reset_count
     
     def clear_old_queue_items(self, days: int = 30) -> int:
         """Clear queue items older than specified days"""

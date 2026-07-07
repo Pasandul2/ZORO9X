@@ -216,6 +216,19 @@ Frontend:
 - ✅ Installer will include all dependencies via BUILD.bat
 - ✅ No additional build script changes needed
 
+### Task 8.3: Fix Sync Queue Issues
+**Status:** completed
+**Description:** Fix sync feature showing "Synced 0 backup(s)" despite queued items
+
+**Implementation:**
+- ✅ Modified `_upload_backup_file()` to return `tuple[bool, str]` with error messages
+- ✅ Modified `sync_pending_uploads()` to return `tuple[int, list]` with error list
+- ✅ Updated UI to show detailed error popups instead of console logs
+- ✅ Added `reset_queue_retry_counts()` method to reset retry counts
+- ✅ Added "Reset & Retry" button to Upload Queue card in backup_settings.py
+- ✅ Button resets all retry counts and starts upload with error popup display
+- ✅ Real errors (connection/auth/server issues) now visible to users
+
 ---
 
 ## Priority Order

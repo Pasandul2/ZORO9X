@@ -4,9 +4,17 @@
       "backup_path": "C:\\GLB\\backup_20260708_002806.db",
       "backup_name": "backup_20260708_002806.db",
       "queued_at": "2026-07-08T00:28:06.782905",
-      "retry_count": 2,
+      "retry_count": 1,
       "last_error": "No API credentials configured",
-      "last_retry": "2026-07-08T00:28:16.759784"
+      "last_retry": "2026-07-08T00:48:18.723003"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260708_004753.db",
+      "backup_name": "backup_20260708_004753.db",
+      "queued_at": "2026-07-08T00:47:53.487350",
+      "retry_count": 1,
+      "last_error": "No API credentials configured",
+      "last_retry": "2026-07-08T00:48:18.723118"
     }
   ]
 }

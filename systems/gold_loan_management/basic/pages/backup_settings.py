@@ -486,6 +486,14 @@ class BackupSettingsPage:
             
             self.theme.make_button(
                 btn_frame,
+                text='Reset & Retry',
+                command=self._reset_and_retry_queue,
+                kind='secondary',
+                width=15
+            ).pack(side=tk.LEFT, padx=5)
+            
+            self.theme.make_button(
+                btn_frame,
                 text='Clear Old Items',
                 command=self._clear_old_queue,
                 kind='ghost',
@@ -602,6 +610,41 @@ class BackupSettingsPage:
     def _process_queue(self):
         """Process upload queue"""
         self._sync_now()
+    
+    def _reset_and_retry_queue(self):
+        """Reset retry counts and process queue"""
+        if not messagebox.askyesno('Confirm', 'Reset retry counts for all queued backups and try uploading again?'):
+            return
+        
+        if self.sync_in_progress:
+            messagebox.showwarning('In Progress', 'Sync already in progress')
+            return
+        
+        try:
+            # Reset retry counts
+            reset_count = self.backup_manager.reset_queue_retry_counts()
+            
+            if reset_count == 0:
+                messagebox.showinfo('No Items', 'No queue items to reset')
+                return
+            
+            messagebox.showinfo('Reset', f'Reset {reset_count} queue item(s). Starting upload...')
+            
+            # Start sync in background
+            self.sync_in_progress = True
+            
+            def sync_thread():
+                try:
+                    count, errors = self.backup_manager.sync_pending_uploads()
+                    self.container.after(0, lambda: self._sync_complete(count, errors))
+                except Exception as e:
+                    self.container.after(0, lambda: self._sync_error(str(e)))
+            
+            thread = threading.Thread(target=sync_thread, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            messagebox.showerror('Error', f'Reset failed: {str(e)}')
     
     def _clear_old_queue(self):
         """Clear old queue items"""
