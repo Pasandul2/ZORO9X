@@ -504,8 +504,35 @@ router.get('/subscriptions/:subscriptionId/backups', async (req, res) => {
 /**
  * GET /api/saas/subscriptions/:subscriptionId/backups/:backupId/download
  * Download a specific backup file
+ * Supports both JWT token and API key authentication
  */
-router.get('/subscriptions/:subscriptionId/backups/:backupId/download', authenticateToken, saasController.downloadSubscriptionBackup);
+router.get('/subscriptions/:subscriptionId/backups/:backupId/download', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    
+    if (token) {
+      // Web dashboard - authenticate with JWT
+      return authenticateToken(req, res, () => {
+        return saasController.downloadSubscriptionBackup(req, res);
+      });
+    } else if (apiKey) {
+      // Desktop app - API key auth handled in controller
+      return saasController.downloadSubscriptionBackup(req, res);
+    } else {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+  } catch (error) {
+    console.error('Error in backup download route:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+});
 
 /**
  * POST /api/saas/sync/from-server

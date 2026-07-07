@@ -737,24 +737,33 @@ class BackupManager:
         """
         api_key, subscription_id = self._get_upload_credentials()
         if not api_key or not subscription_id:
+            print("Error: No API credentials configured")
             return ''
         
         api_url = self._resolve_server_api_url()
         download_url = f"{api_url}/api/saas/subscriptions/{subscription_id}/backups/{backup_id}/download"
         
         try:
+            print(f"Downloading backup from: {download_url}")
+            
             response = requests.get(
                 download_url,
                 params={
                     'api_key': api_key,
-                    'subscription_id': subscription_id,
+                },
+                headers={
+                    'X-API-Key': api_key,
                 },
                 timeout=60,
                 stream=True,
             )
             
+            print(f"Download response status: {response.status_code}")
+            
             if response.status_code != 200:
+                error_text = response.text[:500]
                 print(f"Failed to download backup: {response.status_code}")
+                print(f"Error response: {error_text}")
                 return ''
             
             # Determine destination path
@@ -763,38 +772,51 @@ class BackupManager:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 destination_path = str(Path(loc1) / f"server_backup_{timestamp}.db")
             
-            # Save encrypted file
+            print(f"Saving to: {destination_path}")
+            
+            # Get backup metadata to check if encrypted
+            backups = self.get_server_backups()
+            backup_info = next((b for b in backups if b.get('id') == backup_id), None)
+            is_encrypted = backup_info.get('is_encrypted', False) if backup_info else False
+            
+            print(f"Backup is encrypted: {is_encrypted}")
+            
+            # Save downloaded file
             temp_path = destination_path + '.tmp'
             with open(temp_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
             
-            # Check if file is encrypted (has encryption header)
-            try:
-                with open(temp_path, 'rb') as f:
-                    header = f.read(48)  # salt(32) + iv(16)
-                    if len(header) == 48:
-                        # File appears encrypted, decrypt it
-                        decrypted_path = self._decrypt_file(temp_path, destination_path)
-                        # Remove temp file
-                        try:
-                            Path(temp_path).unlink()
-                        except Exception:
-                            pass
-                        return decrypted_path
-                    else:
-                        # File is not encrypted, just rename
-                        shutil.move(temp_path, destination_path)
-                        return destination_path
-            except Exception as e:
-                print(f"Error processing downloaded backup: {e}")
-                # Just move temp file to destination
+            print(f"Downloaded {Path(temp_path).stat().st_size} bytes")
+            
+            # Decrypt if encrypted
+            if is_encrypted and ENCRYPTION_AVAILABLE:
+                print("Decrypting backup...")
+                decrypted_path = self._decrypt_file(temp_path, destination_path)
+                # Remove temp file
+                try:
+                    Path(temp_path).unlink()
+                except Exception:
+                    pass
+                
+                if decrypted_path and decrypted_path != temp_path:
+                    print(f"Backup decrypted successfully: {decrypted_path}")
+                    return decrypted_path
+                else:
+                    print("Decryption failed, using encrypted file")
+                    shutil.move(temp_path, destination_path)
+                    return destination_path
+            else:
+                # File is not encrypted, just rename
                 shutil.move(temp_path, destination_path)
+                print(f"Backup saved: {destination_path}")
                 return destination_path
                 
         except Exception as e:
             print(f"Error downloading server backup: {e}")
+            import traceback
+            traceback.print_exc()
             return ''
     
     def get_backups(self, max_count: int = 20) -> list:

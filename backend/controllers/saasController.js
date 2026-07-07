@@ -3643,6 +3643,7 @@ exports.getSubscriptionBackupsViaApiKey = async (req, res) => {
 
 /**
  * Download a stored server backup
+ * Supports both JWT token (web dashboard) and API key (desktop app) authentication
  */
 exports.downloadSubscriptionBackup = async (req, res) => {
   try {
@@ -3650,13 +3651,36 @@ exports.downloadSubscriptionBackup = async (req, res) => {
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
     const backupId = Number(req.params.backupId || 0);
-    const userId = req.user.id;
+    
+    // Check authentication method
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    
+    if (apiKey) {
+      // Desktop app access - verify API key matches subscription
+      const [subscriptions] = await pool.execute(
+        `SELECT id FROM client_subscriptions WHERE id = ? AND api_key = ?`,
+        [subscriptionId, apiKey]
+      );
 
-    const subscription = await getOwnedSubscription(subscriptionId, userId);
-    if (!subscription) {
-      return res.status(404).json({
+      if (subscriptions.length === 0) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid API key for this subscription',
+        });
+      }
+    } else if (req.user && req.user.id) {
+      // Web dashboard access - verify JWT and ownership
+      const subscription = await getOwnedSubscription(subscriptionId, req.user.id);
+      if (!subscription) {
+        return res.status(404).json({
+          success: false,
+          message: 'Subscription not found'
+        });
+      }
+    } else {
+      return res.status(401).json({
         success: false,
-        message: 'Subscription not found'
+        message: 'Authentication required',
       });
     }
 
