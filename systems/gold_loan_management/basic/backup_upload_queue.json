@@ -100,25 +100,65 @@
       "backup_path": "C:\\GLB\\backup_20260709_153714.db",
       "backup_name": "backup_20260709_153714.db",
       "queued_at": "2026-07-09T15:37:14.270532",
-      "retry_count": 2,
+      "retry_count": 3,
       "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
-      "last_retry": "2026-07-09T15:40:00.561316"
+      "last_retry": "2026-07-09T16:24:28.884761"
     },
     {
       "backup_path": "C:\\GLB\\backup_20260709_153723.db",
       "backup_name": "backup_20260709_153723.db",
       "queued_at": "2026-07-09T15:37:23.560365",
-      "retry_count": 2,
+      "retry_count": 3,
       "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
-      "last_retry": "2026-07-09T15:40:00.564559"
+      "last_retry": "2026-07-09T16:24:28.886104"
     },
     {
       "backup_path": "C:\\GLB\\backup_20260709_154000.db",
       "backup_name": "backup_20260709_154000.db",
       "queued_at": "2026-07-09T15:40:00.450454",
+      "retry_count": 3,
+      "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
+      "last_retry": "2026-07-09T16:29:43.729773"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260709_162428.db",
+      "backup_name": "backup_20260709_162428.db",
+      "queued_at": "2026-07-09T16:24:28.842854",
+      "retry_count": 3,
+      "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
+      "last_retry": "2026-07-09T16:32:11.962426"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260709_162430.db",
+      "backup_name": "backup_20260709_162430.db",
+      "queued_at": "2026-07-09T16:24:30.694659",
+      "retry_count": 3,
+      "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
+      "last_retry": "2026-07-09T16:35:50.120705"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260709_162943.db",
+      "backup_name": "backup_20260709_162943.db",
+      "queued_at": "2026-07-09T16:29:43.626581",
+      "retry_count": 3,
+      "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
+      "last_retry": "2026-07-09T16:35:50.122702"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260709_163211.db",
+      "backup_name": "backup_20260709_163211.db",
+      "queued_at": "2026-07-09T16:32:11.913780",
+      "retry_count": 2,
+      "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
+      "last_retry": "2026-07-09T16:35:50.123983"
+    },
+    {
+      "backup_path": "C:\\GLB\\backup_20260709_163550.db",
+      "backup_name": "backup_20260709_163550.db",
+      "queued_at": "2026-07-09T16:35:50.013716",
       "retry_count": 1,
       "last_error": "No API credentials configured\n\nMissing:\nAPI key not found in gold_loan_config.json\nSubscription ID not found in gold_loan_license.json",
-      "last_retry": "2026-07-09T15:40:00.566971"
+      "last_retry": "2026-07-09T16:35:50.125207"
     }
   ]
 }

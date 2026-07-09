@@ -2426,7 +2426,164 @@ class SmsCenterPage:
         vbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.hist_tree.pack(fill=tk.BOTH, expand=True)
 
+        # Tag colors for status
+        self.hist_tree.tag_configure('sent', foreground='#16a34a')
+        self.hist_tree.tag_configure('failed', foreground='#dc2626')
+        self.hist_tree.tag_configure('pending', foreground='#d97706')
+
+        # Bind click to show detail popup
+        self.hist_tree.bind('<ButtonRelease-1>', self._on_history_click)
+        self.hist_tree.bind('<Return>', self._on_history_click)
+
+        tk.Label(card, text='Click any row to view full message details',
+                 font=('Segoe UI', 8), bg=self.MC.surface,
+                 fg=self.MC.text_muted).pack(anchor='w', padx=16, pady=(0, 8))
+
+        self._history_data = {}  # iid -> full msg dict
         self._refresh_history()
+
+    def _on_history_click(self, _event=None):
+        sel = self.hist_tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        msg = self._history_data.get(iid)
+        if msg:
+            self._show_sms_detail(msg)
+
+    def _show_sms_detail(self, msg):
+        """Show a popup with full SMS message details."""
+        popup = tk.Toplevel(self.container)
+        popup.title('SMS Details')
+        popup.geometry('520x500')
+        popup.resizable(True, True)
+        popup.configure(bg=self.MC.surface)
+        popup.transient(self.container)
+        popup.grab_set()
+
+        # Center popup
+        popup.update_idletasks()
+        try:
+            x = self.container.winfo_rootx() + (self.container.winfo_width() - 520) // 2
+            y = self.container.winfo_rooty() + (self.container.winfo_height() - 500) // 2
+            popup.geometry(f'520x500+{max(0,x)}+{max(0,y)}')
+        except Exception:
+            pass
+
+        # Header color based on status
+        status_val = (msg.get('status', '') or '').lower()
+        status_colors = {'sent': '#10b981', 'failed': '#ef4444', 'pending': '#f59e0b'}
+        status_color = status_colors.get(status_val, self.MC.primary)
+
+        hdr = tk.Frame(popup, bg=status_color, height=52)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+        tk.Label(hdr, text=f'📱  SMS Detail  —  {status_val.upper()}',
+                 font=('Segoe UI', 12, 'bold'), bg=status_color, fg='#ffffff').pack(
+            side=tk.LEFT, padx=16)
+
+        # Scrollable body
+        canvas = tk.Canvas(popup, bg=self.MC.surface, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(popup, orient='vertical', command=canvas.yview)
+        body_frame = tk.Frame(canvas, bg=self.MC.surface)
+
+        body_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=body_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=16, pady=10)
+
+        def _row(label, value):
+            row = tk.Frame(body_frame, bg=self.MC.surface)
+            row.pack(fill=tk.X, pady=4)
+            tk.Label(row, text=label, font=('Segoe UI', 9, 'bold'),
+                     bg=self.MC.surface, fg=self.MC.text_muted,
+                     width=14, anchor='w').pack(side=tk.LEFT, padx=(0, 8))
+            tk.Label(row, text=str(value or '—'), font=('Segoe UI', 10),
+                     bg=self.MC.surface, fg=self.MC.text,
+                     anchor='w', wraplength=340, justify='left').pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        cat_label = CATEGORY_LABELS.get(msg.get('category', ''), msg.get('category', ''))
+        recipient_display = msg.get('customer_name') or msg.get('recipient', '')
+
+        _row('Date & Time:', msg.get('created_at', ''))
+        _row('Recipient:', recipient_display)
+        _row('Phone:', msg.get('recipient', ''))
+        if msg.get('customer_nic'):
+            _row('NIC:', msg.get('customer_nic', ''))
+        if msg.get('ticket_no'):
+            _row('Ticket No:', msg.get('ticket_no', ''))
+        _row('Category:', cat_label)
+        _row('Status:', status_val.upper())
+        if msg.get('error_message'):
+            _row('Error:', msg.get('error_message', ''))
+
+        # Message label
+        tk.Label(body_frame, text='Message:', font=('Segoe UI', 9, 'bold'),
+                 bg=self.MC.surface, fg=self.MC.text_muted, anchor='w').pack(
+            fill=tk.X, padx=(0, 0), pady=(8, 2))
+
+        # Message text box
+        txt_frame = tk.Frame(body_frame, bg=self.MC.border, padx=1, pady=1)
+        txt_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        txt = tk.Text(txt_frame, font=('Segoe UI', 10), wrap=tk.WORD,
+                      bg=self.MC.surface_alt, fg=self.MC.text,
+                      relief='flat', bd=0, padx=10, pady=8,
+                      height=7)
+        txt_sb = ttk.Scrollbar(txt_frame, orient=tk.VERTICAL, command=txt.yview)
+        txt.configure(yscrollcommand=txt_sb.set)
+        txt_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        txt.pack(fill=tk.BOTH, expand=True)
+        txt.insert('1.0', msg.get('message', '') or '')
+        txt.configure(state=tk.DISABLED)
+
+        # Close button (and optional Resend for failed)
+        btn_frame = tk.Frame(popup, bg=self.MC.surface)
+        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
+
+        if status_val == 'failed':
+            def _resend():
+                if not self._check_internet():
+                    self._toast('No Internet', 'Internet connection required to resend.', 'warning')
+                    return
+
+                msg_id = msg.get('id')
+                recipient = msg.get('recipient', '')
+                message = msg.get('message', '')
+                category = msg.get('category', '')
+                customer_id = msg.get('customer_id')
+                loan_id = msg.get('loan_id')
+
+                customer = None
+                if customer_id:
+                    customer = get_customer(customer_id)
+
+                ok, res_text, _ = send_sms(
+                    recipient=recipient,
+                    message=message,
+                    customer=customer,
+                    category=category,
+                    sent_by=self.user['id']
+                )
+
+                if ok:
+                    conn = get_connection()
+                    conn.execute("DELETE FROM sms_messages WHERE id = ?", (msg_id,))
+                    conn.commit()
+                    conn.close()
+                    self._toast('Success', f'SMS resent successfully to {recipient}!', 'success')
+                    popup.destroy()
+                    self._refresh_history()
+                else:
+                    self._toast('Failed', f'Resend failed: {res_text}', 'error')
+
+            self._modern_button(btn_frame, '🔄  Resend SMS', _resend,
+                                kind='primary', width=14, pady=7).pack(side=tk.LEFT)
+
+        self._modern_button(btn_frame, 'Close', popup.destroy,
+                            kind='ghost', width=12, pady=7).pack(side=tk.RIGHT)
 
     def _refresh_history(self):
         cat_map = {
@@ -2444,16 +2601,21 @@ class SmsCenterPage:
         for item in self.hist_tree.get_children():
             self.hist_tree.delete(item)
 
+        self._history_data.clear()
+
         for msg in messages:
             cat_label = CATEGORY_LABELS.get(msg.get('category', ''), msg.get('category', ''))
-            status_val = msg.get('status', '')
+            status_val = (msg.get('status', '') or '').lower()
             recipient_name = msg.get('customer_name') or msg.get('recipient', '')
             msg_preview = (msg.get('message', '') or '')[:80]
+            if len(msg.get('message', '') or '') > 80:
+                msg_preview += '…'
             date_val = msg.get('created_at', '')
 
-            self.hist_tree.insert('', tk.END, values=(
+            iid = self.hist_tree.insert('', tk.END, values=(
                 date_val, recipient_name, cat_label, status_val.upper(), msg_preview
-            ))
+            ), tags=(status_val,))
+            self._history_data[iid] = msg
 
         self.hist_total_var.set(f'{len(messages)} messages')
 
