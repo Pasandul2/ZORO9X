@@ -427,7 +427,8 @@ class _MorningSmsPopup:
         def _do_send():
             sent_ok = 0
             sent_fail = 0
-            today_str = datetime.now().strftime('%Y-%m-%d')
+            sent_rem_ids = set()
+            sent_bday_ids = set()
 
             # Reminders
             for loan in rem_selected:
@@ -473,6 +474,9 @@ class _MorningSmsPopup:
                 if ok:
                     if not is_custom:
                         mark_reminder_sent(loan['id'], loan['reminder_month'], db_path=self.db_path)
+                        sent_rem_ids.add(str(loan['id']))
+                    else:
+                        sent_rem_ids.add(f'custom_{recipient}')
                     sent_ok += 1
                 else:
                     sent_fail += 1
@@ -512,16 +516,27 @@ class _MorningSmsPopup:
                 if ok:
                     if not is_custom:
                         mark_birthday_wish_sent(cust['id'], db_path=self.db_path)
+                        sent_bday_ids.add(str(cust['id']))
+                    else:
+                        sent_bday_ids.add(f'custom_{recipient}')
                     sent_ok += 1
                 else:
                     sent_fail += 1
 
             def _done():
+                # Remove successfully sent rows from the check dicts and trees
+                for key in list(sent_rem_ids):
+                    self.reminder_checks.pop(key, None)
+                for key in list(sent_bday_ids):
+                    self.birthday_checks.pop(key, None)
+                self._refresh_reminder_list()
+                self._refresh_birthday_list()
+
                 parts = []
                 if sent_ok:
-                    parts.append(f'{sent_ok} sent')
+                    parts.append(f'{sent_ok} sent ✅')
                 if sent_fail:
-                    parts.append(f'{sent_fail} failed (see SMS Center > Failed tab)')
+                    parts.append(f'{sent_fail} failed ❌ (see SMS Center > Failed tab)')
                 self.status_var.set('  •  '.join(parts))
                 self.send_btn.config(state='normal')
                 if sent_fail == 0:
@@ -530,6 +545,31 @@ class _MorningSmsPopup:
             self.dlg.after(0, _done)
 
         threading.Thread(target=_do_send, daemon=True).start()
+
+    def _refresh_reminder_list(self):
+        """Remove successfully sent rows from the reminder tree."""
+        try:
+            nb = self.dlg.nametowidget(self.dlg.winfo_children()[1].winfo_children()[0].winfo_name())
+        except Exception:
+            pass  # tree refresh is best-effort; checks dict is already cleaned
+
+        # Walk all treeview widgets inside the dialog and remove sent iids
+        def _remove_from_trees(widget):
+            if isinstance(widget, ttk.Treeview):
+                for iid in list(widget.get_children()):
+                    if iid not in self.reminder_checks and iid not in self.birthday_checks:
+                        try:
+                            widget.delete(iid)
+                        except Exception:
+                            pass
+            for child in widget.winfo_children():
+                _remove_from_trees(child)
+
+        _remove_from_trees(self.dlg)
+
+    def _refresh_birthday_list(self):
+        """Birthday list shares the same tree-walk refresh — no-op here."""
+        pass  # _refresh_reminder_list handles both trees already
 
     def _build_preview_tab(self, parent, sms_type):
         """Build preview/edit tab for reminder or birthday SMS templates."""
