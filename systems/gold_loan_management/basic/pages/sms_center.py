@@ -153,11 +153,12 @@ ICONS = {
 class SmsCenterPage:
     """Premium SMS Center with glassmorphism design, 9 tabs, and rich features."""
 
-    def __init__(self, container, theme, user, navigate_fn):
+    def __init__(self, container, theme, user, navigate_fn, db_path=None):
         self.container = container
         self.theme = theme
         self.user = user
         self.navigate = navigate_fn
+        self.db_path = db_path
         self.templates = {}
         self.customers = []
         self.selected_customer = None
@@ -409,7 +410,7 @@ class SmsCenterPage:
         # Reminders & Birthdays button — to the right of the status card
         def _open_reminders():
             from pages.morning_sms_popup import show_sms_reminders_popup
-            show_sms_reminders_popup(self.container.winfo_toplevel(), self.theme, self.user)
+            show_sms_reminders_popup(self.container.winfo_toplevel(), self.theme, self.user, db_path=self.db_path)
 
         self._modern_button(
             status_frame, '📨  Reminders & Birthdays', _open_reminders,

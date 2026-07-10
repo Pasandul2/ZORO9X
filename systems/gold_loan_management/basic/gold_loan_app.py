@@ -1143,7 +1143,7 @@ class GoldLoanSystemApp:
 
         elif page_name == 'sms_center':
             from pages.sms_center import SmsCenterPage
-            SmsCenterPage(self.page_content, self.theme, self.current_user, self.navigate).render()
+            SmsCenterPage(self.page_content, self.theme, self.current_user, self.navigate, db_path=self.db_file).render()
 
         elif page_name == 'cash_management':
             from pages.cash_management import CashManagementPage
