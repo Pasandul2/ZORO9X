@@ -1418,7 +1418,7 @@ def mark_reminder_sent(loan_id, reminder_month, db_path=None):
 
 
 def get_due_reminder_loans(db_path=None):
-    """Return active loans that need a reminder SMS today (based on expire date + monthly intervals)."""
+    """Return active loans that need a reminder SMS this month (not yet sent)."""
     conn = get_connection(db_path)
     rows = conn.execute(
         """SELECT l.*, c.name AS customer_name, c.nic AS customer_nic,
@@ -1431,9 +1431,9 @@ def get_due_reminder_loans(db_path=None):
     conn.close()
 
     today = datetime.now().date()
-    today_str = today.strftime('%Y-%m-%d')
+    current_month = today.strftime('%Y-%m')
     due = []
-    
+
     for row in rows:
         loan = dict(row)
         expire_str = loan.get('expire_date', '')
@@ -1444,36 +1444,15 @@ def get_due_reminder_loans(db_path=None):
         except ValueError:
             continue
 
-        # Check reminders starting from expire date, then monthly after
-        check = expire_date
-        found_pending = False
-        
-        for _ in range(120):  # up to 10 years of monthly reminders
-            # Check if this reminder date has passed or is today
-            if check > today:
-                break
-                
-            reminder_month = check.strftime('%Y-%m')
-            sent_months = get_reminder_sent_months(loan['id'], db_path)
-            
-            if reminder_month not in sent_months:
-                loan['reminder_month'] = reminder_month
-                loan['reminder_date'] = check.strftime('%Y-%m-%d')
-                found_pending = True
-                break
-            
-            # Move to next month (same day of month as expire date)
-            month = check.month + 1
-            year = check.year + (month - 1) // 12
-            month = ((month - 1) % 12) + 1
-            try:
-                # Handle edge case where day doesn't exist in target month (e.g., Jan 31 -> Feb 28)
-                day = min(expire_date.day, [31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
-                check = check.replace(year=year, month=month, day=day)
-            except ValueError:
-                break
+        # Only show loans whose expire date has already passed (overdue)
+        if expire_date > today:
+            continue
 
-        if found_pending:
+        # Check if this month's reminder has already been sent
+        sent_months = get_reminder_sent_months(loan['id'], db_path)
+        if current_month not in sent_months:
+            loan['reminder_month'] = current_month
+            loan['reminder_date'] = today.strftime('%Y-%m-%d')
             due.append(loan)
 
     return due

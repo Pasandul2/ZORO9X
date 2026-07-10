@@ -502,11 +502,7 @@ class _MorningSmsPopup:
                 )
                 if ok:
                     if not is_custom:
-                        print(f"Debug: Marking reminder sent - loan_id={loan['id']}, month={loan.get('reminder_month')}, db_path={self.db_path}")
                         mark_reminder_sent(loan['id'], loan['reminder_month'], db_path=self.db_path)
-                        # Verify it was saved
-                        saved = get_reminder_sent_months(loan['id'], db_path=self.db_path)
-                        print(f"Debug: Saved reminder months for loan {loan['id']}: {saved}")
                         sent_rem_ids.add(str(loan['id']))
                     else:
                         sent_rem_ids.add(f'custom_{recipient}')
