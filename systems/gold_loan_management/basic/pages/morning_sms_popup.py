@@ -90,6 +90,8 @@ class _MorningSmsPopup:
             'Dear {{customer_name}},\n\nWishing you a very Happy Birthday! 🎂🎉\n\nWarm wishes,\n{{company_name}}'
         )
 
+        self._reminder_tree = None
+        self._birthday_tree = None
         self._build()
 
     def _build(self):
@@ -152,23 +154,42 @@ class _MorningSmsPopup:
         
         # Bind mousewheel scrolling
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            try:
+                if canvas.winfo_exists():
+                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                else:
+                    canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                try:
+                    canvas.unbind_all("<MouseWheel>")
+                except Exception:
+                    pass
         
         def _bind_mousewheel(event=None):
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
         
         def _unbind_mousewheel(event=None):
-            canvas.unbind_all("<MouseWheel>")
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
         
         canvas.bind('<Enter>', _bind_mousewheel)
         canvas.bind('<Leave>', _unbind_mousewheel)
         
         # When dialog closes, unbind mousewheel
         def _on_close():
-            canvas.unbind_all("<MouseWheel>")
-            dlg.destroy()
+            try:
+                canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
         
         dlg.protocol("WM_DELETE_WINDOW", _on_close)
+        dlg.bind('<Destroy>', lambda e: _unbind_mousewheel() if e.widget is dlg else None)
 
         # Notebook inside scrollable frame
         nb = ttk.Notebook(scrollable_frame)
@@ -275,9 +296,16 @@ class _MorningSmsPopup:
         for row in rows:
             key = str(row[row_key])   # string key everywhere
             var = tk.BooleanVar(value=True)
+            row['_tree_key'] = key    # store key in row for reliable retrieval
             checks[key] = {'var': var, 'row': row}
             values = ('✓',) + tuple(str(row.get(c, '') or '') for c in cols)
             tree.insert('', tk.END, iid=key, values=values)
+
+        # Store tree reference on self keyed by checks dict id so refresh can find it
+        if checks is self.reminder_checks:
+            self._reminder_tree = tree
+        elif checks is self.birthday_checks:
+            self._birthday_tree = tree
 
         def _set_row(key, value):
             checks[key]['var'].set(value)
@@ -474,7 +502,7 @@ class _MorningSmsPopup:
                 if ok:
                     if not is_custom:
                         mark_reminder_sent(loan['id'], loan['reminder_month'], db_path=self.db_path)
-                        sent_rem_ids.add(str(loan['id']))
+                        sent_rem_ids.add(loan.get('_tree_key') or str(loan.get('id', '')))
                     else:
                         sent_rem_ids.add(f'custom_{recipient}')
                     sent_ok += 1
@@ -516,7 +544,7 @@ class _MorningSmsPopup:
                 if ok:
                     if not is_custom:
                         mark_birthday_wish_sent(cust['id'], db_path=self.db_path)
-                        sent_bday_ids.add(str(cust['id']))
+                        sent_bday_ids.add(cust.get('_tree_key') or str(cust.get('id', '')))
                     else:
                         sent_bday_ids.add(f'custom_{recipient}')
                     sent_ok += 1
@@ -524,13 +552,26 @@ class _MorningSmsPopup:
                     sent_fail += 1
 
             def _done():
-                # Remove successfully sent rows from the check dicts and trees
+                # Remove successfully sent rows directly from checks dict AND tree
                 for key in list(sent_rem_ids):
                     self.reminder_checks.pop(key, None)
+                    tree = getattr(self, '_reminder_tree', None)
+                    if tree:
+                        try:
+                            if tree.exists(key):
+                                tree.delete(key)
+                        except Exception:
+                            pass
+
                 for key in list(sent_bday_ids):
                     self.birthday_checks.pop(key, None)
-                self._refresh_reminder_list()
-                self._refresh_birthday_list()
+                    tree = getattr(self, '_birthday_tree', None)
+                    if tree:
+                        try:
+                            if tree.exists(key):
+                                tree.delete(key)
+                        except Exception:
+                            pass
 
                 parts = []
                 if sent_ok:
@@ -548,28 +589,27 @@ class _MorningSmsPopup:
 
     def _refresh_reminder_list(self):
         """Remove successfully sent rows from the reminder tree."""
-        try:
-            nb = self.dlg.nametowidget(self.dlg.winfo_children()[1].winfo_children()[0].winfo_name())
-        except Exception:
-            pass  # tree refresh is best-effort; checks dict is already cleaned
-
-        # Walk all treeview widgets inside the dialog and remove sent iids
-        def _remove_from_trees(widget):
-            if isinstance(widget, ttk.Treeview):
-                for iid in list(widget.get_children()):
-                    if iid not in self.reminder_checks and iid not in self.birthday_checks:
-                        try:
-                            widget.delete(iid)
-                        except Exception:
-                            pass
-            for child in widget.winfo_children():
-                _remove_from_trees(child)
-
-        _remove_from_trees(self.dlg)
+        tree = getattr(self, '_reminder_tree', None)
+        if tree is None:
+            return
+        for iid in list(tree.get_children()):
+            if iid not in self.reminder_checks:
+                try:
+                    tree.delete(iid)
+                except Exception:
+                    pass
 
     def _refresh_birthday_list(self):
-        """Birthday list shares the same tree-walk refresh — no-op here."""
-        pass  # _refresh_reminder_list handles both trees already
+        """Remove successfully sent rows from the birthday tree."""
+        tree = getattr(self, '_birthday_tree', None)
+        if tree is None:
+            return
+        for iid in list(tree.get_children()):
+            if iid not in self.birthday_checks:
+                try:
+                    tree.delete(iid)
+                except Exception:
+                    pass
 
     def _build_preview_tab(self, parent, sms_type):
         """Build preview/edit tab for reminder or birthday SMS templates."""
