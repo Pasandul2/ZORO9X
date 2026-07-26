@@ -4,7 +4,8 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox
 from database import (get_loan, renew_loan, redeem_loan, get_loan_renewals,
-                      get_duration_rate, add_audit_log, create_approval_request, get_setting, get_sms_template)
+                      get_duration_rate, add_audit_log, create_approval_request, get_setting, get_sms_template,
+                      repawn_loan, restock_repawned_loan, get_repawn_history)
 from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, format_date, calculate_total_payable,
                    calculate_interest, get_expire_date, is_overdue)
@@ -898,5 +899,214 @@ class RedeemLoanPage:
                 })
             else:
                 self.navigate('loan_detail', self.loan_id)
+        else:
+            messagebox.showerror('Error', msg)
+
+
+class RepawnLoanPage:
+    """Page to confirm marking a loan as repawned (sent to another pawning centre for petty cash).
+    Financial amounts are NOT changed — only the loan status changes to 'repawned'."""
+
+    def __init__(self, container, theme, user, navigate_fn, loan_id):
+        self.container = container
+        self.theme = theme
+        self.user = user
+        self.navigate = navigate_fn
+        self.loan_id = loan_id
+
+    def render(self):
+        for w in self.container.winfo_children():
+            w.destroy()
+
+        loan = get_loan(self.loan_id)
+        if not loan:
+            messagebox.showerror('Error', 'Loan not found.')
+            self.navigate('loan_list')
+            return
+
+        # Guard: only active/renewed loans can be repawned
+        if loan.get('status') in ('redeemed', 'forfeited', 'repawned'):
+            messagebox.showerror(
+                'Cannot Repawn',
+                f"Loan {loan['ticket_no']} has status '{loan['status']}' and cannot be repawned."
+            )
+            self.navigate('loan_detail', self.loan_id)
+            return
+
+        self.loan = loan
+
+        view = tk.Frame(self.container, bg=self.theme.palette.bg_app)
+        view.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # Header
+        hdr = tk.Frame(view, bg=self.theme.palette.bg_app)
+        hdr.pack(fill=tk.X, pady=(0, 12))
+        back_btn = self.theme.make_button(hdr, text='← Back',
+                                          command=lambda: self.navigate('loan_detail', self.loan_id),
+                                          kind='ghost', width=8, pady=6)
+        back_btn.pack(side=tk.LEFT, padx=(0, 10))
+        tk.Label(hdr, text=f'♻ Repawn Loan: {loan["ticket_no"]}', font=self.theme.fonts.h1,
+                 bg=self.theme.palette.bg_app, fg='#a855f7').pack(side=tk.LEFT)
+
+        # Info notice
+        notice_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
+        notice_card.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(
+            notice_card.inner,
+            text=(
+                'ℹ  Repawning means this gold item is being sent to another pawning centre for petty cash.\n'
+                'The loan amounts, interest rates, and all financial values remain UNCHANGED.\n'
+                'Only the loan status changes to "REPAWNED". The item cannot be redeemed while repawned.\n'
+                'Use "Restock" to bring the item back to active status when it returns.'
+            ),
+            font=self.theme.fonts.body,
+            bg=self.theme.palette.bg_surface,
+            fg=self.theme.palette.text_primary,
+            justify='left',
+            wraplength=700,
+            anchor='w',
+        ).pack(padx=14, pady=12)
+
+        # Two-column layout
+        main = tk.Frame(view, bg=self.theme.palette.bg_app)
+        main.pack(fill=tk.BOTH, expand=True)
+        main.grid_columnconfigure(0, weight=1)
+        main.grid_columnconfigure(1, weight=1)
+
+        # Left — Loan summary (read-only)
+        left = tk.Frame(main, bg=self.theme.palette.bg_app)
+        left.grid(row=0, column=0, sticky='nsew', padx=(0, 6))
+
+        info_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
+        info_card.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(info_card.inner, text='📋 Current Loan Details', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(
+            anchor='w', padx=14, pady=(10, 6))
+
+        details = [
+            ('Ticket No', loan['ticket_no']),
+            ('Customer', loan['customer_name']),
+            ('NIC', loan['customer_nic']),
+            ('Loan Amount', format_currency(loan['loan_amount'])),
+            ('Interest Rate', f"{float(loan['interest_rate']):.1f}% / month"),
+            ('Duration', f"{loan['duration_months']} month(s)"),
+            ('Issue Date', format_date(loan['issue_date'])),
+            ('Expire Date', format_date(loan['expire_date'])),
+            ('Current Status', (loan.get('status') or '').upper()),
+        ]
+
+        dg = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
+        dg.pack(fill=tk.X, padx=14, pady=(0, 10))
+        dg.grid_columnconfigure(0, minsize=140, weight=0)
+        dg.grid_columnconfigure(1, weight=1)
+        for row_idx, (lbl, val) in enumerate(details):
+            tk.Label(dg, text=f'{lbl}:', font=self.theme.fonts.body_bold, anchor='w',
+                     bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_muted).grid(row=row_idx, column=0, sticky='w', pady=2)
+            tk.Label(dg, text=val or '-', font=self.theme.fonts.body, anchor='w',
+                     bg=self.theme.palette.bg_surface,
+                     fg=self.theme.palette.text_primary).grid(row=row_idx, column=1, sticky='w', padx=(8, 0), pady=2)
+
+        # Right — Repawn form
+        right = tk.Frame(main, bg=self.theme.palette.bg_app)
+        right.grid(row=0, column=1, sticky='nsew')
+
+        form_card = self.theme.make_card(right, bg=self.theme.palette.bg_surface)
+        form_card.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(form_card.inner, text='♻ Repawn Details', font=self.theme.fonts.h3,
+                 bg=self.theme.palette.bg_surface, fg='#a855f7').pack(anchor='w', padx=14, pady=(10, 8))
+
+        form = tk.Frame(form_card.inner, bg=self.theme.palette.bg_surface)
+        form.pack(fill=tk.X, padx=14, pady=(0, 14))
+
+        # Destination field
+        r1 = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        r1.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(r1, text='Destination Centre:', font=self.theme.fonts.body_bold, width=20, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.destination_var = tk.StringVar()
+        self.theme.make_entry(r1, variable=self.destination_var, width=24).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Remarks field
+        r2 = tk.Frame(form, bg=self.theme.palette.bg_surface)
+        r2.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(r2, text='Remarks:', font=self.theme.fonts.body_bold, width=20, anchor='w',
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        self.remarks_var = tk.StringVar()
+        self.theme.make_entry(r2, variable=self.remarks_var, width=24).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Warning notice
+        warn_frame = tk.Frame(form_card.inner, bg='#fef3c7',
+                              highlightbackground='#f59e0b', highlightthickness=1)
+        warn_frame.pack(fill=tk.X, padx=14, pady=(0, 12))
+        tk.Label(warn_frame,
+                 text='⚠  This item CANNOT be redeemed while in "Repawned" status.\n'
+                      '    Use "Restock" to return it to active status first.',
+                 font=self.theme.fonts.small, bg='#fef3c7', fg='#92400e', justify='left', anchor='w').pack(
+            padx=10, pady=8)
+
+        # Confirm button
+        btn_frame = tk.Frame(form_card.inner, bg=self.theme.palette.bg_surface)
+        btn_frame.pack(fill=tk.X, padx=14, pady=(0, 14))
+        self.theme.make_button(
+            btn_frame,
+            text='♻ Confirm — Mark As Repawned',
+            command=self._do_repawn,
+            kind='secondary',
+            width=30,
+            pady=10,
+        ).pack(fill=tk.X)
+
+        # Existing repawn history for this loan
+        hist = get_repawn_history(self.loan_id)
+        if hist:
+            hist_card = self.theme.make_card(view, bg=self.theme.palette.bg_surface)
+            hist_card.pack(fill=tk.X, pady=(10, 0))
+            tk.Label(hist_card.inner, text='📜 Previous Repawn Records for This Loan',
+                     font=self.theme.fonts.h3,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(
+                anchor='w', padx=14, pady=(10, 6))
+            for rh in hist:
+                rh_row = tk.Frame(hist_card.inner, bg=self.theme.palette.bg_surface_alt)
+                rh_row.pack(fill=tk.X, padx=14, pady=3)
+                tk.Label(
+                    rh_row,
+                    text=(f"Repawned: {format_date(rh.get('repawned_at',''))}  |  "
+                          f"By: {rh.get('repawned_by_name', '-')}  |  "
+                          f"Destination: {rh.get('destination', '-') or '-'}  |  "
+                          f"Status: {(rh.get('status') or '').upper()}"),
+                    font=self.theme.fonts.small,
+                    bg=self.theme.palette.bg_surface_alt,
+                    fg=self.theme.palette.text_primary,
+                    anchor='w',
+                ).pack(fill=tk.X, padx=8, pady=5)
+
+    def _do_repawn(self):
+        destination = self.destination_var.get().strip()
+        remarks = self.remarks_var.get().strip()
+
+        if not messagebox.askyesno(
+            'Confirm Repawn',
+            f"Mark loan {self.loan['ticket_no']} as REPAWNED?\n\n"
+            f"Destination: {destination or '(not specified)'}\n"
+            f"Remarks: {remarks or '(none)'}\n\n"
+            f"The loan amounts and interest rates will NOT change.\n"
+            f"The item will be unavailable for redemption until restocked."
+        ):
+            return
+
+        ok, msg = repawn_loan(
+            self.loan_id,
+            user_id=self.user['id'],
+            destination=destination,
+            remarks=remarks,
+        )
+        add_audit_log(
+            self.user['id'], 'REPAWN_LOAN', 'loan', self.loan_id,
+            f"Loan {self.loan['ticket_no']} repawned. Destination: {destination}. {remarks}"
+        )
+        if ok:
+            messagebox.showinfo('Repawned', f"Loan {self.loan['ticket_no']} has been marked as REPAWNED.")
+            self.navigate('loan_detail', self.loan_id)
         else:
             messagebox.showerror('Error', msg)

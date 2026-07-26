@@ -4,7 +4,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from database import (search_loans, get_loan, get_loan_items, get_loan_renewals,
                       get_loan_payments, update_loan_status, get_approval_request_by_loan, get_duration_rate,
-                      get_setting, list_customer_letters, list_sms_messages_filtered)
+                      get_setting, list_customer_letters, list_sms_messages_filtered,
+                      repawn_loan, restock_repawned_loan, get_repawn_history)
 from utils import (format_currency, format_date, get_status_text, get_status_color,
                    calculate_total_payable, is_overdue)
 
@@ -51,7 +52,7 @@ class LoanListPage:
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
         self.status_var = tk.StringVar(value='all')
         status_combo = ttk.Combobox(fbar, textvariable=self.status_var,
-                                    values=['all', 'active', 'overdue', 'renewed', 'redeemed', 'forfeited'],
+                                    values=['all', 'active', 'overdue', 'renewed', 'redeemed', 'forfeited', 'repawned'],
                                     state='readonly', font=self.theme.fonts.body[0:2], width=12)
         status_combo.pack(side=tk.LEFT, padx=(8, 16))
         status_combo.bind('<<ComboboxSelected>>', self._on_status_change)
@@ -88,14 +89,16 @@ class LoanListPage:
             w.destroy()
 
         shown_count = len(loans)
-        active_count = sum(1 for loan in loans if loan.get('status') == 'active')
-        overdue_count = sum(1 for loan in loans if loan.get('status') == 'active' and is_overdue(loan.get('expire_date', '')))
+        active_count = sum(1 for loan in loans if loan.get('status') in ('active', 'renewed'))
+        overdue_count = sum(1 for loan in loans if loan.get('status') in ('active', 'renewed') and is_overdue(loan.get('expire_date', '')))
+        repawned_count = sum(1 for loan in loans if loan.get('status') == 'repawned')
         total_amount = sum(float(loan.get('loan_amount') or 0) for loan in loans)
 
         stats = [
             ('Loans Shown', str(shown_count), self.theme.palette.accent),
             ('Active Loans', str(active_count), self.theme.palette.success),
             ('Overdue Active', str(overdue_count), self.theme.palette.danger),
+            ('Repawned', str(repawned_count), '#a855f7'),
             ('Shown Amount', format_currency(total_amount), self.theme.palette.info),
         ]
 
@@ -211,9 +214,26 @@ class LoanListPage:
                 red_lbl.grid(row=0, column=2, sticky='ew')
                 red_lbl.bind('<Button-1>', lambda e, lid=loan['id']: self.navigate('redeem_loan', lid))
 
+            elif effective_status == 'repawned':
+                restock_lbl = _make_action_badge(act_frame, '📦 Restock', '#a855f7')
+                restock_lbl.grid(row=0, column=1, columnspan=2, sticky='ew', padx=(0, 0))
+                restock_lbl.bind('<Button-1>', lambda e, lid=loan['id'], tno=loan['ticket_no']: self._do_restock(lid, tno))
+
         if not loans:
             tk.Label(tbl, text='No loans found.', font=self.theme.fonts.body,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(pady=30)
+
+    def _do_restock(self, loan_id, ticket_no):
+        if not messagebox.askyesno('Confirm Restock',
+                                   f'Restock repawned loan {ticket_no} back to active?\n\n'
+                                   f'The loan items will be available for redemption again.'):
+            return
+        ok, msg = restock_repawned_loan(loan_id, self.user['id'])
+        if ok:
+            messagebox.showinfo('Restocked', msg)
+        else:
+            messagebox.showerror('Error', msg)
+        self._do_search()
 
 
 class LoanDetailPage:
@@ -413,6 +433,65 @@ class LoanDetailPage:
             renew_btn.config(state=tk.DISABLED)
             redeem_btn.config(state=tk.DISABLED)
 
+        # Repawn button — only for active (not redeemed/forfeited/repawned)
+        if effective_status == 'active':
+            repawn_btn = self.theme.make_button(
+                abf,
+                text='♻ Mark As Repawned',
+                kind='secondary',
+                width=28,
+                pady=8,
+                command=lambda: self.navigate('repawn_loan', self.loan_id),
+            )
+            repawn_btn.grid(row=4, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
+
+        # Repawned — show restock button, disable renew/redeem
+        if effective_status == 'repawned':
+            renew_btn.config(state=tk.DISABLED)
+            redeem_btn.config(state=tk.DISABLED)
+
+            def _do_restock_detail():
+                if not messagebox.askyesno('Confirm Restock',
+                                           f"Restock loan {loan['ticket_no']} back to active?\n\n"
+                                           f"The items will be available for redemption again."):
+                    return
+                ok, msg = restock_repawned_loan(self.loan_id, self.user['id'])
+                if ok:
+                    messagebox.showinfo('Restocked', msg)
+                    self.navigate('loan_detail', self.loan_id)
+                else:
+                    messagebox.showerror('Error', msg)
+
+            restock_btn = self.theme.make_button(
+                abf,
+                text='📦 Restock (Return to Active)',
+                kind='primary',
+                width=28,
+                pady=8,
+                command=_do_restock_detail,
+            )
+            restock_btn.grid(row=4, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
+
+            # Show repawn history for this loan
+            rh_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)
+            rh_card.pack(fill=tk.X, pady=(0, 10))
+            tk.Label(rh_card.inner, text='♻ Repawn History', font=self.theme.fonts.h3,
+                     bg=self.theme.palette.bg_surface, fg='#a855f7').pack(anchor='w', padx=14, pady=(10, 6))
+            rh_records = get_repawn_history(self.loan_id)
+            if rh_records:
+                for rh in rh_records:
+                    rh_row = tk.Frame(rh_card.inner, bg=self.theme.palette.bg_surface_alt)
+                    rh_row.pack(fill=tk.X, padx=14, pady=3)
+                    tk.Label(rh_row, text=f"Repawned: {format_date(rh.get('repawned_at', ''))}",
+                             font=self.theme.fonts.small, bg=self.theme.palette.bg_surface_alt,
+                             fg=self.theme.palette.text_muted).pack(anchor='w', padx=8, pady=(4, 1))
+                    tk.Label(rh_row, text=f"By: {rh.get('repawned_by_name', '-')}  |  Destination: {rh.get('destination', '-') or '-'}",
+                             font=self.theme.fonts.small, bg=self.theme.palette.bg_surface_alt,
+                             fg=self.theme.palette.text_primary).pack(anchor='w', padx=8, pady=(0, 4))
+            else:
+                tk.Label(rh_card.inner, text='No repawn records found.', font=self.theme.fonts.small,
+                         bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(padx=14, pady=6)
+
         # Allow closing overdue active loans as forfeited directly from details.
         if self.user.get('role') == 'admin' and effective_status == 'active' and is_overdue(loan['expire_date']):
             def _mark_forfeited():
@@ -433,7 +512,7 @@ class LoanDetailPage:
                 pady=8,
                 command=_mark_forfeited,
             )
-            forfeit_btn.grid(row=4, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
+            forfeit_btn.grid(row=5, column=0, columnspan=2, padx=0, pady=(8, 0), sticky='ew')
 
         # Letter History section (below action buttons on left side)
         letter_hist_card = self.theme.make_card(left, bg=self.theme.palette.bg_surface)

@@ -156,6 +156,8 @@ def get_status_color(status, expire_date_str=''):
         return '#14b8a6'
     elif status == 'forfeited':
         return '#ef4444'
+    elif status == 'repawned':
+        return '#a855f7'
     elif status == 'active' and expire_date_str and is_overdue(expire_date_str):
         return '#f97316'
     elif status == 'active':
@@ -169,6 +171,8 @@ def get_status_text(status, expire_date_str=''):
     """Return display text for loan status."""
     if status == 'active' and expire_date_str and is_overdue(expire_date_str):
         return 'OVERDUE'
+    if status == 'repawned':
+        return 'REPAWNED'
     return status.upper()
 
 

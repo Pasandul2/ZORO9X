@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
-from database import get_connection, get_dashboard_stats, get_duration_rate
+from database import get_connection, get_dashboard_stats, get_duration_rate, get_repawn_history
 from utils import format_currency, format_date, get_status_text
 from utils import calculate_total_payable
 
@@ -26,6 +26,7 @@ class ReportsPage:
         self._date_to_var = tk.StringVar(value=today.strftime('%Y-%m-%d'))
         self._date_from_var = tk.StringVar(value=(today - timedelta(days=90)).strftime('%Y-%m-%d'))
         self._gold_inventory_scope_var = tk.StringVar(value='active')
+        self._date_field_var = tk.StringVar(value='Issue Date')
 
     def render(self):
         for w in self.container.winfo_children():
@@ -63,6 +64,29 @@ class ReportsPage:
 
         filters = tk.Frame(filter_card.inner, bg=self.theme.palette.bg_surface)
         filters.pack(fill=tk.X, padx=12, pady=8)
+
+        # Date field selector — controls which date column the range applies to
+        _DATE_FIELD_OPTIONS = [
+            'Issue Date',
+            'Redeem Date',
+            'Forfeited Date',
+            'Repawned Date',
+            'Restocked Date',
+            'Created Date',
+        ]
+        tk.Label(filters, text='Filter By:', font=self.theme.fonts.body_bold,
+                 bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
+        from tkinter import ttk as _ttk
+        _field_combo = _ttk.Combobox(
+            filters,
+            textvariable=self._date_field_var,
+            values=_DATE_FIELD_OPTIONS,
+            state='readonly',
+            font=self.theme.fonts.body[0:2],
+            width=15,
+        )
+        _field_combo.pack(side=tk.LEFT, padx=(6, 16))
+        _field_combo.bind('<<ComboboxSelected>>', lambda _e: self._refresh_active_report())
 
         tk.Label(filters, text='From:', font=self.theme.fonts.body_bold,
                  bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.LEFT)
@@ -131,6 +155,7 @@ class ReportsPage:
             ('Customer Report', lambda: self._set_active_report(self._show_customers)),
             ('Gold Inventory', lambda: self._set_active_report(self._show_gold_inventory)),
             ('Operations', lambda: self._set_active_report(self._show_operations)),
+            ('♻ Repawning', lambda: self._set_active_report(self._show_repawning)),
         ]
         for idx, (label, command) in enumerate(reports):
             btn = self.theme.make_button(btn_wrap, text=label, command=command, kind='ghost', width=16, pady=7)
@@ -181,6 +206,18 @@ class ReportsPage:
         if not date_from or not date_to:
             return
         self._active_report_handler()
+
+    def _get_date_field_col(self):
+        """Return the SQL column expression matching the selected date field dropdown."""
+        mapping = {
+            'Issue Date':     'l.issue_date',
+            'Redeem Date':    "CASE WHEN l.status='redeemed' THEN l.updated_at ELSE NULL END",
+            'Forfeited Date': "CASE WHEN l.status='forfeited' THEN l.updated_at ELSE NULL END",
+            'Repawned Date':  "CASE WHEN l.status='repawned' THEN l.updated_at ELSE NULL END",
+            'Restocked Date': 'l.updated_at',   # restocked = repawned → active, so updated_at
+            'Created Date':   'l.created_at',
+        }
+        return mapping.get(self._date_field_var.get(), 'l.issue_date')
 
     def _render_access_denied(self):
         tk.Label(
@@ -525,13 +562,12 @@ class ReportsPage:
                 date_from = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
 
             rows = self._query(
-                '''SELECT l.ticket_no, c.name AS customer_name, l.loan_amount, l.status,
+                f'''SELECT l.ticket_no, c.name AS customer_name, l.loan_amount, l.status,
                           l.issue_date, l.expire_date, l.duration_months, l.interest_rate
                    FROM loans l
                    JOIN customers c ON l.customer_id=c.id
-                   WHERE date(l.issue_date) BETWEEN ? AND ?
-                   ORDER BY l.id DESC'''
-                     ,
+                   WHERE date({self._get_date_field_col()}) BETWEEN ? AND ?
+                   ORDER BY l.id DESC''',
                 (date_from, date_to),
             )
 
@@ -698,20 +734,22 @@ class ReportsPage:
             date_to = datetime.now().strftime('%Y-%m-%d')
             date_from = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
 
+        _dc = self._get_date_field_col()   # dynamic date column
+
         total_loans = self._scalar(
-            "SELECT COUNT(*) FROM loans WHERE date(created_at) BETWEEN ? AND ?",
+            f"SELECT COUNT(*) FROM loans l WHERE date({_dc}) BETWEEN ? AND ?",
             (date_from, date_to),
         )
         total_active = self._scalar(
-            "SELECT COUNT(*) FROM loans WHERE status='active' AND date(created_at) BETWEEN ? AND ?",
+            f"SELECT COUNT(*) FROM loans l WHERE status='active' AND date({_dc}) BETWEEN ? AND ?",
             (date_from, date_to),
         )
         total_redeemed = self._scalar(
-            "SELECT COUNT(*) FROM loans WHERE status='redeemed' AND date(created_at) BETWEEN ? AND ?",
+            f"SELECT COUNT(*) FROM loans l WHERE status='redeemed' AND date({_dc}) BETWEEN ? AND ?",
             (date_from, date_to),
         )
         overdue_count = self._scalar(
-            "SELECT COUNT(*) FROM loans WHERE status='active' AND expire_date < ? AND date(created_at) BETWEEN ? AND ?",
+            f"SELECT COUNT(*) FROM loans l WHERE status='active' AND expire_date < ? AND date({_dc}) BETWEEN ? AND ?",
             (date_to, date_from, date_to),
         )
         total_customers = self._scalar(
@@ -719,11 +757,11 @@ class ReportsPage:
             (date_from, date_to),
         )
         active_loan_amount = self._scalar(
-            "SELECT COALESCE(SUM(loan_amount),0) FROM loans WHERE status='active' AND date(created_at) BETWEEN ? AND ?",
+            f"SELECT COALESCE(SUM(loan_amount),0) FROM loans l WHERE status='active' AND date({_dc}) BETWEEN ? AND ?",
             (date_from, date_to),
         )
         today_loans = self._scalar(
-            "SELECT COUNT(*) FROM loans WHERE date(created_at)=?",
+            f"SELECT COUNT(*) FROM loans l WHERE date({_dc})=?",
             (date_to,),
         )
         today_revenue = self._scalar(
@@ -758,11 +796,11 @@ class ReportsPage:
         )
 
         active_interest_rows = self._query(
-            '''SELECT id, loan_amount, interest_principal_amount, interest_rate,
+            f'''SELECT id, loan_amount, interest_principal_amount, interest_rate,
                       overdue_interest_rate, duration_months, issue_date,
                       renew_date, expire_date
-               FROM loans
-               WHERE status='active' AND date(created_at) BETWEEN ? AND ?''',
+               FROM loans l
+               WHERE status='active' AND date({_dc}) BETWEEN ? AND ?''',
             (date_from, date_to),
         )
         active_collections = self._query(
@@ -821,15 +859,15 @@ class ReportsPage:
             (date_from, date_to),
         )
         active_items = self._scalar(
-            """SELECT COUNT(*) FROM loan_items li
+            f"""SELECT COUNT(*) FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active' AND date(l.created_at) BETWEEN ? AND ?""",
+               WHERE l.status='active' AND date({_dc}) BETWEEN ? AND ?""",
             (date_from, date_to),
         )
         active_gold_weight = self._scalar(
-            """SELECT COALESCE(SUM(li.gold_weight),0) FROM loan_items li
+            f"""SELECT COALESCE(SUM(li.gold_weight),0) FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active' AND date(l.created_at) BETWEEN ? AND ?""",
+               WHERE l.status='active' AND date({_dc}) BETWEEN ? AND ?""",
             (date_from, date_to),
         )
 
@@ -887,14 +925,14 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
         loans = self._query(
-            '''SELECT l.id, l.ticket_no, c.name AS customer_name, l.loan_amount,
+            f'''SELECT l.id, l.ticket_no, c.name AS customer_name, l.loan_amount,
                       l.assessed_value, l.market_value, l.interest_rate,
                       l.overdue_interest_rate, l.duration_months, l.issue_date,
                       l.renew_date, l.expire_date, l.status, l.total_gold_weight,
                       l.total_item_weight
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
-               WHERE date(l.issue_date) BETWEEN ? AND ?
+               WHERE date({self._get_date_field_col()}) BETWEEN ? AND ?
                ORDER BY l.id DESC''',
             (date_from, date_to),
         )
@@ -948,13 +986,13 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
-            '''SELECT l.id, l.ticket_no, c.name AS customer_name, c.phone,
+            f'''SELECT l.id, l.ticket_no, c.name AS customer_name, c.phone,
                       l.loan_amount, l.expire_date, l.interest_rate,
                       l.overdue_interest_rate, l.renew_date
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
                WHERE l.status='active' AND l.expire_date < ?
-                 AND date(l.expire_date) BETWEEN ? AND ?
+                 AND date({self._get_date_field_col()}) BETWEEN ? AND ?
                ORDER BY l.expire_date ASC''',
             (date_to, date_from, date_to),
         )
@@ -1135,8 +1173,9 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
 
+        _dc = self._get_date_field_col()
         loans = self._query(
-            '''SELECT l.id, l.ticket_no, l.customer_id, c.name AS customer_name,
+            f'''SELECT l.id, l.ticket_no, l.customer_id, c.name AS customer_name,
                       l.status, l.loan_amount, l.interest_principal_amount,
                       l.interest_rate, l.overdue_interest_rate, l.duration_months,
                       l.issue_date, l.renew_date, l.expire_date,
@@ -1158,9 +1197,9 @@ class ReportsPage:
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
                LEFT JOIN loan_payments lp ON lp.loan_id=l.id
-                    WHERE date(l.issue_date) <= ?
+                    WHERE date({_dc}) <= ?
                       AND (
-                          date(l.issue_date) BETWEEN ? AND ?
+                          date({_dc}) BETWEEN ? AND ?
                           OR EXISTS (
                                 SELECT 1 FROM loan_payments lp2
                                 WHERE lp2.loan_id=l.id AND date(lp2.payment_date) BETWEEN ? AND ?
@@ -1300,7 +1339,7 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
-            '''SELECT c.id, c.name, c.nic, c.phone, c.job,
+            f'''SELECT c.id, c.name, c.nic, c.phone, c.job,
                       COUNT(l.id) AS total_loans,
                       SUM(CASE WHEN l.status='active' THEN 1 ELSE 0 END) AS active_loans,
                       SUM(CASE WHEN l.status='redeemed' THEN 1 ELSE 0 END) AS redeemed_loans,
@@ -1308,7 +1347,7 @@ class ReportsPage:
                       COALESCE(SUM(CASE WHEN l.status='active' THEN l.loan_amount ELSE 0 END),0) AS active_exposure,
                       MAX(l.issue_date) AS last_loan_date
                FROM customers c
-                             LEFT JOIN loans l ON c.id=l.customer_id AND date(l.issue_date) BETWEEN ? AND ?
+                             LEFT JOIN loans l ON c.id=l.customer_id AND date({self._get_date_field_col()}) BETWEEN ? AND ?
                GROUP BY c.id
                ORDER BY active_exposure DESC, total_borrowed DESC'''
                         ,(date_from, date_to),
@@ -1374,7 +1413,7 @@ class ReportsPage:
                 ROUND(AVG(li.carat), 2) AS avg_carat
             FROM loan_items li
             JOIN loans l ON li.loan_id=l.id
-            WHERE date(l.issue_date) BETWEEN ? AND ?
+            WHERE date({self._get_date_field_col()}) BETWEEN ? AND ?
             {status_filter_sql}
             GROUP BY li.article_type
             ORDER BY total_gold_weight DESC'''
@@ -1392,7 +1431,7 @@ class ReportsPage:
             FROM loan_items li
             JOIN loans l ON li.loan_id=l.id
             JOIN customers c ON l.customer_id=c.id
-            WHERE date(l.issue_date) BETWEEN ? AND ?
+            WHERE date({self._get_date_field_col()}) BETWEEN ? AND ?
             {status_filter_sql}
             ORDER BY li.id DESC'''
 
@@ -1661,3 +1700,181 @@ class ReportsPage:
                 str(r['entity_id'] or '-'),
             ])
         self._render_table(card.inner, columns, rows, max_rows=120)
+
+    def _show_repawning(self):
+        """Repawning report: overview, history table, statistics, and currently repawned loans."""
+        self._clear()
+        date_from, date_to = self._get_date_range(show_error=False)
+
+        # ── fetch data ──────────────────────────────────────────────────────────
+        all_history = get_repawn_history()
+
+        def _in_range(dt_str):
+            try:
+                d = (dt_str or '')[:10]
+                return date_from <= d <= date_to
+            except Exception:
+                return False
+
+        # For repawning tab: choose the relevant date field from history records
+        _field = self._date_field_var.get()
+        if _field == 'Restocked Date':
+            history_in_range = [rh for rh in all_history if _in_range(rh.get('restock_at', ''))]
+        else:
+            # Default: filter by repawned_at for all other field selections
+            history_in_range = [rh for rh in all_history if _in_range(rh.get('repawned_at', ''))]
+
+        currently_repawned = self._query(
+            '''SELECT l.ticket_no, l.loan_amount, l.interest_rate, l.duration_months,
+                      l.issue_date, l.expire_date, l.total_gold_weight,
+                      c.name AS customer_name, c.nic AS customer_nic,
+                      rh.repawned_at, rh.destination, rh.remarks,
+                      u.full_name AS repawned_by_name
+               FROM loans l
+               JOIN customers c ON l.customer_id=c.id
+               LEFT JOIN repawn_history rh ON rh.loan_id=l.id AND rh.status='repawned'
+               LEFT JOIN users u ON rh.repawned_by=u.id
+               WHERE l.status='repawned'
+               ORDER BY rh.repawned_at DESC'''
+        )
+
+        restocked_in_range   = [rh for rh in history_in_range if rh.get('status') == 'restocked']
+        repawned_in_range    = [rh for rh in history_in_range if rh.get('status') == 'repawned']
+        total_repawned       = len(repawned_in_range)
+        total_restocked      = len(restocked_in_range)
+        currently_repawned_count = len(currently_repawned)
+        total_loan_amount    = sum(float(rh.get('loan_amount') or 0) for rh in repawned_in_range)
+        total_gold_weight    = sum(float(r.get('total_gold_weight') or 0) for r in currently_repawned)
+        all_repawned_count   = sum(1 for rh in all_history if rh.get('status') == 'repawned')
+        all_restocked_count  = sum(1 for rh in all_history if rh.get('status') == 'restocked')
+
+        # ── 1. KPI overview — uses _make_card so it sits in report_content like other tabs ──
+        ov = self._make_card('♻ Repawning Overview')
+        ov.inner.configure(bg=self.theme.palette.bg_surface)
+        # override title label colour
+        for w in ov.inner.winfo_children():
+            try:
+                w.configure(fg='#a855f7')
+                break
+            except Exception:
+                pass
+        ov.pack(fill=tk.X, expand=False)
+
+        self._render_kpis(
+            ov.inner,
+            [
+                ('Repawned (Period)',           str(total_repawned),                  '#a855f7'),
+                ('Restocked (Period)',          str(total_restocked),                 self.theme.palette.success),
+                ('Currently Repawned',          str(currently_repawned_count),        self.theme.palette.danger),
+                ('Loan Amount Out',             format_currency(total_loan_amount),   self.theme.palette.warning),
+                ('Current Gold Weight (g)',     f'{total_gold_weight:.3f}',           self.theme.palette.info),
+                ('All-time Repawned',           str(all_repawned_count),              '#a855f7'),
+                ('All-time Restocked',          str(all_restocked_count),             self.theme.palette.success),
+                ('Still Out (All-time)',        str(max(0, all_repawned_count - all_restocked_count)),
+                                                                                      self.theme.palette.danger),
+            ],
+            columns=4,
+        )
+
+        # ── 2. Statistics bar charts ─────────────────────────────────────────────
+        stat_card = self._make_card('📊 Repawning Statistics')
+        stat_card.pack(fill=tk.X, expand=False)
+
+        charts_row = tk.Frame(stat_card.inner, bg=self.theme.palette.bg_surface)
+        charts_row.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        month_repawn = {}
+        for rh in all_history:
+            if rh.get('status') == 'repawned':
+                key = (rh.get('repawned_at') or '')[:7]
+                if key:
+                    month_repawn[key] = month_repawn.get(key, 0) + 1
+        self._render_bar_chart(charts_row, 'Repawned Per Month',
+                               sorted(month_repawn.items())[-12:], '#a855f7')
+
+        dest_count = {}
+        for rh in all_history:
+            dest = (rh.get('destination') or 'Unknown').strip() or 'Unknown'
+            dest_count[dest] = dest_count.get(dest, 0) + 1
+        dest_pairs = sorted(dest_count.items(), key=lambda x: -x[1])[:8]
+        self._render_bar_chart(charts_row, 'Top Destinations', dest_pairs, self.theme.palette.info)
+
+        # ── 3. Currently repawned loans table ───────────────────────────────────
+        cur_card = self._make_card('📋 Currently Repawned Loans')
+        cur_card.pack(fill=tk.BOTH, expand=True)
+
+        cur_cols = [
+            ('Ticket #',     10), ('Customer', 15), ('NIC',        13),
+            ('Loan Amount',  12), ('Interest %', 10), ('Gold Wt (g)', 11),
+            ('Issue Date',   10), ('Expire Date', 10), ('Repawned On', 11),
+            ('Destination',  15), ('By',          14),
+        ]
+        cur_rows = []
+        for r in currently_repawned:
+            cur_rows.append([
+                r['ticket_no'],
+                r['customer_name'] or '-',
+                r['customer_nic'] or '-',
+                format_currency(r['loan_amount']),
+                f"{float(r['interest_rate']):.1f}%",
+                f"{float(r.get('total_gold_weight') or 0):.3f}",
+                format_date(r['issue_date']),
+                format_date(r['expire_date']),
+                format_date(r.get('repawned_at', '')),
+                r.get('destination') or '-',
+                r.get('repawned_by_name') or '-',
+            ])
+        self._render_table(cur_card.inner, cur_cols, cur_rows, ticket_col=0)
+        self._export_columns = [c[0] for c in cur_cols]
+        self._export_rows    = cur_rows
+        self._report_title   = 'repawning_current'
+
+        # ── 4. History filtered by date range ───────────────────────────────────
+        hist_card = self._make_card('📜 Repawn History (Date Range)')
+        hist_card.pack(fill=tk.BOTH, expand=True)
+
+        hist_cols = [
+            ('Ticket #',    10), ('Customer',    15), ('Loan Amount', 12),
+            ('Repawned On', 11), ('Restocked On', 11), ('Status',     10),
+            ('Destination', 15), ('By',           14), ('Remarks',    20),
+        ]
+        hist_rows = []
+        for rh in history_in_range:
+            hist_rows.append([
+                rh.get('ticket_no', '-'),
+                rh.get('customer_name', '-'),
+                format_currency(rh.get('loan_amount', 0)),
+                format_date(rh.get('repawned_at', '')),
+                format_date(rh.get('restock_at', '')) if rh.get('restock_at') else '-',
+                (rh.get('status') or '').upper(),
+                rh.get('destination') or '-',
+                rh.get('repawned_by_name') or '-',
+                rh.get('remarks') or '-',
+            ])
+        self._render_table(hist_card.inner, hist_cols, hist_rows, ticket_col=0)
+
+        # ── 5. Full all-time history table ───────────────────────────────────────
+        full_card = self._make_card('📑 Full Repawn History (All Time)')
+        full_card.pack(fill=tk.BOTH, expand=True)
+
+        full_cols = [
+            ('Ticket #',     10), ('Customer',    15), ('Loan Amount',  12),
+            ('Repawned On',  11), ('Restocked On', 11), ('Status',      10),
+            ('Destination',  15), ('Repawned By',  14), ('Restocked By', 14),
+            ('Remarks',      20),
+        ]
+        full_rows = []
+        for rh in all_history:
+            full_rows.append([
+                rh.get('ticket_no', '-'),
+                rh.get('customer_name', '-'),
+                format_currency(rh.get('loan_amount', 0)),
+                format_date(rh.get('repawned_at', '')),
+                format_date(rh.get('restock_at', '')) if rh.get('restock_at') else '-',
+                (rh.get('status') or '').upper(),
+                rh.get('destination') or '-',
+                rh.get('repawned_by_name') or '-',
+                rh.get('restock_by_name') or '-',
+                rh.get('remarks') or '-',
+            ])
+        self._render_table(full_card.inner, full_cols, full_rows, ticket_col=0)

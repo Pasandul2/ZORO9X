@@ -1130,6 +1130,10 @@ class GoldLoanSystemApp:
             from pages.loan_actions import RedeemLoanPage
             RedeemLoanPage(self.page_content, self.theme, self.current_user, self.navigate, param).render()
 
+        elif page_name == 'repawn_loan':
+            from pages.loan_actions import RepawnLoanPage
+            RepawnLoanPage(self.page_content, self.theme, self.current_user, self.navigate, param).render()
+
         elif page_name == 'customers':
             from pages.customers import CustomersPage
             CustomersPage(self.page_content, self.theme, self.current_user, self.navigate).render()

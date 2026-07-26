@@ -133,7 +133,7 @@ def init_database(db_path=None):
         issue_date TEXT NOT NULL,
         renew_date TEXT,
         expire_date TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','renewed','redeemed','forfeited')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','renewed','redeemed','forfeited','repawned')),
         total_gold_weight REAL NOT NULL DEFAULT 0,
         total_item_weight REAL NOT NULL DEFAULT 0,
         remarks TEXT,
@@ -356,6 +356,69 @@ def init_database(db_path=None):
         wish_year TEXT NOT NULL,
         sent_at TEXT DEFAULT (datetime('now','localtime')),
         UNIQUE(customer_id, wish_year)
+    )''')
+
+    # Migrate existing databases: allow repawned status by recreating the loans table check constraint.
+    # SQLite does not support ALTER TABLE ... MODIFY COLUMN, so we inspect the schema SQL directly.
+    # If 'repawned' is not already in the CHECK constraint, recreate the table.
+    _loans_ddl = c.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='loans'"
+    ).fetchone()
+    _loans_sql = (_loans_ddl[0] or '') if _loans_ddl else ''
+    if "'repawned'" not in _loans_sql and '"repawned"' not in _loans_sql:
+        # Disable FK enforcement during the table swap to avoid child-table constraint errors.
+        c.execute("PRAGMA foreign_keys = OFF")
+        c.execute('''CREATE TABLE IF NOT EXISTS loans_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_no TEXT UNIQUE NOT NULL,
+            customer_id INTEGER NOT NULL,
+            purpose TEXT,
+            advance_amount REAL,
+            loan_amount REAL NOT NULL,
+            interest_principal_amount REAL,
+            is_other_bank_ticket INTEGER NOT NULL DEFAULT 0,
+            other_bank_paid_amount REAL NOT NULL DEFAULT 0,
+            service_charge_rate REAL NOT NULL DEFAULT 0,
+            service_charge_amount REAL NOT NULL DEFAULT 0,
+            service_charge_payment_mode TEXT NOT NULL DEFAULT 'financed',
+            customer_balance_amount REAL NOT NULL DEFAULT 0,
+            assessed_value REAL NOT NULL,
+            market_value REAL NOT NULL,
+            interest_rate REAL NOT NULL,
+            overdue_interest_rate REAL NOT NULL,
+            duration_months INTEGER NOT NULL,
+            issue_date TEXT NOT NULL,
+            renew_date TEXT,
+            expire_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','renewed','redeemed','forfeited','repawned')),
+            total_gold_weight REAL NOT NULL DEFAULT 0,
+            total_item_weight REAL NOT NULL DEFAULT 0,
+            remarks TEXT,
+            created_by INTEGER,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (customer_id) REFERENCES customers(id),
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )''')
+        c.execute('INSERT INTO loans_new SELECT * FROM loans')
+        c.execute('DROP TABLE loans')
+        c.execute('ALTER TABLE loans_new RENAME TO loans')
+        c.execute("PRAGMA foreign_keys = ON")
+
+    # Create repawn_history table to track repawning events
+    c.execute('''CREATE TABLE IF NOT EXISTS repawn_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        loan_id INTEGER NOT NULL,
+        repawned_by INTEGER,
+        repawned_at TEXT DEFAULT (datetime('now','localtime')),
+        restock_by INTEGER,
+        restock_at TEXT,
+        destination TEXT,
+        remarks TEXT,
+        status TEXT NOT NULL DEFAULT 'repawned' CHECK(status IN ('repawned','restocked')),
+        FOREIGN KEY (loan_id) REFERENCES loans(id),
+        FOREIGN KEY (repawned_by) REFERENCES users(id),
+        FOREIGN KEY (restock_by) REFERENCES users(id)
     )''')
 
     # Backward-compatible schema updates for existing databases.
@@ -1047,6 +1110,8 @@ def search_loans(query='', status='all', sort_overdue=False, db_path=None):
         today = __import__('datetime').date.today().isoformat()
         sql += " AND l.status IN ('active','renewed') AND l.expire_date < ?"
         params.append(today)
+    elif status == 'repawned':
+        sql += " AND l.status='repawned'"
     elif status != 'all':
         sql += " AND l.status=?"
         params.append(status)
@@ -1090,6 +1155,93 @@ def update_loan_status(loan_id, status, db_path=None):
     conn.execute("UPDATE loans SET status=?, updated_at=datetime('now','localtime') WHERE id=?", (status, loan_id))
     conn.commit()
     conn.close()
+
+
+def repawn_loan(loan_id, user_id, destination='', remarks='', db_path=None):
+    """Mark a loan as repawned (sent to another pawning centre for petty cash).
+    Only active/renewed loans that are not redeemed can be repawned.
+    Financial amounts are NOT changed — only the status changes to 'repawned'."""
+    conn = get_connection(db_path)
+    try:
+        loan = conn.execute("SELECT id, ticket_no, status FROM loans WHERE id=?", (loan_id,)).fetchone()
+        if not loan:
+            return False, "Loan not found"
+        if loan['status'] in ('redeemed', 'forfeited', 'repawned'):
+            return False, f"Cannot repawn a loan with status '{loan['status']}'"
+        conn.execute(
+            "UPDATE loans SET status='repawned', updated_at=datetime('now','localtime') WHERE id=?",
+            (loan_id,)
+        )
+        conn.execute(
+            "INSERT INTO repawn_history (loan_id, repawned_by, destination, remarks, status) VALUES (?,?,?,?,?)",
+            (loan_id, user_id, destination or '', remarks or '', 'repawned')
+        )
+        conn.commit()
+        return True, f"Loan {loan['ticket_no']} marked as repawned"
+    except Exception as exc:
+        conn.rollback()
+        return False, str(exc)
+    finally:
+        conn.close()
+
+
+def restock_repawned_loan(loan_id, user_id, remarks='', db_path=None):
+    """Restock a repawned loan back to active status."""
+    conn = get_connection(db_path)
+    try:
+        loan = conn.execute("SELECT id, ticket_no, status FROM loans WHERE id=?", (loan_id,)).fetchone()
+        if not loan:
+            return False, "Loan not found"
+        if loan['status'] != 'repawned':
+            return False, f"Loan is not in repawned status (current: {loan['status']})"
+        conn.execute(
+            "UPDATE loans SET status='active', updated_at=datetime('now','localtime') WHERE id=?",
+            (loan_id,)
+        )
+        conn.execute(
+            """UPDATE repawn_history SET status='restocked', restock_by=?, restock_at=datetime('now','localtime'), remarks=COALESCE(NULLIF(remarks,''),?) || CASE WHEN remarks!='' THEN ' | Restock: '||? ELSE ? END
+               WHERE loan_id=? AND status='repawned'""",
+            (user_id, remarks, remarks, remarks, loan_id)
+        )
+        conn.commit()
+        return True, f"Loan {loan['ticket_no']} restocked successfully"
+    except Exception as exc:
+        conn.rollback()
+        return False, str(exc)
+    finally:
+        conn.close()
+
+
+def get_repawn_history(loan_id=None, db_path=None):
+    """Get repawn history records. If loan_id given, filter by it."""
+    conn = get_connection(db_path)
+    if loan_id:
+        rows = conn.execute(
+            '''SELECT rh.*, l.ticket_no, c.name as customer_name,
+                      u1.full_name as repawned_by_name, u2.full_name as restock_by_name
+               FROM repawn_history rh
+               JOIN loans l ON rh.loan_id=l.id
+               JOIN customers c ON l.customer_id=c.id
+               LEFT JOIN users u1 ON rh.repawned_by=u1.id
+               LEFT JOIN users u2 ON rh.restock_by=u2.id
+               WHERE rh.loan_id=? ORDER BY rh.repawned_at DESC''',
+            (loan_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''SELECT rh.*, l.ticket_no, l.loan_amount, l.interest_rate, l.expire_date,
+                      c.name as customer_name,
+                      u1.full_name as repawned_by_name, u2.full_name as restock_by_name
+               FROM repawn_history rh
+               JOIN loans l ON rh.loan_id=l.id
+               JOIN customers c ON l.customer_id=c.id
+               LEFT JOIN users u1 ON rh.repawned_by=u1.id
+               LEFT JOIN users u2 ON rh.restock_by=u2.id
+               ORDER BY rh.repawned_at DESC'''
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 
 def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
