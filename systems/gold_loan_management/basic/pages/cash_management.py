@@ -479,9 +479,20 @@ class CashManagementPage:
 
         tk.Label(main, text='Amount (Rs.):', font=('Segoe UI', 9, 'bold'),
                  bg=dialog['bg'], fg=self.theme.palette.text_primary).pack(anchor='w')
-        amt_var = tk.StringVar(value='0')
+
+        # Default to previous day's closing balance; user can edit before saving.
+        selected_date = self.date_var.get().strip() or datetime.now().strftime('%Y-%m-%d')
+        try:
+            prev_date = (datetime.strptime(selected_date, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+            default_opening = get_cash_balance(as_of_date=prev_date)
+        except ValueError:
+            default_opening = 0.0
+
+        amt_var = tk.StringVar(value=f'{default_opening:.2f}')
         entry = self.theme.make_entry(main, variable=amt_var, width=20)
         entry.pack(fill=tk.X, pady=(4, 16))
+        entry.focus_set()
+        entry.select_range(0, tk.END)
 
         btn_row = tk.Frame(main, bg=dialog['bg'])
         btn_row.pack(fill=tk.X)
@@ -590,7 +601,14 @@ class CashManagementPage:
                 else:
                     desc_text = f'Owner personal withdrawal: {desc_text}' if desc_text else 'Owner personal withdrawal'
 
-            balance_before = get_cash_balance(as_of_date=date_str)
+            # Use the latest transaction on the selected date first.
+            # This avoids stale/incorrect carry-over when older backdated
+            # records were inserted later and have higher IDs.
+            day_latest = get_cash_transactions(transaction_date=date_str, limit=1)
+            if day_latest:
+                balance_before = float(day_latest[0].get('balance_after') or 0)
+            else:
+                balance_before = get_cash_balance(as_of_date=date_str)
             if ttype == 'owner_withdrawal':
                 # Check sufficient balance
                 if balance_before < amount:
@@ -784,7 +802,11 @@ def show_morning_cash_popup(parent_window, theme, user, db_file=None):
 
     tk.Label(main, text='Cash in Drawer (Rs.):', font=('Segoe UI', 10, 'bold'),
              bg=dialog['bg'], fg=theme.palette.text_primary).pack(anchor='w')
-    amt_var = tk.StringVar(value='0')
+
+    # Suggest previous day's closing balance by default; user can override.
+    prev_date = (datetime.strptime(today, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+    default_opening = get_cash_balance(as_of_date=prev_date, db_path=db_file)
+    amt_var = tk.StringVar(value=f'{default_opening:.2f}')
     entry = tk.Entry(main, textvariable=amt_var, font=('Segoe UI', 12),
                      bg=theme.palette.bg_input, fg=theme.palette.text_primary,
                      relief='flat', highlightthickness=1,

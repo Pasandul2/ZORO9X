@@ -1514,7 +1514,7 @@ def get_cash_balance(as_of_date=None, db_path=None):
     conn = get_connection(db_path)
     if as_of_date:
         row = conn.execute(
-            "SELECT balance_after FROM cash_register WHERE transaction_date<=? ORDER BY id DESC LIMIT 1",
+            "SELECT balance_after FROM cash_register WHERE transaction_date<=? ORDER BY transaction_date DESC, id DESC LIMIT 1",
             (as_of_date,)
         ).fetchone()
     else:
