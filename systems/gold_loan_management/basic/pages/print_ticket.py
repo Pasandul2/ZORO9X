@@ -58,6 +58,7 @@ class PrintTicketPage:
 
         requested_payment_id = self.print_context.get('payment_id')
         self.latest_redemption = self._get_latest_redemption_payment(requested_payment_id)
+        self.latest_interest_part_payment = self._get_latest_interest_part_payment(requested_payment_id)
 
         if self.doc_type == 'renewal_ticket' and not self.latest_renewal:
             messagebox.showwarning('Renewal Ticket', 'No renewal record found for this loan.')
@@ -65,6 +66,10 @@ class PrintTicketPage:
             return
         if self.doc_type == 'redeem_ticket' and not self.latest_redemption:
             messagebox.showwarning('Redeem Ticket', 'No redemption record found for this loan.')
+            self.navigate('loan_detail', self.loan_id)
+            return
+        if self.doc_type == 'interest_part_ticket' and not self.latest_interest_part_payment:
+            messagebox.showwarning('Interest Part Receipt', 'No interest part payment record found for this loan.')
             self.navigate('loan_detail', self.loan_id)
             return
 
@@ -82,6 +87,7 @@ class PrintTicketPage:
             'cash_credit': 'Cash Credit Slip',
             'renewal_ticket': 'Renewal Ticket',
             'redeem_ticket': 'Redeem Ticket',
+            'interest_part_ticket': 'Interest Part Payment Receipt',
             'ticket': 'Ticket',
         }
         page_title = title_map.get(self.doc_type, 'Ticket')
@@ -316,6 +322,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 html_content = self._build_renewal_ticket_html(Path(pdf_path).as_uri())
             elif self.doc_type == 'redeem_ticket':
                 html_content = self._build_redeem_ticket_html(Path(pdf_path).as_uri())
+            elif self.doc_type == 'interest_part_ticket':
+                html_content = self._build_interest_part_ticket_html(Path(pdf_path).as_uri())
             else:
                 html_content = self._build_pawn_ticket_html(Path(pdf_path).as_uri())
 
@@ -413,6 +421,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
                 html_content = self._build_renewal_ticket_html('')
             elif self.doc_type == 'redeem_ticket':
                 html_content = self._build_redeem_ticket_html('')
+            elif self.doc_type == 'interest_part_ticket':
+                html_content = self._build_interest_part_ticket_html('')
             else:
                 html_content = self._build_pawn_ticket_html('')
 
@@ -588,6 +598,31 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
         for payment in payments:
             if payment.get('payment_type') == 'redemption':
+                return payment
+        return None
+
+    def _get_latest_interest_part_payment(self, payment_id=None):
+        payments = get_loan_payments(self.loan_id)
+        for payment in payments:
+            payment_type = (payment.get('payment_type') or '').lower()
+            remarks = (payment.get('remarks') or '').lower()
+            if payment_type != 'interest' or 'interest part payment' not in remarks:
+                continue
+            if payment_id is not None and str(payment.get('id')) != str(payment_id):
+                continue
+            return payment
+
+        if payment_id is not None:
+            for payment in payments:
+                payment_type = (payment.get('payment_type') or '').lower()
+                remarks = (payment.get('remarks') or '').lower()
+                if payment_type == 'interest' and 'interest part payment' in remarks:
+                    return payment
+
+        for payment in payments:
+            payment_type = (payment.get('payment_type') or '').lower()
+            remarks = (payment.get('remarks') or '').lower()
+            if payment_type == 'interest' and 'interest part payment' in remarks:
                 return payment
         return None
 
@@ -1003,6 +1038,79 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
         return html_content
 
+    def _build_interest_part_ticket_html(self, pdf_uri=''):
+        loan = self.loan
+        template = self._load_redeem_pawn_ticket_template()
+        payment = self.latest_interest_part_payment or {}
+
+        pay_date_raw = payment.get('payment_date') or ''
+        if pay_date_raw:
+            date_str = format_date(pay_date_raw)
+            time_str = pay_date_raw.split(' ', 1)[1][:5] if isinstance(pay_date_raw, str) and ' ' in pay_date_raw else ''
+        else:
+            now = datetime.now()
+            date_str = format_date(now.strftime('%Y-%m-%d %H:%M:%S'))
+            time_str = now.strftime('%H:%M')
+
+        amount_advanced = float(loan.get('interest_principal_amount') or loan.get('loan_amount') or 0)
+        normal_interest = float(payment.get('interest_amount') or 0)
+        overdue_interest = float(payment.get('overdue_interest_amount') or 0)
+        other_charges = float(payment.get('other_charges_amount') or 0)
+        total_paid = float(payment.get('amount') or 0)
+        total_interest = normal_interest + overdue_interest
+
+        if total_interest <= 0 and total_paid > 0:
+            total_interest = total_paid
+
+        replacements = {
+            '{{LOGO_SRC}}': html_escape.escape(str(self._get_logo_src())),
+            '{{PDF_URI}}': html_escape.escape(str(pdf_uri)),
+            '{{BRANCH}}': html_escape.escape(str(get_setting('branch_name', 'Kolonna'))),
+            '{{PAWN_TICKET_NO}}': html_escape.escape(str(loan.get('ticket_no', ''))),
+            '{{DATE}}': html_escape.escape(str(date_str)),
+            '{{TIME}}': html_escape.escape(str(time_str)),
+            '{{PAWNER_NAME}}': html_escape.escape(str(loan.get('customer_name', ''))),
+            '{{PAWNER_ADDRESS}}': html_escape.escape(str(loan.get('customer_address', ''))),
+            '{{NIC}}': html_escape.escape(str(loan.get('customer_nic', ''))),
+            '{{PHONE}}': html_escape.escape(str(loan.get('customer_phone', ''))),
+            '{{ADVANCED_AMOUNT}}': html_escape.escape(str(format_currency(amount_advanced))),
+            '{{INTEREST_AMOUNT}}': html_escape.escape(str(format_currency(total_interest))),
+            '{{OTHER_CHARGES}}': html_escape.escape(str(format_currency(other_charges))),
+            '{{PAYMENT_AMOUNT}}': html_escape.escape(str(format_currency(total_paid))),
+            '{{TOTAL}}': html_escape.escape(str(format_currency(total_paid))),
+        }
+
+        html_content = template
+        for key, value in replacements.items():
+            html_content = html_content.replace(key, value)
+
+        html_content = html_content.replace('Print Renewal Ticket', 'Print Interest Part Payment Receipt')
+        html_content = html_content.replace('Redeem Date', 'Interest Part Payment Date')
+
+        # Interest-part receipt needs a wider amount box and a seal style that avoids clipping.
+        interest_part_css = (
+            '\n    .split-stack::after { right: 44mm !important; }\n'
+            '    .split-field .value { width: 37mm !important; font-size: 11px !important; white-space: nowrap; }\n'
+            '    .stamp-zone {\n'
+            '      left: 56mm !important;\n'
+            '      top: 72mm !important;\n'
+            '      width: 48mm !important;\n'
+            '      height: 17mm !important;\n'
+            '      font-size: 5.4mm !important;\n'
+            '      line-height: 1.02 !important;\n'
+            '      text-align: center;\n'
+            '      white-space: normal;\n'
+            '      padding: 0.5mm 1mm;\n'
+            '      display: flex;\n'
+            '      align-items: center;\n'
+            '      justify-content: center;\n'
+            '    }\n'
+        )
+        html_content = html_content.replace('</style>', f'{interest_part_css}</style>', 1)
+        html_content = html_content.replace('COMPLETED', 'INTEREST<br>PART PAYMENT')
+
+        return html_content
+
     def _do_print(self, format_type):
         """Print using system print dialog."""
         try:
@@ -1028,6 +1136,12 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: {'11pt' if format
 
             if self.doc_type == 'redeem_ticket':
                 html = self._build_redeem_ticket_html('')
+                html_path = self._write_temp_html(html)
+                webbrowser.open(Path(html_path).as_uri())
+                return
+
+            if self.doc_type == 'interest_part_ticket':
+                html = self._build_interest_part_ticket_html('')
                 html_path = self._write_temp_html(html)
                 webbrowser.open(Path(html_path).as_uri())
                 return

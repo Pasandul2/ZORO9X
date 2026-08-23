@@ -868,6 +868,19 @@ class LoanHistoryPage:
                             'renewal_id': rid,
                         }),
                     ).pack(side=tk.LEFT)
+                elif self._is_interest_part_payment(pay):
+                    self.theme.make_button(
+                        btn_row,
+                        text='🖨 Print Interest Part Receipt',
+                        kind='ghost',
+                        width=26,
+                        pady=6,
+                        command=lambda pid=pay.get('id'): self.navigate('print_ticket', {
+                            'loan_id': self.loan_id,
+                            'doc_type': 'interest_part_ticket',
+                            'payment_id': pid,
+                        }),
+                    ).pack(side=tk.LEFT)
                 elif payment_type in ('interest', 'partial', 'penalty') and renewals:
                     match_renewal = self._match_renewal_for_payment(pay, renewals)
                     self.theme.make_button(
@@ -961,6 +974,11 @@ class LoanHistoryPage:
         payment_type = (payment.get('payment_type') or '').lower()
         remarks = (payment.get('remarks') or '').lower()
         return payment_type in ('interest', 'partial', 'penalty') and 'renewal' in remarks
+
+    def _is_interest_part_payment(self, payment):
+        payment_type = (payment.get('payment_type') or '').lower()
+        remarks = (payment.get('remarks') or '').lower()
+        return payment_type == 'interest' and 'interest part payment' in remarks
 
     def _match_renewal_for_payment(self, payment, renewals):
         payment_dt = str(payment.get('payment_date') or '')

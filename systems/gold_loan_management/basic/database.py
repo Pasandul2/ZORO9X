@@ -1288,6 +1288,46 @@ def renew_loan(loan_id, new_duration, interest_paid, new_interest_rate,
     return True, "Loan renewed successfully"
 
 
+def record_interest_part_payment(loan_id, amount_paid, user_id, remarks='',
+                                 overdue_interest_paid=0, normal_interest_paid=0,
+                                 other_charges_paid=0, db_path=None):
+    """Record an interest part payment without renewing/extending the loan."""
+    conn = get_connection(db_path)
+    loan = conn.execute("SELECT id FROM loans WHERE id=?", (loan_id,)).fetchone()
+    if not loan:
+        conn.close()
+        return False, "Loan not found", None
+
+    final_remarks = (remarks or '').strip()
+    if final_remarks:
+        final_remarks = f"Interest part payment - {final_remarks}"
+    else:
+        final_remarks = 'Interest part payment'
+
+    cur = conn.execute(
+        '''INSERT INTO loan_payments
+           (loan_id, payment_type, amount, principal_amount, interest_amount,
+            overdue_interest_amount, other_charges_amount, received_by, remarks)
+           VALUES (?,?,?,?,?,?,?,?,?)''',
+        (
+            loan_id,
+            'interest',
+            float(amount_paid or 0),
+            0,
+            float(normal_interest_paid or 0),
+            float(overdue_interest_paid or 0),
+            float(other_charges_paid or 0),
+            user_id,
+            final_remarks,
+        ),
+    )
+
+    payment_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return True, "Interest part payment recorded successfully", payment_id
+
+
 def redeem_loan(loan_id, total_paid, user_id, remarks='', principal_amount=0, interest_amount=0, overdue_interest_amount=0, other_charges_amount=0, db_path=None):
     conn = get_connection(db_path)
     conn.execute('''INSERT INTO loan_payments (loan_id, payment_type, amount, principal_amount, interest_amount, overdue_interest_amount, other_charges_amount, received_by, remarks)

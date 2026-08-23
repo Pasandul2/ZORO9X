@@ -5,7 +5,8 @@ from datetime import datetime
 from tkinter import messagebox
 from database import (get_loan, renew_loan, redeem_loan, get_loan_renewals,
                       get_duration_rate, add_audit_log, create_approval_request, get_setting, get_sms_template,
-                      repawn_loan, restock_repawned_loan, get_repawn_history)
+                      repawn_loan, restock_repawned_loan, get_repawn_history,
+                      get_loan_payments, record_interest_part_payment)
 from sms_service import build_sms_context, render_template, send_sms
 from utils import (format_currency, format_date, calculate_total_payable,
                    calculate_interest, get_expire_date, is_overdue)
@@ -66,6 +67,19 @@ def _record_cash_for_loan(action, *, loan, user_id, amount=None, breakdown=None)
                 if principal_red > 0:
                     _ins('loan_payment', principal_red,
                          f'Renewal principal reduction — Ticket: {ticket}')
+
+        elif action == 'interest_part_payment':
+            if breakdown:
+                overdue_paid = float(breakdown.get('overdue_paid', 0))
+                normal_paid = float(breakdown.get('normal_paid', 0))
+                other_paid = float(breakdown.get('other_charges_paid', 0))
+                total_interest = overdue_paid + normal_paid
+                if total_interest > 0:
+                    _ins('interest_income', total_interest,
+                         f'Interest part payment — Ticket: {ticket}')
+                if other_paid > 0:
+                    _ins('other_in', other_paid,
+                         f'Interest part payment charges — Ticket: {ticket}')
 
         elif action == 'redemption':
             if breakdown:
@@ -258,6 +272,9 @@ class RenewLoanPage:
 
         self.overdue_interest_display_var = tk.StringVar(value=format_currency(payable['overdue_interest']))
         self.overdue_penalty_var = tk.StringVar(value=str(payable.get('overdue_penalty_interest', 0)))
+        part_paid_totals = self._get_interest_part_payment_totals()
+        self.total_interest_part_payment = float(part_paid_totals.get('total_interest_paid', 0) or 0)
+        current_interest_due = round(float(payable.get('interest', 0)) + float(payable.get('overdue_interest', 0)), 2)
         if payable['overdue_days'] > 0:
             overdue_base_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
             overdue_base_row.pack(fill=tk.X, padx=14, pady=1)
@@ -282,6 +299,14 @@ class RenewLoanPage:
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
             tk.Label(overdue_row, textvariable=self.overdue_interest_display_var, font=self.theme.fonts.body_bold,
                      bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_primary).pack(side=tk.RIGHT)
+
+        if self.total_interest_part_payment > 0.009 and current_interest_due > 0.009:
+            interest_part_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
+            interest_part_row.pack(fill=tk.X, padx=14, pady=1)
+            tk.Label(interest_part_row, text='Total Interest Part Payment', font=self.theme.fonts.body, width=20, anchor='w',
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.text_muted).pack(side=tk.LEFT)
+            tk.Label(interest_part_row, text=format_currency(self.total_interest_part_payment), font=self.theme.fonts.body_bold,
+                     bg=self.theme.palette.bg_surface, fg=self.theme.palette.success).pack(side=tk.RIGHT)
 
         self.total_outstanding_display_var = tk.StringVar(value=format_currency(payable['interest'] + payable['overdue_interest']))
         total_row = tk.Frame(info_card.inner, bg=self.theme.palette.bg_surface)
@@ -442,7 +467,7 @@ class RenewLoanPage:
         self.payment_amount_var.set(f"{amount:.2f}")
 
     def _calculate_payment_breakdown(self):
-        normal_due = float(self.payable['interest'])
+        normal_due_raw = float(self.payable['interest'])
         overdue_base_due = float(self.payable.get('overdue_base_interest', 0))
         max_penalty_due = float(self.payable.get('overdue_penalty_interest', 0))
         
@@ -466,7 +491,17 @@ class RenewLoanPage:
         except ValueError:
             other_charges = 0.0
         
-        overdue_due = round(overdue_base_due + penalty_due, 2)
+        overdue_due_raw = round(overdue_base_due + penalty_due, 2)
+
+        # Apply previously recorded interest part-payments to reduce pending dues.
+        # Allocation rule: overdue first, then normal interest.
+        part_paid_totals = self._get_interest_part_payment_totals()
+        remaining_credit = round(part_paid_totals['total_interest_paid'], 2)
+
+        overdue_due = round(max(0.0, overdue_due_raw - remaining_credit), 2)
+        remaining_credit = round(max(0.0, remaining_credit - overdue_due_raw), 2)
+        normal_due = round(max(0.0, normal_due_raw - remaining_credit), 2)
+
         try:
             payment_amount = round(max(0.0, float(self.payment_amount_var.get() or 0.0)), 2)
         except ValueError:
@@ -480,10 +515,12 @@ class RenewLoanPage:
 
         return {
             'normal_due': normal_due,
+            'normal_due_raw': normal_due_raw,
             'overdue_base_due': overdue_base_due,
             'overdue_penalty_due': penalty_due,
             'max_overdue_penalty_due': max_penalty_due,
             'overdue_due': overdue_due,
+            'overdue_due_raw': overdue_due_raw,
             'other_charges': other_charges,
             'payment_amount': payment_amount,
             'total_interest_due': total_interest_due,
@@ -491,6 +528,36 @@ class RenewLoanPage:
             'interest_applied': interest_applied,
             'principal_reduction': principal_reduction,
             'new_loan_amount': new_loan_amount,
+            'existing_part_interest_paid': part_paid_totals['total_interest_paid'],
+        }
+
+    def _get_interest_part_payment_totals(self):
+        payments = get_loan_payments(self.loan_id)
+        accrual_start = (self.loan.get('renew_date') or self.loan.get('issue_date') or '').strip()
+        total_interest_paid = 0.0
+
+        for pay in payments:
+            payment_type = (pay.get('payment_type') or '').lower()
+            remarks = (pay.get('remarks') or '').lower()
+            payment_date = (pay.get('payment_date') or '').strip()
+
+            if payment_type != 'interest':
+                continue
+            if 'interest part payment' not in remarks:
+                continue
+            if accrual_start and payment_date and payment_date[:10] < accrual_start[:10]:
+                continue
+
+            paid_normal = float(pay.get('interest_amount') or 0)
+            paid_overdue = float(pay.get('overdue_interest_amount') or 0)
+            split_total = paid_normal + paid_overdue
+            if split_total <= 0:
+                split_total = float(pay.get('amount') or 0)
+
+            total_interest_paid += split_total
+
+        return {
+            'total_interest_paid': round(total_interest_paid, 2),
         }
 
     def _do_renew(self):
@@ -502,12 +569,7 @@ class RenewLoanPage:
         if breakdown['payment_amount'] <= 0:
             messagebox.showwarning('Renewal', 'Payment amount must be greater than 0.')
             return
-        if breakdown['payment_amount'] + 0.01 < breakdown['total_charges_due']:
-            messagebox.showwarning(
-                'Renewal',
-                f"Minimum payment is total outstanding (interest + charges): {format_currency(breakdown['total_charges_due'])}."
-            )
-            return
+        is_partial_interest_payment = breakdown['payment_amount'] + 0.01 < breakdown['total_charges_due']
 
         try:
             overdue_penalty_paid = float(self.overdue_penalty_var.get()) if self.payable['overdue_days'] > 0 else 0.0
@@ -518,6 +580,59 @@ class RenewLoanPage:
 
         if overdue_penalty_paid > (breakdown['max_overdue_penalty_due'] + 0.01):
             messagebox.showwarning('Renewal', 'Overdue penalty cannot be increased above the calculated penalty amount.')
+            return
+
+        if is_partial_interest_payment:
+            remaining = breakdown['payment_amount']
+            overdue_paid = round(min(remaining, breakdown['overdue_due']), 2)
+            remaining = round(max(0.0, remaining - overdue_paid), 2)
+            normal_paid = round(min(remaining, breakdown['normal_due']), 2)
+            remaining = round(max(0.0, remaining - normal_paid), 2)
+            other_paid = round(min(remaining, breakdown['other_charges']), 2)
+
+            if not messagebox.askyesno(
+                'Confirm Interest Part Payment',
+                f'Record interest part payment for loan {self.loan["ticket_no"]}?\n'
+                f'Paid amount: {format_currency(breakdown["payment_amount"])}\n'
+                f'Overdue settled: {format_currency(overdue_paid)}\n'
+                f'Normal interest settled: {format_currency(normal_paid)}\n'
+                f'Other charges settled: {format_currency(other_paid)}\n\n'
+                'Loan will stay active, and renew/expire dates will NOT change.'
+            ):
+                return
+
+            ok, msg, payment_id = record_interest_part_payment(
+                self.loan_id,
+                breakdown['payment_amount'],
+                self.user['id'],
+                remarks=self.remarks_var.get(),
+                overdue_interest_paid=overdue_paid,
+                normal_interest_paid=normal_paid,
+                other_charges_paid=other_paid,
+            )
+            add_audit_log(self.user['id'], 'INTEREST_PART_PAYMENT', 'loan', self.loan_id, msg)
+
+            if ok:
+                _record_cash_for_loan(
+                    'interest_part_payment',
+                    loan=self.loan,
+                    user_id=self.user['id'],
+                    breakdown={
+                        'overdue_paid': overdue_paid,
+                        'normal_paid': normal_paid,
+                        'other_charges_paid': other_paid,
+                    },
+                )
+                if messagebox.askyesno('Success', f'{msg}\n\nWould you like to print an Interest Part Payment receipt?'):
+                    self.navigate('print_ticket', {
+                        'loan_id': self.loan_id,
+                        'doc_type': 'interest_part_ticket',
+                        'payment_id': payment_id,
+                    })
+                else:
+                    self.navigate('loan_detail', self.loan_id)
+            else:
+                messagebox.showerror('Error', msg)
             return
 
         if breakdown['new_loan_amount'] <= 0.009:
