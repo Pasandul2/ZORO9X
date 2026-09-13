@@ -110,6 +110,73 @@ async function getRemoteDatabaseConnection(remoteDatabaseName) {
   });
 }
 
+async function ensureGoldLoanReportSchema(remoteDatabaseName) {
+  const connection = await getRemoteDatabaseConnection(remoteDatabaseName);
+  const tableDefinitions = {
+    customers: `
+      CREATE TABLE IF NOT EXISTS customers (
+        id BIGINT PRIMARY KEY,
+        nic VARCHAR(100), name VARCHAR(255), phone VARCHAR(50), address TEXT,
+        birthday VARCHAR(50), job VARCHAR(255), marital_status VARCHAR(50), language VARCHAR(50),
+        created_at DATETIME NULL, updated_at DATETIME NULL
+      )`,
+    loans: `
+      CREATE TABLE IF NOT EXISTS loans (
+        id BIGINT PRIMARY KEY,
+        ticket_no VARCHAR(100), customer_id BIGINT, purpose TEXT, advance_amount DECIMAL(18,2),
+        loan_amount DECIMAL(18,2), assessed_value DECIMAL(18,2), market_value DECIMAL(18,2),
+        interest_rate DECIMAL(10,4), overdue_interest_rate DECIMAL(10,4), duration_months INT,
+        issue_date DATETIME NULL, renew_date DATETIME NULL, expire_date DATETIME NULL,
+        status VARCHAR(50), total_gold_weight DECIMAL(18,4), total_item_weight DECIMAL(18,4),
+        created_at DATETIME NULL, updated_at DATETIME NULL
+      )`,
+    loan_items: `
+      CREATE TABLE IF NOT EXISTS loan_items (
+        id BIGINT PRIMARY KEY, loan_id BIGINT, article_type VARCHAR(255), description TEXT,
+        quantity DECIMAL(18,4), total_weight DECIMAL(18,4), gold_weight DECIMAL(18,4),
+        carat DECIMAL(10,2), estimated_value DECIMAL(18,2)
+      )`,
+    loan_renewals: `
+      CREATE TABLE IF NOT EXISTS loan_renewals (
+        id BIGINT PRIMARY KEY, loan_id BIGINT, old_expire_date DATETIME NULL, new_expire_date DATETIME NULL,
+        new_duration_months INT, interest_paid DECIMAL(18,2), payment_amount DECIMAL(18,2),
+        normal_interest_due DECIMAL(18,2), overdue_interest_due DECIMAL(18,2), principal_reduction DECIMAL(18,2),
+        renewed_at DATETIME NULL, remarks TEXT
+      )`,
+    loan_payments: `
+      CREATE TABLE IF NOT EXISTS loan_payments (
+        id BIGINT PRIMARY KEY, loan_id BIGINT, payment_type VARCHAR(50), amount DECIMAL(18,2),
+        principal_amount DECIMAL(18,2), interest_amount DECIMAL(18,2), overdue_interest_amount DECIMAL(18,2),
+        other_charges_amount DECIMAL(18,2), payment_date DATETIME NULL, remarks TEXT
+      )`,
+    audit_log: `
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id BIGINT PRIMARY KEY, action VARCHAR(255), entity_type VARCHAR(100), entity_id BIGINT,
+        details TEXT, created_at DATETIME NULL
+      )`,
+    cash_register: `
+      CREATE TABLE IF NOT EXISTS cash_register (
+        id BIGINT PRIMARY KEY, transaction_date DATETIME NULL, transaction_type VARCHAR(100),
+        description TEXT, amount DECIMAL(18,2), balance_after DECIMAL(18,2), created_at DATETIME NULL
+      )`,
+  };
+
+  try {
+    for (const statement of Object.values(tableDefinitions)) {
+      await connection.query(statement);
+    }
+  } finally {
+    await connection.end();
+  }
+}
+
+function inferColumnType(value) {
+  if (typeof value === 'number') return Number.isInteger(value) ? 'BIGINT' : 'DECIMAL(18,6)';
+  if (typeof value === 'boolean') return 'TINYINT(1)';
+  if (value instanceof Date || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value))) return 'DATETIME NULL';
+  return 'TEXT';
+}
+
 /**
  * Sync data from local to remote database
  */
@@ -117,6 +184,18 @@ async function syncToRemote(remoteDatabaseName, tableName, data) {
   const connection = await getRemoteDatabaseConnection(remoteDatabaseName);
   
   try {
+    if (!/^[a-zA-Z0-9_]+$/.test(tableName) || !data || typeof data !== 'object') {
+      throw new Error('Invalid table name or row data');
+    }
+
+    await connection.query(`CREATE TABLE IF NOT EXISTS \`${tableName}\` (id BIGINT PRIMARY KEY)`);
+    const [existingColumns] = await connection.query(`SHOW COLUMNS FROM \`${tableName}\``);
+    const existingColumnNames = new Set(existingColumns.map(column => column.Field));
+    for (const [key, value] of Object.entries(data)) {
+      if (!/^[a-zA-Z0-9_]+$/.test(key) || existingColumnNames.has(key) || key === 'id') continue;
+      await connection.query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${key}\` ${inferColumnType(value)}`);
+    }
+
     // Convert data to SQL insert or update
     const keys = Object.keys(data);
     const values = Object.values(data);
@@ -211,6 +290,7 @@ async function deleteRemoteDatabase(remoteDatabaseName) {
 module.exports = {
   createRemoteDatabase,
   getRemoteDatabaseConnection,
+  ensureGoldLoanReportSchema,
   generateRemoteDatabaseName,
   syncToRemote,
   syncFromRemote,

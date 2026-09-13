@@ -502,6 +502,43 @@ async function getOwnedSubscription(subscriptionId, userId) {
   return rows[0] || null;
 }
 
+async function ensureRemoteDatabaseForSubscription(subscription) {
+  if (!subscription || subscription.remote_database_name) {
+    if (subscription?.remote_database_name) {
+      await dbSync.ensureGoldLoanReportSchema(subscription.remote_database_name);
+    }
+    return subscription;
+  }
+
+  const [rows] = await pool.execute(
+    `SELECT u.email, s.name AS system_name
+     FROM client_subscriptions cs
+     JOIN clients c ON cs.client_id = c.id
+     JOIN users u ON c.user_id = u.id
+     JOIN systems s ON cs.system_id = s.id
+     WHERE cs.id = ?`,
+    [subscription.id]
+  );
+  const owner = rows[0];
+  if (!owner?.email || !owner.system_name) {
+    return subscription;
+  }
+
+  const remoteDatabase = await dbSync.createRemoteDatabase(
+    owner.email,
+    owner.system_name,
+    subscription.database_name,
+    []
+  );
+  await dbSync.ensureGoldLoanReportSchema(remoteDatabase.database_name);
+  await pool.execute(
+    'UPDATE client_subscriptions SET remote_database_name = ? WHERE id = ?',
+    [remoteDatabase.database_name, subscription.id]
+  );
+  subscription.remote_database_name = remoteDatabase.database_name;
+  return subscription;
+}
+
 async function getSubscriptionForBackupAccess(subscriptionId, user) {
   if (user?.role === 'admin' || user?.role === 'super_admin') {
     const [rows] = await pool.execute(
@@ -3119,6 +3156,7 @@ exports.generateCustomSystem = async (req, res) => {
         subscription.database_name,
         tables
       );
+      await dbSync.ensureGoldLoanReportSchema(remoteDbResult.database_name);
       
       console.log('Remote backup database created:', remoteDbResult.database_name);
       
@@ -3449,9 +3487,9 @@ exports.syncToServer = async (req, res) => {
       });
     }
     
-    const subscription = subscriptions[0];
+    const subscription = await ensureRemoteDatabaseForSubscription(subscriptions[0]);
     const remoteDatabaseName = subscription.remote_database_name;
-    
+
     if (!remoteDatabaseName) {
       return res.status(404).json({
         success: false,
@@ -3631,10 +3669,11 @@ exports.getSubscriptionReports = async (req, res) => {
   let connection;
   try {
     const subscriptionId = Number(req.params.subscriptionId || 0);
-    const subscription = await getOwnedSubscription(subscriptionId, req.user?.id);
+    let subscription = await getOwnedSubscription(subscriptionId, req.user?.id);
     if (!subscription) {
       return res.status(404).json({ success: false, message: 'Subscription not found' });
     }
+    subscription = await ensureRemoteDatabaseForSubscription(subscription);
     if (!subscription.remote_database_name) {
       return res.status(404).json({ success: false, message: 'Remote database is not configured yet' });
     }
