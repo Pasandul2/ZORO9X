@@ -502,6 +502,18 @@ async function getOwnedSubscription(subscriptionId, userId) {
   return rows[0] || null;
 }
 
+async function getSubscriptionForBackupAccess(subscriptionId, user) {
+  if (user?.role === 'admin' || user?.role === 'super_admin') {
+    const [rows] = await pool.execute(
+      'SELECT * FROM client_subscriptions WHERE id = ?',
+      [subscriptionId]
+    );
+    return rows[0] || null;
+  }
+
+  return getOwnedSubscription(subscriptionId, user?.id);
+}
+
 function addBillingCycle(baseDateValue, billingCycle) {
   const baseDate = new Date(baseDateValue);
   if (Number.isNaN(baseDate.getTime())) {
@@ -3574,9 +3586,8 @@ exports.getSubscriptionBackups = async (req, res) => {
     await ensureBackupSchema();
 
     const subscriptionId = Number(req.params.subscriptionId || 0);
-    const userId = req.user.id;
 
-    const subscription = await getOwnedSubscription(subscriptionId, userId);
+    const subscription = await getSubscriptionForBackupAccess(subscriptionId, req.user);
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -3697,7 +3708,7 @@ exports.downloadSubscriptionBackup = async (req, res) => {
       }
     } else if (req.user && req.user.id) {
       // Web dashboard access - verify JWT and ownership
-      const subscription = await getOwnedSubscription(subscriptionId, req.user.id);
+      const subscription = await getSubscriptionForBackupAccess(subscriptionId, req.user);
       if (!subscription) {
         return res.status(404).json({
           success: false,

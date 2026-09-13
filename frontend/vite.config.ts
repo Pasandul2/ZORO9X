@@ -9,6 +9,11 @@ export default defineConfig({
       overlay: false, // optional: disables error overlay
     },
   },
+  preview: {
+    host: '127.0.0.1',
+    port: 4173,
+    allowedHosts: ['zoro9x.com', 'www.zoro9x.com'],
+  },
   resolve: {
     alias: {
       // Optional, but helps if you're using path aliases
