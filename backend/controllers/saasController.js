@@ -3672,6 +3672,8 @@ exports.getSubscriptionBackups = async (req, res) => {
 exports.getSubscriptionReports = async (req, res) => {
   let connection;
   try {
+    await ensureBackupSchema();
+
     const subscriptionId = Number(req.params.subscriptionId || 0);
     let subscription = await getOwnedSubscription(subscriptionId, req.user?.id);
     if (!subscription) {
