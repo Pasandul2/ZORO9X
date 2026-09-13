@@ -90,7 +90,7 @@ class LoanListPage:
 
         shown_count = len(loans)
         active_count = sum(1 for loan in loans if loan.get('status') in ('active', 'renewed'))
-        overdue_count = sum(1 for loan in loans if loan.get('status') in ('active', 'renewed') and is_overdue(loan.get('expire_date', '')))
+        overdue_count = sum(1 for loan in loans if loan.get('status') in ('active', 'renewed', 'repawned') and is_overdue(loan.get('expire_date', '')))
         repawned_count = sum(1 for loan in loans if loan.get('status') == 'repawned')
         total_amount = sum(float(loan.get('loan_amount') or 0) for loan in loans)
 

@@ -321,10 +321,10 @@ class ReportsPage:
             px_widths.append(max(72, by_chars, by_header, by_content))
 
         table_canvas = tk.Canvas(wrap, bg=self.theme.palette.bg_surface, highlightthickness=0, bd=0)
-        table_canvas.pack(fill=tk.X, expand=False)
 
         xbar = tk.Scrollbar(wrap, orient=tk.HORIZONTAL, command=table_canvas.xview)
         xbar.pack(fill=tk.X)
+        table_canvas.pack(fill=tk.X, expand=False)
         table_canvas.configure(xscrollcommand=xbar.set)
 
         grid = tk.Frame(table_canvas, bg=self.theme.palette.bg_surface)
@@ -749,7 +749,7 @@ class ReportsPage:
             (date_from, date_to),
         )
         overdue_count = self._scalar(
-            f"SELECT COUNT(*) FROM loans l WHERE status='active' AND expire_date < ? AND date({_dc}) BETWEEN ? AND ?",
+            f"SELECT COUNT(*) FROM loans l WHERE status IN ('active','renewed','repawned') AND expire_date < ? AND date({_dc}) BETWEEN ? AND ?",
             (date_to, date_from, date_to),
         )
         total_customers = self._scalar(
@@ -800,7 +800,7 @@ class ReportsPage:
                       overdue_interest_rate, duration_months, issue_date,
                       renew_date, expire_date
                FROM loans l
-               WHERE status='active' AND date({_dc}) BETWEEN ? AND ?''',
+               WHERE status IN ('active','renewed','repawned') AND date({_dc}) BETWEEN ? AND ?''',
             (date_from, date_to),
         )
         active_collections = self._query(
@@ -861,7 +861,7 @@ class ReportsPage:
         active_items = self._scalar(
             f"""SELECT COUNT(*) FROM loan_items li
                JOIN loans l ON li.loan_id=l.id
-               WHERE l.status='active' AND date({_dc}) BETWEEN ? AND ?""",
+               WHERE l.status IN ('active','renewed','repawned') AND date({_dc}) BETWEEN ? AND ?""",
             (date_from, date_to),
         )
         active_gold_weight = self._scalar(
@@ -988,10 +988,10 @@ class ReportsPage:
         rows = self._query(
             f'''SELECT l.id, l.ticket_no, c.name AS customer_name, c.phone,
                       l.loan_amount, l.expire_date, l.interest_rate,
-                      l.overdue_interest_rate, l.renew_date
+                      l.overdue_interest_rate, l.renew_date, l.status
                FROM loans l
                JOIN customers c ON l.customer_id=c.id
-               WHERE l.status='active' AND l.expire_date < ?
+               WHERE l.status IN ('active','renewed','repawned') AND l.expire_date < ?
                  AND date({self._get_date_field_col()}) BETWEEN ? AND ?
                ORDER BY l.expire_date ASC''',
             (date_to, date_from, date_to),
@@ -1027,7 +1027,7 @@ class ReportsPage:
         ]
         table_rows = []
         for r, overdue_days in zip(rows, days):
-            status_text = get_status_text('active', r['expire_date'])
+            status_text = get_status_text(r['status'], r['expire_date'])
             table_rows.append([
                 r['ticket_no'],
                 r['customer_name'],
@@ -1204,7 +1204,7 @@ class ReportsPage:
                                 SELECT 1 FROM loan_payments lp2
                                 WHERE lp2.loan_id=l.id AND date(lp2.payment_date) BETWEEN ? AND ?
                           )
-                          OR l.status='active'
+                          OR l.status IN ('active','renewed','repawned')
                       )
                GROUP BY l.id
                ORDER BY l.id DESC''',
@@ -1221,7 +1221,7 @@ class ReportsPage:
 
             current_interest = 0.0
             overdue_interest = 0.0
-            if loan.get('status') == 'active':
+            if loan.get('status') in ('active', 'renewed', 'repawned'):
                 accrual_start = loan.get('renew_date') or loan.get('issue_date')
                 dur_rate = get_duration_rate(loan.get('duration_months') or 1)
                 max_interest_months = dur_rate.get('max_interest_months', 3) if dur_rate else 3
@@ -1339,7 +1339,7 @@ class ReportsPage:
         self._clear()
         date_from, date_to = self._get_date_range(show_error=False)
         rows = self._query(
-            f'''SELECT c.id, c.name, c.nic, c.phone, c.job,
+            f'''SELECT c.id, c.name, c.nic, c.phone, c.address, c.job,
                       COUNT(l.id) AS total_loans,
                       SUM(CASE WHEN l.status='active' THEN 1 ELSE 0 END) AS active_loans,
                       SUM(CASE WHEN l.status='redeemed' THEN 1 ELSE 0 END) AS redeemed_loans,
@@ -1374,6 +1374,7 @@ class ReportsPage:
             ('Customer', 15),
             ('NIC', 13),
             ('Phone', 12),
+            ('Address', 20),
             ('Job', 12),
             ('Loans', 7),
             ('Active', 7),
@@ -1388,6 +1389,7 @@ class ReportsPage:
                 r['name'] or '-',
                 r['nic'] or '-',
                 r['phone'] or '-',
+                r['address'] or '-',
                 r['job'] or '-',
                 str(r['total_loans'] or 0),
                 str(r['active_loans'] or 0),

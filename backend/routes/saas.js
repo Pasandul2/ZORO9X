@@ -502,6 +502,12 @@ router.get('/subscriptions/:subscriptionId/backups', async (req, res) => {
 });
 
 /**
+ * GET /api/saas/subscriptions/:subscriptionId/reports
+ * Read-only reports for the subscribed Gold Loan system.
+ */
+router.get('/subscriptions/:subscriptionId/reports', authenticateToken, saasController.getSubscriptionReports);
+
+/**
  * GET /api/saas/subscriptions/:subscriptionId/backups/:backupId/download
  * Download a specific backup file
  * Supports both JWT token and API key authentication

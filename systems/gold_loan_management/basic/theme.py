@@ -454,6 +454,9 @@ class RoundedEntry(tk.Frame):
     def delete(self, start, end=None):
         self.entry.delete(start, end)
 
+    def select_range(self, start, end):
+        self.entry.select_range(start, end)
+
     def config(self, **kwargs):
         self.entry.config(**kwargs)
 

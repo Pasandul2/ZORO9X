@@ -1108,7 +1108,7 @@ def search_loans(query='', status='all', sort_overdue=False, db_path=None):
     if status == 'overdue':
         # Active/renewed loans whose expire_date is in the past
         today = __import__('datetime').date.today().isoformat()
-        sql += " AND l.status IN ('active','renewed') AND l.expire_date < ?"
+        sql += " AND l.status IN ('active','renewed','repawned') AND l.expire_date < ?"
         params.append(today)
     elif status == 'repawned':
         sql += " AND l.status='repawned'"
@@ -2023,7 +2023,7 @@ def get_dashboard_stats(db_path=None):
     stats['total_customers'] = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
     r = conn.execute("SELECT COALESCE(SUM(COALESCE(advance_amount, loan_amount)),0) FROM loans WHERE status='active'").fetchone()
     stats['active_loan_amount'] = r[0]
-    r = conn.execute("SELECT COUNT(*) FROM loans WHERE status='active' AND expire_date < ?", (today,)).fetchone()
+    r = conn.execute("SELECT COUNT(*) FROM loans WHERE status IN ('active','renewed','repawned') AND expire_date < ?", (today,)).fetchone()
     stats['overdue_count'] = r[0]
     r = conn.execute("SELECT COUNT(*) FROM loans WHERE date(created_at)=?", (today,)).fetchone()
     stats['today_loans'] = r[0]
@@ -2198,7 +2198,7 @@ def search_overdue_loans_for_letters(query='', language='', db_path=None):
                COALESCE(NULLIF(c.language, ''), 'Sinhala') AS customer_language
         FROM loans l
         JOIN customers c ON l.customer_id = c.id
-        WHERE l.status='active' AND date(l.expire_date) < date('now')
+        WHERE l.status IN ('active','renewed','repawned') AND date(l.expire_date) < date('now')
     '''
     params = []
     if query:

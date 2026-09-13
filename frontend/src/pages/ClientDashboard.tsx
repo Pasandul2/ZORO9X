@@ -6,7 +6,7 @@ import {
   Activity, AlertCircle, Copy, Download, ExternalLink,
   Server, Check, Phone, Mail, Edit, Building2,
   Eye, EyeOff, Shield, Clock, HardDrive, Wifi, WifiOff,
-  Archive, RefreshCw
+  Archive, RefreshCw, BarChart3
 } from 'lucide-react';
 
 interface ClientDashboardProps {
@@ -929,6 +929,16 @@ const ClientDashboard: React.FC<ClientDashboardProps> = ({ darkMode }) => {
               >
                 <Archive className="w-4 h-4" />
                 Backups
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/client-dashboard/${selectedSubscription.id}/reports`)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold border flex items-center gap-2 ${
+                  darkMode ? 'bg-gray-900 text-gray-300 border-gray-700' : 'bg-white text-gray-700 border-gray-200'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                System Analytics
               </button>
             </div>
 

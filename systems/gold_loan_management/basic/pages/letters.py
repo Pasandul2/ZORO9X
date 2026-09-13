@@ -2046,7 +2046,7 @@ class LettersPage:
                    COALESCE(NULLIF(c.language, ''), 'Sinhala') AS customer_language
             FROM loans l
             JOIN customers c ON l.customer_id = c.id
-            WHERE l.status='active'
+            WHERE l.status IN ('active','renewed','repawned')
         '''
         params = []
 
@@ -2692,7 +2692,7 @@ body {{ font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif; color: #1f2
                    COALESCE(NULLIF(c.language, ''), 'Sinhala') AS customer_language
             FROM loans l
             JOIN customers c ON l.customer_id = c.id
-            WHERE l.status='active' {stage_condition}
+            WHERE l.status IN ('active','renewed','repawned') {stage_condition}
         '''
         params = []
 

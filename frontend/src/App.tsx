@@ -30,6 +30,7 @@ import SystemsMarketplace from './pages/SystemsMarketplace';
 import SystemPlansPage from './pages/SystemPlansPage';
 import ClientDashboard from './pages/ClientDashboard';
 import ClientRenewalPage from './pages/ClientRenewalPage';
+import ClientSystemReports from './pages/ClientSystemReports';
 import SecurityDashboard from './pages/SecurityDashboard';
 import ServiceDetail from './components/ServiceDetail';
 import ContactUs from './pages/ContactUs';
@@ -156,6 +157,7 @@ function AppContent() {
                 <Route path="/marketplace" element={<SystemsMarketplace darkMode={darkMode} />} />
                 <Route path="/marketplace/system/:systemId/plans" element={<SystemPlansPage darkMode={darkMode} />} />
                 <Route path="/client-dashboard" element={<ClientDashboard darkMode={darkMode} />} />
+                <Route path="/client-dashboard/:subscriptionId/reports" element={<ClientSystemReports darkMode={darkMode} />} />
                 <Route path="/client-dashboard/renewal/:subscriptionId" element={<ClientRenewalPage darkMode={darkMode} />} />
                 <Route path="/services/:serviceId" element={<ServiceDetail />} />
                 <Route path="/services" element={<ServicesSection darkMode={darkMode}/>} />

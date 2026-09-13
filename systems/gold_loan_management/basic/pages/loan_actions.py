@@ -57,6 +57,10 @@ def _record_cash_for_loan(action, *, loan, user_id, amount=None, breakdown=None)
             amt = amount or float(loan.get('loan_amount', 0))
             _ins('loan_disbursement', amt, f'New loan disbursement — Ticket: {ticket}')
 
+        elif action == 'loan_deletion':
+            amt = amount or float(loan.get('loan_amount', 0))
+            _ins('loan_payment', amt, f'Loan deletion refund — Ticket: {ticket}')
+
         elif action == 'renewal':
             if breakdown:
                 interest = float(breakdown.get('interest_applied', 0))

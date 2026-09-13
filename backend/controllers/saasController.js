@@ -3623,6 +3623,139 @@ exports.getSubscriptionBackups = async (req, res) => {
 };
 
 /**
+ * Return the web report datasets for a client's remote Gold Loan database.
+ * The database name comes from the owned subscription; it is never accepted
+ * from the request, so a client cannot select another tenant's database.
+ */
+exports.getSubscriptionReports = async (req, res) => {
+  let connection;
+  try {
+    const subscriptionId = Number(req.params.subscriptionId || 0);
+    const subscription = await getOwnedSubscription(subscriptionId, req.user?.id);
+    if (!subscription) {
+      return res.status(404).json({ success: false, message: 'Subscription not found' });
+    }
+    if (!subscription.remote_database_name) {
+      return res.status(404).json({ success: false, message: 'Remote database is not configured yet' });
+    }
+    const [systemRows] = await pool.execute('SELECT name FROM systems WHERE id = ?', [subscription.system_id]);
+    if (!String(systemRows[0]?.name || '').toLowerCase().includes('gold')) {
+      return res.status(400).json({ success: false, message: 'Reports are not available for this system' });
+    }
+
+    const from = String(req.query.from || new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10));
+    const to = String(req.query.to || new Date().toISOString().slice(0, 10));
+    const dateFields = {
+      issue: 'l.issue_date',
+      redeem: "CASE WHEN l.status = 'redeemed' THEN l.updated_at END",
+      forfeited: "CASE WHEN l.status = 'forfeited' THEN l.updated_at END",
+      repawned: "CASE WHEN l.status = 'repawned' THEN l.updated_at END",
+      restocked: 'l.updated_at',
+      created: 'l.created_at',
+    };
+    const dateField = dateFields[String(req.query.dateField || 'issue')] || dateFields.issue;
+    connection = await dbSync.getRemoteDatabaseConnection(subscription.remote_database_name);
+
+    const query = async (sql, params = []) => {
+      try {
+        const [rows] = await connection.query(sql, params);
+        return rows;
+      } catch (error) {
+        console.warn(`Report query skipped: ${error.message}`);
+        return [];
+      }
+    };
+
+    const [loans, payments, renewals, customers, inventory, operations, repawning, cash, cashSummary, backups] = await Promise.all([
+      query(`SELECT l.id, l.ticket_no, c.name AS customer_name, c.phone, l.loan_amount, l.assessed_value,
+                    l.market_value, l.interest_rate, l.overdue_interest_rate, l.duration_months,
+                    l.issue_date, l.renew_date, l.expire_date, l.status, l.total_gold_weight,
+                    l.total_item_weight
+             FROM loans l JOIN customers c ON l.customer_id = c.id
+             WHERE DATE(${dateField}) BETWEEN ? AND ? ORDER BY l.id DESC`, [from, to]),
+      query(`SELECT lp.id, lp.payment_date, l.ticket_no, c.name AS customer_name, lp.payment_type,
+                    lp.amount, lp.principal_amount, lp.interest_amount, lp.overdue_interest_amount,
+                    lp.other_charges_amount, lp.remarks
+             FROM loan_payments lp JOIN loans l ON lp.loan_id = l.id
+             JOIN customers c ON l.customer_id = c.id
+             WHERE DATE(lp.payment_date) BETWEEN ? AND ? ORDER BY lp.id DESC`, [from, to]),
+      query(`SELECT lr.id, lr.renewed_at, l.ticket_no, c.name AS customer_name, lr.old_expire_date,
+                    lr.new_expire_date, lr.new_duration_months, lr.payment_amount, lr.interest_paid,
+                    lr.normal_interest_due, lr.overdue_interest_due, lr.principal_reduction
+             FROM loan_renewals lr JOIN loans l ON lr.loan_id = l.id
+             JOIN customers c ON l.customer_id = c.id
+             WHERE DATE(lr.renewed_at) BETWEEN ? AND ? ORDER BY lr.id DESC`, [from, to]),
+      query(`SELECT id, nic, name, phone, address, birthday, job, marital_status, language, created_at
+             FROM customers WHERE DATE(created_at) BETWEEN ? AND ? ORDER BY id DESC`, [from, to]),
+      query(`SELECT li.id, l.ticket_no, c.name AS customer_name, li.article_type, li.description,
+                    li.quantity, li.total_weight, li.gold_weight, li.carat, li.estimated_value, l.status
+             FROM loan_items li JOIN loans l ON li.loan_id = l.id
+             JOIN customers c ON l.customer_id = c.id
+             WHERE DATE(${dateField}) BETWEEN ? AND ? ORDER BY li.id DESC`, [from, to]),
+      query(`SELECT id, action, entity_type, entity_id, details, created_at
+             FROM audit_log WHERE DATE(created_at) BETWEEN ? AND ? ORDER BY id DESC`, [from, to]),
+      query(`SELECT lr.id, lr.renewed_at, l.ticket_no, c.name AS customer_name, lr.old_expire_date,
+                    lr.new_expire_date, lr.payment_amount, lr.principal_reduction, lr.remarks
+             FROM loan_renewals lr JOIN loans l ON lr.loan_id = l.id
+             JOIN customers c ON l.customer_id = c.id
+             WHERE DATE(lr.new_expire_date) BETWEEN ? AND ? ORDER BY lr.id DESC`, [from, to]),
+      query(`SELECT id, transaction_date, transaction_type, description, amount, balance_after, created_at
+             FROM cash_register WHERE transaction_date BETWEEN ? AND ? ORDER BY transaction_date DESC, id DESC`, [from, to]),
+      query(`SELECT
+               COALESCE(SUM(CASE WHEN transaction_type IN ('opening_balance','loan_payment','interest_income','owner_deposit','other_in') THEN amount ELSE 0 END), 0) AS total_in,
+               COALESCE(SUM(CASE WHEN transaction_type IN ('loan_disbursement','expense','owner_withdrawal','other_out') THEN amount ELSE 0 END), 0) AS total_out,
+               COALESCE((SELECT balance_after FROM cash_register ORDER BY transaction_date DESC, id DESC LIMIT 1), 0) AS current_balance
+             FROM cash_register WHERE transaction_date BETWEEN ? AND ?`, [from, to]),
+      pool.execute(`SELECT id, backup_name, file_size, source, created_at, uploaded_at
+                    FROM subscription_backups WHERE subscription_id = ? ORDER BY uploaded_at DESC, id DESC LIMIT 10`, [subscriptionId])
+        .then(([rows]) => rows).catch(() => []),
+    ]);
+
+    const activeLoans = loans.filter((loan) => ['active', 'renewed', 'repawned'].includes(loan.status));
+    const totalIssued = loans.reduce((sum, loan) => sum + Number(loan.loan_amount || 0), 0);
+    const totalCollected = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const statusCounts = loans.reduce((result, loan) => {
+      result[loan.status] = (result[loan.status] || 0) + 1;
+      return result;
+    }, {});
+
+    res.json({
+      success: true,
+      range: { from, to, dateField: req.query.dateField || 'issue' },
+      backup: backups[0] || null,
+      backups,
+      summary: {
+        totalLoans: loans.length, activeLoans: activeLoans.length,
+        redeemedLoans: statusCounts.redeemed || 0, forfeitedLoans: statusCounts.forfeited || 0,
+        overdueLoans: activeLoans.filter((loan) => loan.expire_date && String(loan.expire_date).slice(0, 10) < to).length,
+        totalCustomers: customers.length, totalIssued, totalCollected,
+        averageTicket: loans.length ? totalIssued / loans.length : 0,
+        totalGoldWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_gold_weight || 0), 0),
+        totalPayments: payments.length, totalRenewals: renewals.length,
+      },
+      datasets: {
+        loans,
+        overdue: activeLoans.filter((loan) => loan.expire_date && String(loan.expire_date).slice(0, 10) < to),
+        interest: loans,
+        payments,
+        renewals,
+        customers,
+        inventory,
+        operations,
+        repawning,
+        cash,
+        cashSummary: cashSummary[0] || {},
+      },
+    });
+  } catch (error) {
+    console.error('Error loading subscription reports:', error);
+    res.status(500).json({ success: false, message: 'Failed to load system reports' });
+  } finally {
+    if (connection) await connection.end().catch(() => {});
+  }
+};
+
+/**
  * List server backups via API key (for desktop app)
  */
 exports.getSubscriptionBackupsViaApiKey = async (req, res) => {

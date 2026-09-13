@@ -779,6 +779,12 @@ class AdminSettingsPage:
             messagebox.showerror('Error', msg)
             return
 
+        try:
+            from pages.loan_actions import _record_cash_for_loan
+            _record_cash_for_loan('loan_deletion', loan=loan, user_id=self.user['id'])
+        except Exception:
+            pass
+
         add_audit_log(self.user['id'], 'DELETE_LOAN', 'loan', loan['id'],
                       f"Deleted {loan['ticket_no']} ({loan['customer_nic']})")
         messagebox.showinfo('Success', msg)
