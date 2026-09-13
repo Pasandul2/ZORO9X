@@ -543,6 +543,75 @@ async function ensureRemoteDatabaseForSubscription(subscription) {
   return subscription;
 }
 
+function rowsInRange(rows, dateKey, from, to) {
+  return rows.filter((row) => {
+    const value = row[dateKey];
+    if (!value) return false;
+    const day = String(value).slice(0, 10);
+    return day >= from && day <= to;
+  });
+}
+
+function buildBackupReport(tables, from, to, dateField) {
+  const customers = tables.customers || [];
+  const customerById = new Map(customers.map((customer) => [String(customer.id), customer]));
+  const rawLoans = rowsInRange(tables.loans || [], {
+    issue: 'issue_date', redeem: 'updated_at', forfeited: 'updated_at',
+    repawned: 'updated_at', restocked: 'updated_at', created: 'created_at',
+  }[dateField] || 'issue_date', from, to);
+  const loans = rawLoans.map((loan) => {
+    const customer = customerById.get(String(loan.customer_id)) || {};
+    return { ...loan, customer_name: customer.name || '-', phone: customer.phone || '' };
+  });
+  const loanById = new Map((tables.loans || []).map((loan) => [String(loan.id), loan]));
+  const withLoanCustomer = (row) => {
+    const loan = loanById.get(String(row.loan_id)) || {};
+    const customer = customerById.get(String(loan.customer_id)) || {};
+    return { ...row, ticket_no: loan.ticket_no || '-', customer_name: customer.name || '-', phone: customer.phone || '' };
+  };
+  const payments = rowsInRange(tables.loan_payments || [], 'payment_date', from, to).map(withLoanCustomer);
+  const renewals = rowsInRange(tables.loan_renewals || [], 'renewed_at', from, to).map(withLoanCustomer);
+  const repawning = rowsInRange(tables.loan_renewals || [], 'new_expire_date', from, to).map(withLoanCustomer);
+  const inventory = (tables.loan_items || []).filter((item) => rawLoans.some((loan) => String(loan.id) === String(item.loan_id))).map((item) => ({
+    ...item,
+    ...withLoanCustomer(item),
+    status: (loanById.get(String(item.loan_id)) || {}).status || '-',
+  }));
+  const operations = rowsInRange(tables.audit_log || [], 'created_at', from, to);
+  const cash = rowsInRange(tables.cash_register || [], 'transaction_date', from, to);
+  const activeLoans = loans.filter((loan) => ['active', 'renewed', 'repawned'].includes(String(loan.status).toLowerCase()));
+  const totalIssued = loans.reduce((sum, loan) => sum + Number(loan.loan_amount || 0), 0);
+  const statusCounts = loans.reduce((result, loan) => {
+    result[loan.status] = (result[loan.status] || 0) + 1;
+    return result;
+  }, {});
+  const totalCollected = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const cashSummary = cash.reduce((summary, row) => {
+    const amount = Number(row.amount || 0);
+    if (['opening_balance', 'loan_payment', 'interest_income', 'owner_deposit', 'other_in'].includes(row.transaction_type)) summary.total_in += amount;
+    if (['loan_disbursement', 'expense', 'owner_withdrawal', 'other_out'].includes(row.transaction_type)) summary.total_out += amount;
+    summary.current_balance = Number(row.balance_after || summary.current_balance || 0);
+    return summary;
+  }, { total_in: 0, total_out: 0, current_balance: 0 });
+  return {
+    summary: {
+      totalLoans: loans.length, activeLoans: activeLoans.length,
+      redeemedLoans: statusCounts.redeemed || 0, forfeitedLoans: statusCounts.forfeited || 0,
+      overdueLoans: activeLoans.filter((loan) => loan.expire_date && String(loan.expire_date).slice(0, 10) < to).length,
+      totalCustomers: customers.length, totalIssued, totalCollected,
+      averageTicket: loans.length ? totalIssued / loans.length : 0,
+      totalGoldWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_gold_weight || 0), 0),
+      totalPayments: payments.length, totalRenewals: renewals.length,
+    },
+    datasets: {
+      loans, overdue: activeLoans.filter((loan) => loan.expire_date && String(loan.expire_date).slice(0, 10) < to),
+      interest: loans, payments, renewals,
+      customers: rowsInRange(customers, 'created_at', from, to), inventory, operations, repawning, cash,
+      cashSummary,
+    },
+  };
+}
+
 async function getSubscriptionForBackupAccess(subscriptionId, user) {
   if (user?.role === 'admin' || user?.role === 'super_admin') {
     const [rows] = await pool.execute(
@@ -3679,10 +3748,6 @@ exports.getSubscriptionReports = async (req, res) => {
     if (!subscription) {
       return res.status(404).json({ success: false, message: 'Subscription not found' });
     }
-    subscription = await ensureRemoteDatabaseForSubscription(subscription);
-    if (!subscription.remote_database_name) {
-      return res.status(404).json({ success: false, message: 'Remote database is not configured yet' });
-    }
     const [systemRows] = await pool.execute('SELECT name FROM systems WHERE id = ?', [subscription.system_id]);
     if (!String(systemRows[0]?.name || '').toLowerCase().includes('gold')) {
       return res.status(400).json({ success: false, message: 'Reports are not available for this system' });
@@ -3699,7 +3764,6 @@ exports.getSubscriptionReports = async (req, res) => {
       created: 'l.created_at',
     };
     const dateField = dateFields[String(req.query.dateField || 'issue')] || dateFields.issue;
-    connection = await dbSync.getRemoteDatabaseConnection(subscription.remote_database_name);
 
     const [recentBackups] = await pool.execute(
       `SELECT file_path, is_encrypted
@@ -3708,6 +3772,47 @@ exports.getSubscriptionReports = async (req, res) => {
        ORDER BY uploaded_at DESC, id DESC LIMIT 1`,
       [subscriptionId]
     );
+
+    let backupReport = null;
+    if (recentBackups[0]?.file_path && fs.existsSync(recentBackups[0].file_path)) {
+      try {
+        const tables = dbSync.readSqliteBackup(
+          recentBackups[0].file_path,
+          Boolean(recentBackups[0].is_encrypted),
+          subscription.api_key,
+          subscriptionId
+        );
+        backupReport = buildBackupReport(tables, from, to, req.query.dateField || 'issue');
+      } catch (backupError) {
+        console.warn(`Latest backup report skipped: ${backupError.message}`);
+      }
+    }
+
+    try {
+      subscription = await ensureRemoteDatabaseForSubscription(subscription);
+    } catch (remoteError) {
+      console.warn(`Remote report database unavailable: ${remoteError.message}`);
+    }
+
+    if (!subscription.remote_database_name && backupReport) {
+      const backups = await pool.execute(
+        `SELECT id, backup_name, file_size, source, created_at, uploaded_at
+         FROM subscription_backups WHERE subscription_id = ? ORDER BY uploaded_at DESC, id DESC LIMIT 10`,
+        [subscriptionId]
+      ).then(([rows]) => rows).catch(() => []);
+      return res.json({
+        success: true,
+        range: { from, to, dateField: req.query.dateField || 'issue' },
+        backup: backups[0] || null,
+        backups,
+        ...backupReport,
+      });
+    }
+    if (!subscription.remote_database_name) {
+      return res.status(404).json({ success: false, message: 'No report database or uploaded backup is available' });
+    }
+
+    connection = await dbSync.getRemoteDatabaseConnection(subscription.remote_database_name);
     if (recentBackups[0]) {
       try {
         await dbSync.restoreSqliteBackupToRemote(

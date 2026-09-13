@@ -372,6 +372,7 @@ module.exports = {
   createRemoteDatabase,
   getRemoteDatabaseConnection,
   ensureGoldLoanReportSchema,
+  readSqliteBackup,
   restoreSqliteBackupToRemote,
   generateRemoteDatabaseName,
   syncToRemote,
