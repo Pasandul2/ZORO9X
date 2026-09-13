@@ -6,6 +6,11 @@
  */
 
 const mysql = require('mysql2/promise');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
 require('dotenv').config();
 
 /**
@@ -177,6 +182,82 @@ function inferColumnType(value) {
   return 'TEXT';
 }
 
+function readSqliteBackup(backupPath, encrypted, apiKey, subscriptionId) {
+  let databasePath = backupPath;
+  let temporaryPath = null;
+  try {
+    if (encrypted) {
+      const encryptedData = fs.readFileSync(backupPath);
+      const salt = encryptedData.subarray(0, 32);
+      const iv = encryptedData.subarray(32, 48);
+      const decipher = crypto.createDecipheriv(
+        'aes-256-cbc',
+        crypto.pbkdf2Sync(`${apiKey}:${subscriptionId}`, salt, 100000, 32, 'sha256'),
+        iv
+      );
+      const decrypted = Buffer.concat([decipher.update(encryptedData.subarray(48)), decipher.final()]);
+      temporaryPath = path.join(os.tmpdir(), `zoro9x-report-${subscriptionId}-${Date.now()}.db`);
+      fs.writeFileSync(temporaryPath, decrypted);
+      databasePath = temporaryPath;
+    }
+
+    const script = `
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.row_factory = sqlite3.Row
+tables = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
+result = {}
+for table in tables:
+    name = table[0]
+    rows = db.execute('SELECT * FROM "' + name.replace('"', '""') + '"').fetchall()
+    result[name] = [dict(row) for row in rows]
+print(json.dumps(result, default=str))
+`;
+    const result = spawnSync(process.env.PYTHON || 'python', ['-c', script, databasePath], {
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    if (result.status !== 0) throw new Error(result.stderr || 'Unable to read SQLite backup');
+    return JSON.parse(result.stdout || '{}');
+  } finally {
+    if (temporaryPath) fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+async function restoreSqliteBackupToRemote(remoteDatabaseName, backup, apiKey, subscriptionId) {
+  if (!backup?.file_path || !fs.existsSync(backup.file_path)) return 0;
+  const tables = readSqliteBackup(backup.file_path, Boolean(backup.is_encrypted), apiKey, subscriptionId);
+  const connection = await getRemoteDatabaseConnection(remoteDatabaseName);
+  let imported = 0;
+  try {
+    for (const [tableName, rows] of Object.entries(tables)) {
+      if (!/^[a-zA-Z0-9_]+$/.test(tableName)) continue;
+      for (const data of rows) {
+        if (!data || data.id === undefined || data.id === null) continue;
+        await connection.query(`CREATE TABLE IF NOT EXISTS \`${tableName}\` (id BIGINT PRIMARY KEY)`);
+        const [existingColumns] = await connection.query(`SHOW COLUMNS FROM \`${tableName}\``);
+        const existingColumnNames = new Set(existingColumns.map(column => column.Field));
+        for (const [key, value] of Object.entries(data)) {
+          if (!/^[a-zA-Z0-9_]+$/.test(key) || existingColumnNames.has(key) || key === 'id') continue;
+          await connection.query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${key}\` ${inferColumnType(value)}`);
+        }
+        const keys = Object.keys(data);
+        const escapedKeys = keys.map(key => `\`${key}\``).join(', ');
+        const placeholders = keys.map(() => '?').join(', ');
+        const updates = keys.filter(key => key !== 'id').map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(', ');
+        await connection.query(
+          `INSERT INTO \`${tableName}\` (${escapedKeys}) VALUES (${placeholders})${updates ? ` ON DUPLICATE KEY UPDATE ${updates}` : ''}`,
+          Object.values(data)
+        );
+        imported += 1;
+      }
+    }
+    return imported;
+  } finally {
+    await connection.end();
+  }
+}
+
 /**
  * Sync data from local to remote database
  */
@@ -291,6 +372,7 @@ module.exports = {
   createRemoteDatabase,
   getRemoteDatabaseConnection,
   ensureGoldLoanReportSchema,
+  restoreSqliteBackupToRemote,
   generateRemoteDatabaseName,
   syncToRemote,
   syncFromRemote,

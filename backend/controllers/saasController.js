@@ -3695,6 +3695,26 @@ exports.getSubscriptionReports = async (req, res) => {
     const dateField = dateFields[String(req.query.dateField || 'issue')] || dateFields.issue;
     connection = await dbSync.getRemoteDatabaseConnection(subscription.remote_database_name);
 
+    const [recentBackups] = await pool.execute(
+      `SELECT file_path, is_encrypted
+       FROM subscription_backups
+       WHERE subscription_id = ? AND file_path IS NOT NULL
+       ORDER BY uploaded_at DESC, id DESC LIMIT 1`,
+      [subscriptionId]
+    );
+    if (recentBackups[0]) {
+      try {
+        await dbSync.restoreSqliteBackupToRemote(
+          subscription.remote_database_name,
+          recentBackups[0],
+          subscription.api_key,
+          subscriptionId
+        );
+      } catch (backupError) {
+        console.warn(`Latest backup import skipped: ${backupError.message}`);
+      }
+    }
+
     const query = async (sql, params = []) => {
       try {
         const [rows] = await connection.query(sql, params);
