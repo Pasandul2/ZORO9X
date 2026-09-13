@@ -213,7 +213,8 @@ for table in tables:
     result[name] = [dict(row) for row in rows]
 print(json.dumps(result, default=str))
 `;
-    const result = spawnSync(process.env.PYTHON || 'python', ['-c', script, databasePath], {
+    const pythonExecutable = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+    const result = spawnSync(pythonExecutable, ['-c', script, databasePath], {
       encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024,
     });
