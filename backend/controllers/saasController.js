@@ -503,18 +503,22 @@ async function getOwnedSubscription(subscriptionId, userId) {
 }
 
 async function ensureRemoteDatabaseForSubscription(subscription) {
-  if (!subscription || subscription.remote_database_name) {
-    if (subscription?.remote_database_name) {
+  if (!subscription) return subscription;
+
+  if (subscription.remote_database_name) {
+    try {
       await dbSync.ensureGoldLoanReportSchema(subscription.remote_database_name);
+      return subscription;
+    } catch (error) {
+      console.warn(`Remote report database unavailable; recreating it: ${error.message}`);
     }
-    return subscription;
   }
 
   const [rows] = await pool.execute(
     `SELECT u.email, s.name AS system_name
      FROM client_subscriptions cs
      JOIN clients c ON cs.client_id = c.id
-     JOIN users u ON c.user_id = u.id
+     LEFT JOIN users u ON c.user_id = u.id
      JOIN systems s ON cs.system_id = s.id
      WHERE cs.id = ?`,
     [subscription.id]

@@ -93,7 +93,7 @@ const ClientSystemReports: React.FC<{ darkMode: boolean }> = () => {
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); link.download = `${section === 'cash' ? 'cash-flow' : activeTab}-report-${from}-${to}.csv`; link.click(); URL.revokeObjectURL(link.href);
   };
 
-  const card = (title: string, value: React.ReactNode, tone = 'navy') => <div className="report-kpi"><p>{title}</p><strong className={`tone-${tone}`}>{value}</strong></div>;
+  const card = (title: string, value: React.ReactNode, tone = 'navy') => <div key={title} className="report-kpi"><p>{title}</p><strong className={`tone-${tone}`}>{value}</strong></div>;
   const renderTable = (key: string, data = report?.datasets?.[key] || []) => {
     const tableColumns = columns[key] || [];
     return <div className="report-table-wrap"><table className="report-table"><thead><tr>{tableColumns.map(column => <th key={column}>{label(column)}</th>)}</tr></thead><tbody>{data.map((row, index) => <tr key={`${key}-${index}`}>{tableColumns.map(column => <td key={column}>{displayValue(column, column === 'days_overdue' ? Math.max(0, Math.floor((Date.now() - new Date(String(row.expire_date)).getTime()) / 86400000)) : row[column])}</td>)}</tr>)}</tbody></table>{!data.length && <div className="empty-report">No records found for this report.</div>}</div>;
