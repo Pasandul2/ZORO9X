@@ -502,6 +502,10 @@ async function getOwnedSubscription(subscriptionId, userId) {
   return rows[0] || null;
 }
 
+function isRemoteDatabasePermissionError(error) {
+  return error?.code === 'ER_DBACCESS_DENIED_ERROR' || error?.errno === 1044;
+}
+
 async function ensureRemoteDatabaseForSubscription(subscription) {
   if (!subscription) return subscription;
 
@@ -511,6 +515,7 @@ async function ensureRemoteDatabaseForSubscription(subscription) {
       return subscription;
     } catch (error) {
       console.warn(`Remote report database unavailable; recreating it: ${error.message}`);
+      subscription.remote_database_name = null;
     }
   }
 
@@ -3794,6 +3799,12 @@ exports.getSubscriptionReports = async (req, res) => {
       subscription = await ensureRemoteDatabaseForSubscription(subscription);
     } catch (remoteError) {
       console.warn(`Remote report database unavailable: ${remoteError.message}`);
+      if (isRemoteDatabasePermissionError(remoteError)) {
+        return res.status(503).json({
+          success: false,
+          message: 'The report database user is not allowed to create or access client databases. Grant database provisioning privileges to DB_USER and restart the API.',
+        });
+      }
     }
 
     if (!subscription.remote_database_name && backupReport) {
@@ -3973,6 +3984,12 @@ exports.getSubscriptionLoanDetails = async (req, res) => {
     return res.json({ success: true, loan: loanRows[0], items });
   } catch (error) {
     console.error('Error loading subscription loan details:', error);
+    if (isRemoteDatabasePermissionError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'The report database user is not allowed to create or access client databases. Grant database provisioning privileges to DB_USER and restart the API.',
+      });
+    }
     return res.status(500).json({ success: false, message: 'Failed to load loan details' });
   } finally {
     if (connection) await connection.end().catch(() => {});
