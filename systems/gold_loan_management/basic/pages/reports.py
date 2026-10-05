@@ -563,7 +563,8 @@ class ReportsPage:
 
             rows = self._query(
                 f'''SELECT l.ticket_no, c.name AS customer_name, l.loan_amount, l.status,
-                          l.issue_date, l.expire_date, l.duration_months, l.interest_rate
+                          l.issue_date, l.expire_date, l.duration_months, l.interest_rate,
+                          l.total_gold_weight, l.total_item_weight
                    FROM loans l
                    JOIN customers c ON l.customer_id=c.id
                    WHERE date({self._get_date_field_col()}) BETWEEN ? AND ?
@@ -606,6 +607,12 @@ class ReportsPage:
             redeemed_count = sum(1 for r in filtered if r.get('status') == 'redeemed')
             forfeited_count = sum(1 for r in filtered if r.get('status') == 'forfeited')
             avg_ticket = (total_issued / len(filtered)) if filtered else 0
+            current_loans = [
+                r for r in filtered
+                if r.get('status') in ('active', 'renewed', 'repawned')
+            ]
+            current_gold_weight = sum(float(r.get('total_gold_weight') or 0) for r in current_loans)
+            current_item_weight = sum(float(r.get('total_item_weight') or 0) for r in current_loans)
 
             self._render_kpis(
                 content,
@@ -616,8 +623,10 @@ class ReportsPage:
                     ('Active', str(active_count), self.theme.palette.success),
                     ('Redeemed', str(redeemed_count), self.theme.palette.warning),
                     ('Forfeited', str(forfeited_count), self.theme.palette.danger),
+                    ('Current Gold Weight (g)', f'{current_gold_weight:.3f}', self.theme.palette.warning),
+                    ('Current Total Weight (g)', f'{current_item_weight:.3f}', self.theme.palette.info),
                 ],
-                columns=3,
+                columns=4,
             )
 
             charts_row = tk.Frame(content, bg=self.theme.palette.bg_surface)
@@ -1729,6 +1738,7 @@ class ReportsPage:
         currently_repawned = self._query(
             '''SELECT l.ticket_no, l.loan_amount, l.interest_rate, l.duration_months,
                       l.issue_date, l.expire_date, l.total_gold_weight,
+                      l.total_item_weight,
                       c.name AS customer_name, c.nic AS customer_nic,
                       rh.repawned_at, rh.destination, rh.remarks,
                       u.full_name AS repawned_by_name
@@ -1747,6 +1757,7 @@ class ReportsPage:
         currently_repawned_count = len(currently_repawned)
         total_loan_amount    = sum(float(rh.get('loan_amount') or 0) for rh in repawned_in_range)
         total_gold_weight    = sum(float(r.get('total_gold_weight') or 0) for r in currently_repawned)
+        total_item_weight    = sum(float(r.get('total_item_weight') or 0) for r in currently_repawned)
         all_repawned_count   = sum(1 for rh in all_history if rh.get('status') == 'repawned')
         all_restocked_count  = sum(1 for rh in all_history if rh.get('status') == 'restocked')
 
@@ -1770,6 +1781,7 @@ class ReportsPage:
                 ('Currently Repawned',          str(currently_repawned_count),        self.theme.palette.danger),
                 ('Loan Amount Out',             format_currency(total_loan_amount),   self.theme.palette.warning),
                 ('Current Gold Weight (g)',     f'{total_gold_weight:.3f}',           self.theme.palette.info),
+                ('Current Total Weight (g)',    f'{total_item_weight:.3f}',           self.theme.palette.info),
                 ('All-time Repawned',           str(all_repawned_count),              '#a855f7'),
                 ('All-time Restocked',          str(all_restocked_count),             self.theme.palette.success),
                 ('Still Out (All-time)',        str(max(0, all_repawned_count - all_restocked_count)),
@@ -1807,7 +1819,7 @@ class ReportsPage:
 
         cur_cols = [
             ('Ticket #',     10), ('Customer', 15), ('NIC',        13),
-            ('Loan Amount',  12), ('Interest %', 10), ('Gold Wt (g)', 11),
+            ('Loan Amount',  12), ('Interest %', 10), ('Gold Wt (g)', 11), ('Item Wt (g)', 11),
             ('Issue Date',   10), ('Expire Date', 10), ('Repawned On', 11),
             ('Destination',  15), ('By',          14),
         ]
@@ -1820,6 +1832,7 @@ class ReportsPage:
                 format_currency(r['loan_amount']),
                 f"{float(r['interest_rate']):.1f}%",
                 f"{float(r.get('total_gold_weight') or 0):.3f}",
+                f"{float(r.get('total_item_weight') or 0):.3f}",
                 format_date(r['issue_date']),
                 format_date(r['expire_date']),
                 format_date(r.get('repawned_at', '')),
@@ -1880,3 +1893,8 @@ class ReportsPage:
                 rh.get('remarks') or '-',
             ])
         self._render_table(full_card.inner, full_cols, full_rows, ticket_col=0)
+
+        # The export button for this tab targets the currently repawned loans table.
+        self._export_columns = [c[0] for c in cur_cols]
+        self._export_rows = [list(r) for r in cur_rows]
+        self._report_title = 'repawning_current'

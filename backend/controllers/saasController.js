@@ -601,6 +601,7 @@ function buildBackupReport(tables, from, to, dateField) {
       totalCustomers: customers.length, totalIssued, totalCollected,
       averageTicket: loans.length ? totalIssued / loans.length : 0,
       totalGoldWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_gold_weight || 0), 0),
+      totalItemWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_item_weight || 0), 0),
       totalPayments: payments.length, totalRenewals: renewals.length,
     },
     datasets: {
@@ -3763,6 +3764,7 @@ exports.getSubscriptionReports = async (req, res) => {
       restocked: 'l.updated_at',
       created: 'l.created_at',
     };
+
     const dateField = dateFields[String(req.query.dateField || 'issue')] || dateFields.issue;
 
     const [recentBackups] = await pool.execute(
@@ -3901,6 +3903,7 @@ exports.getSubscriptionReports = async (req, res) => {
         totalCustomers: customers.length, totalIssued, totalCollected,
         averageTicket: loans.length ? totalIssued / loans.length : 0,
         totalGoldWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_gold_weight || 0), 0),
+        totalItemWeight: activeLoans.reduce((sum, loan) => sum + Number(loan.total_item_weight || 0), 0),
         totalPayments: payments.length, totalRenewals: renewals.length,
       },
       datasets: {
@@ -3920,6 +3923,57 @@ exports.getSubscriptionReports = async (req, res) => {
   } catch (error) {
     console.error('Error loading subscription reports:', error);
     res.status(500).json({ success: false, message: 'Failed to load system reports' });
+  } finally {
+    if (connection) await connection.end().catch(() => {});
+  }
+};
+
+/**
+ * Return one read-only loan with its customer and pledged articles.
+ * The subscription ownership check prevents cross-tenant loan access.
+ */
+exports.getSubscriptionLoanDetails = async (req, res) => {
+  let connection;
+  try {
+    await ensureBackupSchema();
+    const subscriptionId = Number(req.params.subscriptionId || 0);
+    const loanId = Number(req.params.loanId || 0);
+    if (!Number.isInteger(loanId) || loanId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid loan ID' });
+    }
+
+    let subscription = await getOwnedSubscription(subscriptionId, req.user?.id);
+    if (!subscription) return res.status(404).json({ success: false, message: 'Subscription not found' });
+    const [systemRows] = await pool.execute('SELECT name FROM systems WHERE id = ?', [subscription.system_id]);
+    if (!String(systemRows[0]?.name || '').toLowerCase().includes('gold')) {
+      return res.status(400).json({ success: false, message: 'Loan details are not available for this system' });
+    }
+
+    subscription = await ensureRemoteDatabaseForSubscription(subscription);
+    if (!subscription.remote_database_name) {
+      return res.status(404).json({ success: false, message: 'No report database is available' });
+    }
+
+    connection = await dbSync.getRemoteDatabaseConnection(subscription.remote_database_name);
+    const [loanRows] = await connection.query(
+      `SELECT l.*, c.name AS customer_name, c.nic AS customer_nic, c.phone AS customer_phone,
+              c.address AS customer_address, c.birthday AS customer_birthday, c.job AS customer_job,
+              c.marital_status AS customer_marital_status, c.language AS customer_language
+       FROM loans l JOIN customers c ON l.customer_id = c.id
+       WHERE l.id = ? LIMIT 1`,
+      [loanId]
+    );
+    if (!loanRows[0]) return res.status(404).json({ success: false, message: 'Loan not found' });
+
+    const [items] = await connection.query(
+      `SELECT id, article_type, description, quantity, total_weight, gold_weight, carat, estimated_value
+       FROM loan_items WHERE loan_id = ? ORDER BY id ASC`,
+      [loanId]
+    );
+    return res.json({ success: true, loan: loanRows[0], items });
+  } catch (error) {
+    console.error('Error loading subscription loan details:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load loan details' });
   } finally {
     if (connection) await connection.end().catch(() => {});
   }
@@ -4320,4 +4374,3 @@ exports.getRemoteTables = async (req, res) => {
     });
   }
 };
-

@@ -506,6 +506,7 @@ router.get('/subscriptions/:subscriptionId/backups', async (req, res) => {
  * Read-only reports for the subscribed Gold Loan system.
  */
 router.get('/subscriptions/:subscriptionId/reports', authenticateToken, saasController.getSubscriptionReports);
+router.get('/subscriptions/:subscriptionId/reports/loans/:loanId', authenticateToken, saasController.getSubscriptionLoanDetails);
 
 /**
  * GET /api/saas/subscriptions/:subscriptionId/backups/:backupId/download
