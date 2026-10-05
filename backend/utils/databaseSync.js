@@ -2,7 +2,8 @@
  * Database Synchronization Utility
  * 
  * Creates and manages remote backup databases for client systems
- * Naming: {client_email}_{system_name}_{database_name}
+ * Naming: a readable prefix plus a short hash, limited to MySQL's 64-character
+ * database identifier limit.
  */
 
 const mysql = require('mysql2/promise');
@@ -46,8 +47,15 @@ function generateRemoteDatabaseName(clientEmail, systemName, databaseName) {
   const sanitizedEmail = sanitizeDatabaseName(emailPart);
   const sanitizedSystem = sanitizeDatabaseName(systemName);
   const sanitizedDb = sanitizeDatabaseName(databaseName);
-  
-  return `${sanitizedEmail}_${sanitizedSystem}_${sanitizedDb}`;
+  const readableName = `${sanitizedEmail}_${sanitizedSystem}_${sanitizedDb}`;
+  const suffix = crypto
+    .createHash('sha256')
+    .update(`${clientEmail}\0${systemName}\0${databaseName}`)
+    .digest('hex')
+    .substring(0, 10);
+  const maxReadableLength = 64 - suffix.length - 1;
+
+  return `${readableName.substring(0, maxReadableLength).replace(/_+$/, '')}_${suffix}`;
 }
 
 /**
